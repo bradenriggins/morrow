@@ -14,6 +14,10 @@ fake dispatch_catalog_op to prove:
 
 Stdlib only. Exit 0 on pass, 1 on failure.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '../..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import io
 import json
@@ -54,15 +58,16 @@ class FakeSession:
 
 
 def _fake_dispatch(op_name, method, path_template, effect_class=None,
-                   params=None, provider=None, session=None):
+                   params=None, provider=None, session=None,
+                   require_educator_channel=None):
     DISPATCH_CALLS.append({
         "op_name": op_name, "method": method, "path_template": path_template,
         "effect_class": effect_class, "params": params, "provider": provider,
     })
     if op_name == "canvas_show_page_courses":
-        return {"result": {"title": "Fake", "body": FAKE_HTML}}
+        return {"receipt": {"title": "Fake", "body": FAKE_HTML}}
     if op_name == "canvas_get_single_assignment":
-        return {"result": {"name": "Fake", "description": FAKE_HTML}}
+        return {"receipt": {"name": "Fake", "description": FAKE_HTML}}
     raise AssertionError("unexpected op " + op_name)
 
 
@@ -137,6 +142,48 @@ def main():
                            "--target-ids", "{}", "--canvas-base", "https://x.invalid"])
     check("audit unknown kind funnels (no traceback)", code == 2 and "Traceback" not in err,
           "code=%r" % (code,))
+
+    # -- Refusals reach the educator as named modes -------------------------
+    # (muse UX audit 3, muse-ux3/a11y-runner-refusals-say-might-have-changed,
+    # written before the fix): every runner refusal used to fall through
+    # to the fallback "unknown" mode, which tells the educator the task
+    # might have made a change and asks them to email support. These
+    # commands are read-only and refuse before anything is sent, so each
+    # refusal must name a mode whose message says nothing was sent.
+    def _payload_of(err):
+        try:
+            return json.loads(err.strip().splitlines()[-1] if err.strip() else "{}")
+        except ValueError:
+            return None
+
+    for kind in ("canvas_rubric", "canvas_discussion", "moodle_page",
+                 "canvas_nope"):
+        code, err = _run_main(["audit", "--target-kind", kind,
+                               "--course-id", "89585", "--target-ids", "{}",
+                               "--canvas-base", "https://x.invalid"])
+        payload = _payload_of(err) or {}
+        check("audit refusal for %s names a11y-target-not-covered" % kind,
+              code == 2 and payload.get("mode_id") == "a11y-target-not-covered"
+              and "might have made a change" not in payload.get("message", ""),
+              "code=%r mode=%r msg=%r" % (code, payload.get("mode_id"),
+                                          (payload.get("message") or "")[:80]))
+
+    code, err = _run_main(["audit", "--target-kind", "canvas_page",
+                           "--course-id", "89585",
+                           "--target-ids", '{"url_or_id": "week-1"}',
+                           "--canvas-base", "https://x.invalid"])
+    payload = _payload_of(err) or {}
+    check("missing target id names caller-input-refused",
+          code == 2 and payload.get("mode_id") == "caller-input-refused"
+          and "might have made a change" not in payload.get("message", ""),
+          "code=%r mode=%r" % (code, payload.get("mode_id")))
+
+    code, err = _run_main(["audit", "--target-kind", "canvas_page",
+                           "--course-id", "89585", "--target-ids", "{}"])
+    payload = _payload_of(err) or {}
+    check("no CANVAS_BASE names setup-tenant-not-configured",
+          code == 2 and payload.get("mode_id") == "setup-tenant-not-configured",
+          "code=%r mode=%r" % (code, payload.get("mode_id")))
 
     # -- Planner mode: validates and stops ----------------------------------
     real = _install_fake_dispatch()

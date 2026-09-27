@@ -32,7 +32,12 @@ launched, no Canvas touched):
 
 No network, no Chromium, no session. Fakes only.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import json
+import urllib.parse
 import os
 import shutil
 import sys
@@ -66,6 +71,17 @@ BASE = "https://canvas.example.edu"
 # a dev machine names a different tenant).
 cs._lane_state_base = lambda: BASE  # noqa: E731
 
+# These scenarios use literal course/object ids in their paths, which
+# are not catalog path templates. The live-proven catalog gate is
+# covered by dispatch/test_direct_lane_hardening.py; here it is a no-op
+# so the write-hardening gates are exercised in isolation.
+ex.live_proven_gate = lambda *a, **k: None  # noqa: E731
+# The signed-in account check (final muse audit M3) reads users/self
+# before writes; these fakes script every provider call, so it is a
+# no-op here. It is covered by transport/test_principal_check.py.
+cs.ChromiumSession._verify_principal = lambda *a, **k: None  # noqa: E731
+
+
 # Speed up: no real backoff sleeps in retry tests.
 _ex_backoff = ex._backoff_sleep
 ex._backoff_sleep = lambda attempt: None  # noqa: E731
@@ -96,18 +112,35 @@ _AUTH = ("selftest authorization basis: offline mocked-CDP write hardening "
 # fakes
 # ----------------------------------------------------------------------
 
+
+def _is_roster_read(method, path):
+    """The student roster read Morrow makes before it touches a course
+    (dispatch/test_course_content_e2e.py checks it and its order)."""
+    parts = urllib.parse.urlsplit(path)
+    query = urllib.parse.parse_qs(parts.query)
+    return method == "GET" and (
+        (parts.path.endswith("/users")
+         and "inactive" in query.get("enrollment_state[]", []))
+        or (parts.path.endswith("/enrollments")
+            and query.get("state[]") == ["deleted"]))
+
+
 class FakeTransport:
     """Scripted stand-in for LocalChromiumTransport (the CDP layer)."""
 
     def __init__(self, script):
         self.script = list(script)
         self.calls = []
+        self.roster_calls = []
 
     def ensure_session(self):
         return (1, "Test User")
 
     def api(self, method, path, data=None, _ws=None, timeout=60,
             as_json=False, max_bytes=None):
+        if _is_roster_read(method, path):
+            self.roster_calls.append(path)
+            return 200, {}, "[]"
         self.calls.append({"method": method, "path": path, "data": data,
                            "as_json": as_json, "max_bytes": max_bytes})
         if not self.script:
@@ -193,7 +226,8 @@ def _write_entry(name, method, path, body=None, verify=None,
 
 def _dispatch(entry, params, sess, plan, rec):
     return ex.dispatch_entry(entry, params, sess, _pack(), plan=plan,
-                             op_id=None, approval=rec)
+                             op_id=None, approval=rec,
+                             require_educator_channel=False)
 
 
 # ----------------------------------------------------------------------
@@ -579,12 +613,18 @@ except ex.WriteFieldMismatch as exc:
     check("readback 500 keeps the op uncertain", False,
           "hard failure on an unconfirmed readback: %s" % exc)
 except ex.VerificationFailed as exc:
+    check("readback 500 keeps the op uncertain", False,
+          "reported as a failed verification, not uncertain: %s" % exc)
+except ex.UncertainWrite as exc:
     check("readback 500 keeps the op uncertain", True)
     check("readback 500 is not reported as success", True)
     jrec = ex.find_journal_op(plan.op_id)
     check("readback 500 journals uncertain=True",
           jrec is not None and jrec.get("uncertain") is True,
           repr((jrec or {}).get("uncertain")))
+    check("readback 500 journals verification uncertain",
+          (jrec or {}).get("verification") == "uncertain",
+          repr((jrec or {}).get("verification")))
     check("readback 500 detail says unconfirmed",
           "unconfirmed" in str(exc), str(exc))
 except Exception as exc:  # noqa: BLE001
@@ -621,22 +661,27 @@ check("pre-check failure: no PUT attempted",
       repr(sess._transport.calls))
 
 # ----------------------------------------------------------------------
-# K. DELETE writes are unaffected by the readback
+# K. DELETE is verified by absence (member GET answers 404)
 # ----------------------------------------------------------------------
 entry = _write_entry("wh_delete", "DELETE",
                      "/api/v1/courses/89585/assignment_groups/436900")
 params = {"course_id": "89585"}
 plan, rec = _admit(entry, params)
-sess = _session([_COURSE_89585, ("ok", 200, '{"id": 436900}')])
+sess = _session([_COURSE_89585, ("ok", 200, '{"id": 436900}'),
+                 ("ok", 404, '{"errors": [{"message": "not found"}]}')])
 out = _dispatch(entry, params, sess, plan, rec)
-check("DELETE dispatches without a readback",
-      out["verification"].get("status") == "skipped",
-      repr(out["verification"]))
-check("DELETE made exactly one write call after the target course GET",
-      len(sess._transport.calls) == 2
+check("DELETE verified by the member GET 404",
+      out["verification"].get("status") == "pass"
+      and out.get("outcome") == "verified",
+      repr(out))
+check("DELETE: course GET, one DELETE, then the absence readback GET",
+      len(sess._transport.calls) == 3
       and sess._transport.calls[0]["method"] == "GET"
       and sess._transport.calls[0]["path"] == "/api/v1/courses/89585"
-      and sess._transport.calls[1]["method"] == "DELETE",
+      and sess._transport.calls[1]["method"] == "DELETE"
+      and sess._transport.calls[2]["method"] == "GET"
+      and sess._transport.calls[2]["path"]
+      == "/api/v1/courses/89585/assignment_groups/436900",
       repr(sess._transport.calls))
 
 # ----------------------------------------------------------------------
@@ -888,7 +933,7 @@ class _Boom(Exception):
 
 ex._journal_write_failure_audit(
     "test.n5", "dispatch", "write", {"a": 1}, None, _n5_op, _Boom("x"),
-    {"write_attempted": True}, None, None, None)
+    {"write_attempted": True}, None, None)
 check("audit record is not reported as the outcome",
       ex.find_journal_op(_n5_op) is None)
 check("claim stays live after audit record",
@@ -912,7 +957,8 @@ _n6_op = _n6_plan.op_id
 try:
     ex.dispatch_entry(_n6_entry, {"course_id": "1"},
                       _session([]), _pack(), plan=_n6_plan,
-                      op_id=_n6_op, approval=_n6_rec)
+                      op_id=_n6_op, approval=_n6_rec,
+                      require_educator_channel=False)
     check("LOCAL procedure refused post-claim", False, "no exception")
 except ex.LocalProcedureRefused:
     check("LOCAL procedure refused post-claim", True)
@@ -960,12 +1006,13 @@ def _t_destructive_confirm():
     # W6-P2-D2: claim-release needs a real reconciliation note.
     for bad in ("", "   ", "fixed it", "released the claim"):
         try:
-            ex._check_claim_release_reason(bad)
+            ex._check_operator_reason("claim-release", bad)
             check("w6p2d2: stub reason %r refused" % bad, False,
                   "no ExecutorError raised")
         except ex.ExecutorError:
             check("w6p2d2: stub reason %r refused" % bad, True)
-    ex._check_claim_release_reason(
+    ex._check_operator_reason(
+        "claim-release",
         "reconciled op abc123 against the provider: no such page exists")
     check("w6p2d2: genuine reconciliation note accepted", True)
 _t_destructive_confirm()
@@ -1063,7 +1110,7 @@ def _t_notification_failure_loud():
     fake = mock.MagicMock()
     fake.on_expiry_detected.return_value = None
     fake.quarantine_op.return_value = None
-    fake.quarantined_ops.return_value = [{"op_id": "x"}]
+    fake.paused_ops.return_value = [{"op_id": "x"}]
     fake.write_notify_expired.side_effect = OSError("disk full")
     fake.write_notify_stale.side_effect = OSError("disk full")
     err = io.StringIO()

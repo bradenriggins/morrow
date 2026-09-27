@@ -16,6 +16,7 @@ import hmac
 import os
 import socket
 import ssl
+import sys
 from urllib.parse import urlparse
 
 # Env override wins; then well-known sandbox locations. None of these is
@@ -248,11 +249,22 @@ def ca_found():
 # Egress probing
 # ---------------------------------------------------------------------------
 
+def _configured_canvas_base():
+    """CANVAS_BASE resolved the way every agent-side reader resolves it
+    (config/tree_config: the environment, then this tree's helper/env,
+    then the legacy global env), or ""."""
+    tree = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if tree not in sys.path:
+        sys.path.insert(0, tree)
+    from config import tree_config
+    return tree_config.canvas_base()
+
+
 def default_test_host():
     # P0-11: the tenant base wins when set; otherwise a neutral public
     # host. Never an operator-specific tenant: the egress probe must not
     # depend on (or leak) one educator's account.
-    base = os.environ.get("CANVAS_BASE", "https://example.com")
+    base = _configured_canvas_base() or "https://example.com"
     try:
         host = urlparse(base).hostname
         if host:

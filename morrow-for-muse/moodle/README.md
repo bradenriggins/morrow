@@ -1,9 +1,15 @@
-# Moodle session lane (Morrow Direct)
+# Moodle session lane (Morrow for Muse)
 
-Live-proven against `https://sandbox.moodledemo.net` (Moodle 5.2, the
-official public demo; teacher account, published demo credentials).
-Proof: `../proof-battery/evidence/moodle-wave2/journal/moodle.jsonl`
-(the wave-2 live journal) and `../proof-battery/LEDGER.md` (M-W1, M-W2).
+This lane ships in Morrow for Muse 0.4.6 as a
+separate Moodle HTTPS module. The root `SKILL.md` routes Moodle requests
+here; `INSTALL.md` explains the shared, hash-locked runtime dependencies.
+The package does
+not include a production VM-browser-to-Python session handoff command.
+
+Live-proven against the official Moodle 5.2 public demo. Current
+operation statuses are in `../proof-battery/OPERATION_CATALOG.md`.
+Detailed sandbox journals and proof drivers stay in the source repository
+and are not included in the educator package.
 
 ## What this lane is
 
@@ -19,17 +25,26 @@ never for a real tenant.
 
 ## Files
 
-- `login.py`: session bootstrap. Form login with the provider-published
-  demo credentials (logintoken anti-CSRF handled), sesskey discovery
-  from `M.cfg` on an authenticated page, sesskey stability check. The
-  cookie jar lives in memory only; stdout carries names, lengths, and
-  statuses, never values.
-- `session.py`: `MoodleSession`: the session-authenticated dispatcher.
+- `login.py`: sandbox session bootstrap. Form login with the
+  provider-published demo credentials (logintoken anti-CSRF handled),
+  sesskey discovery from `M.cfg` on an authenticated page, and a
+  sesskey stability check. The cookie jar lives in memory only; stdout
+  carries names, lengths, and statuses, never values. Its standalone
+  command is a demo check; exiting ends the session and does not start
+  a scheduled keepalive.
+- `keepalive.py`: one read-only `/my/` GET for a caller that already holds
+  a live in-memory `MoodleSession`. It reports healthy only when the site,
+  pinned principal id, and sesskey match. It never returns page content
+  or session values. The legacy scheduled shell script cannot use this
+  function because it has no live session object to pass.
+- `session.py`: `MoodleSession`: a low-level session-authenticated dispatcher.
   Primary path `POST {base}/lib/ajax/service.php` with the
   `[{index, methodname, args}]` envelope; form-path fallback for
   functions the site does not AJAX-expose. Expiry classifier
   (`classify_signal`), journal (append-only JSONL), used-op-id set,
-  frozen-plan writes with verify blocks, truncation caps.
+  frozen-plan writes with optional verify blocks, truncation caps. This
+  module does not enforce the Canvas executor's catalog, mode, or approval
+  gate; do not use its write method for production course changes.
 - `probe.py`: connect-time capability probe (read-only): version,
   principal, per-function `allowed_from_ajax` classification by live
   behavioral probing, session cookie shape, sesskey stability, and the
@@ -64,15 +79,15 @@ The bootstrap/discovery layer couples to these deployment details:
   bootstrap this way at all.
 - `probe.py` behavioral-tests the function set per tenant, but these
   bootstrap assumptions still have to hold first.
-- `proof_run.py`: the live write battery: reads, frozen plan, form-path
-  discussion create, frozen readback, form-path undo, verify-gone, with
-  before-state snapshot and leftover cleanup. Full cleanup verified.
-  (Lives at `../proof-battery/evidence/moodle-wave2/proof_run2.py`; the
-  name in this directory is historical.)
-- `journal/` is NOT kept here: live JSONL receipts live at
-  `../proof-battery/evidence/moodle-wave2/journal/moodle.jsonl`
-  (append-only by convention). Shapes, statuses, lengths, IDs only:
-  no cookie values, no sesskey values, no passwords, ever.
+- A simple Moodle base path such as `/moodle` stays attached to login,
+  dispatch, and read-only health URLs. URL credentials, query, fragment,
+  traversal, and encoded path segments are refused. This path handling
+  has local regression coverage; a school path-prefix deployment has
+  not been live-proven.
+- The live write battery verifies reads, a frozen plan, a forum-discussion
+  create, readback, undo, and absence. Its receipts stay in the source
+  repository. Runtime journals are local to the configured journal
+  directory and contain bounded receipts, not cookie or password values.
 - The live write batteries live in
   `../proof-battery/evidence/moodle-wave2/` (`proof_run2.py`,
   `discover_wave2.py` and friends), not in this directory.

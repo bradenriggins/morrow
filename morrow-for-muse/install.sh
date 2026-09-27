@@ -3,7 +3,7 @@
 #
 # Idempotent: safe to run twice. A second run converges to the same state
 # without duplicating or destroying anything: the cron entry is never
-# duplicated (stale entries from a previous tree are migrated, loudly),
+# duplicated (other trees' entries are kept, loudly),
 # ~/.morrow/env is never overwritten, helper/profile/ is never wiped,
 # and the installer writes no bytecode or residue into the tree
 # (PYTHONDONTWRITEBYTECODE=1; the import probes run with cwd outside the
@@ -11,40 +11,49 @@
 # re-verifies every step and repairs drift (missing cron entry, missing
 # profile dir), but it never duplicates and never deletes your state.
 #
-# Upgrade: two supported paths.
-#   * New directory (recommended): unzip the new dist somewhere new and
-#     run this installer there. Supervision (the keepalive cron entry) is
-#     migrated from the old tree to this one, loudly; the old tree is
-#     otherwise untouched.
-#   * In place: unzip the new dist over the old tree and run this
-#     installer. The installer backs the tree up to a timestamped
-#     directory first, then removes files the new version no longer ships
-#     (diffed against the previous install's manifest, loudly logged). If
-#     the upgrade fails afterwards, the backup is restored automatically,
-#     but ONLY from a verified-complete backup: the installer records
-#     the backup's file count and byte total at backup time and
-#     re-verifies them before any restore. A backup interrupted mid-write
-#     (e.g. disk full) is NEVER restored over the tree; the tree is left
-#     in place, the partial backup is quarantined as <tree>.bak-<ts>.PARTIAL,
-#     and the failure names the recovery steps. (The backup covers the
-#     installer's own in-place writes. If you unzipped over the old tree,
-#     the pre-unzip tree is already gone; keep the previous release zip
-#     for full rollback.)
+# Upgrade: in place only (INSTALL.md, "Upgrading"). Copy the new release
+#   over the existing tree with INSTALL.md's Step 1 commands, then run
+#   this installer from the tree. Do not unzip into a fresh directory:
+#   helper/env (the Canvas address) and helper/profile (the sign-in) live
+#   inside the tree, so a fresh tree starts without them and the educator
+#   must sign in again. On a version change the installer backs the tree
+#   up to a timestamped directory first, then removes files the new
+#   version no longer ships (diffed against the previous install's
+#   manifest, loudly logged). The backup is the tree as this installer
+#   found it: the new release's files plus the previous release's
+#   leftovers. The copy already replaced the previous release's own
+#   files, so no step of this installer can bring that release back. If
+#   the upgrade fails afterwards, the backup is restored automatically,
+#   which undoes this installer's changes, but ONLY from a
+#   verified-complete backup: the installer records a per-path SHA-256
+#   manifest of the backup at backup time and re-verifies it before any
+#   restore. A backup interrupted mid-write (e.g. disk full) is NEVER
+#   restored over the tree; the tree is left in place, the partial
+#   backup is quarantined as <tree>.bak-<ts>.PARTIAL, and the failure
+#   names the recovery steps. After a restore, fixing the cause and
+#   running this installer again finishes the upgrade.
 #   A failed FRESH install (no backup) rolls back everything the run
 #   created (state dirs, helper/env, helper/profile, the cron entry),
 #   itemized, instead of leaving a half-install. Upgrade backups keep
-#   a bounded retention: the 2 most recent are kept, older ones pruned.
+#   a bounded retention: the 3 most recent are kept, older ones pruned.
 #   scripts/uninstall.sh removes the tree, the state dir, backups
 #   (<tree>.bak-* incl. .PARTIAL), and failed trees (<tree>.failed-*).
 #
 # What it does, in order:
-#   1. python3 check (>= 3.11; 3.10 refused: security EOL Oct 2026)
+#   1. python3 check (>= 3.11; 3.10 refused: security EOL Oct 2026).
+#      Warns (here and in the closing summary) when the 'cryptography'
+#      package the learner vault needs is missing or too old: student
+#      data will not work until it is installed.
 #   2. Integrity + upgrade: verify the tree against
 #      pack/carve-manifest.json (sha256 per file; drift fails loudly
-#      naming the files). On a version change: back up the tree, remove
-#      files the new version no longer ships (manifest diff, logged).
-#   3. Chromium locate (transport/chromium/chrome, vendor/chromium/chrome,
-#      then /opt/meta-chromium/chrome)
+#      naming the files). Mint the stable tree id (.morrow-tree-id) on
+#      the first install. Runtime files live in the tree's state dir
+#      (${MORROW_HOME}/trees/<tree id>/); logs and loop state that an
+#      older release wrote into helper/ are moved there, loudly. On a
+#      version change: back up the tree, remove files the new version
+#      no longer ships (manifest diff, logged).
+#   3. Chromium locate: CHROMIUM_BIN (the environment, then helper/env)
+#      when set, otherwise /opt/meta-chromium/chrome (the Muse VM image)
 #   4. Egress probe (transport/egress.py: authenticated proxy, bare proxy,
 #      or direct; credentials are redacted in the output)
 #   5. ~/.morrow state creation (0700 dirs; the tree env template
@@ -54,19 +63,27 @@
 #   6. helper/profile creation (0700, first run only). An existing
 #      profile is NEVER wiped, reset, or repackaged: it holds the
 #      educator's authenticated Canvas session.
-#   7. Keepalive cron install (serialized across concurrent installers
+#   7. Keepalive supervision (helper/supervisor.py detects what the
+#      machine has). No cron: a supervised background loop runs
+#      keepalive.sh every 5 minutes (bin/morrow start, or the first
+#      morrow command after a reboot, restarts it). With cron: the
+#      keepalive cron install (serialized across concurrent installers
 #      with a lock file; the entry shell-quotes the tree path so trees
-#      under paths with spaces work; deduped by marker comment; stale
-#      entries from a previous tree are migrated, loudly; orphaned
+#      under paths with spaces work; deduped by marker comment; other
+#      trees' entries are kept, loudly; orphaned
 #      entries whose keepalive.sh no longer exists warn loudly (the
 #      tree was probably moved/renamed: rerun install.sh from the new
 #      location); MORROW_CRON=0 skips this if you arrange your own
 #      scheduler)
-#   8. Secrets gate: scripts/verify-no-secrets.sh against this tree.
-#      Any deny-list violation fails the install. It runs BEFORE the
-#      helper launch so installer-created runtime logs can never trip it.
-#   9. All 23 selftest suites from this tree. Any failure fails the
-#      install and names the suite. Test scratch (.selftest-work) is
+#   8. Secrets gate: scripts/verify-no-secrets.sh against this tree,
+#      except the live helper/profile. helper/env may name the
+#      educator's own Canvas host; every other check still reads it.
+#      Any deny-list violation fails the install. No runtime file is
+#      ever written into the tree (logs and loop state live in the
+#      state dir), so a rerun after the helper ran passes it too.
+#   9. All 23 selftest suites from this tree, through
+#      scripts/install-suites.sh. Any failure fails the install and
+#      names each failed suite. Test scratch (.selftest-work) is
 #      removed afterwards so it never lingers in the install.
 #   10. Helper launch via helper/keepalive.sh (only when CANVAS_BASE is
 #      set): the tenant is probed first (placeholders, unreachable hosts,
@@ -92,7 +109,6 @@ ONBOARDED_SENTINEL="${MORROW_HOME}/onboarded"
 INSTALLED_VERSION_FILE="${MORROW_HOME}/installed-version"
 INSTALLED_MANIFEST_FILE="${MORROW_HOME}/installed-manifest.json"
 CRON_MARKER="# morrow-muse-connector-keepalive"
-HELPER_PORT="${LOGIN_HELPER_PORT:-8901}"
 
 # P0-14: no Python step of this installer may write bytecode into the
 # tree. The import probes (steps 3-4) also run with cwd outside the tree
@@ -115,7 +131,8 @@ UPGRADE_BACKUP=""
 _CREATED=""
 
 _track_created() {
-  # $1 = ledger entry ("dir:<path>", "file:<path>", or "cron").
+  # $1 = ledger entry ("dir:<path>", "file:<path>", "cron", or
+  # "supervisor").
   _CREATED="$1
 ${_CREATED}"
 }
@@ -212,6 +229,14 @@ _rollback_fresh_install() {
 "
             fi ;;
         esac ;;
+      supervisor)
+        if python3 "${TREE}/helper/supervisor.py" uninstall >/dev/null 2>&1; then
+          _rb_removed="${_rb_removed}keepalive background loop for this tree
+"
+        else
+          _rb_failed="${_rb_failed}keepalive background loop for this tree
+"
+        fi ;;
       cron)
         if _rollback_cron_entry; then
           _rb_removed="${_rb_removed}keepalive cron entry for this tree
@@ -234,13 +259,22 @@ _RB_EOF
     printf 'rollback INCOMPLETE; could not remove (remove by hand):\n' >&2
     printf '%s' "${_rb_failed}" | sed 's/^/  /' >&2
   fi
-  if [ -n "${_MIGRATED_STALE:-}" ]; then
-    printf 'note: this run had already migrated stale keepalive entries from other tree(s) away; restore them by rerunning the other tree'"'"'s installer if needed.\n' >&2
-  fi
 }
 
 fail() {
   printf 'INSTALL FAIL [%s]: %s\n' "$1" "$2" >&2
+  if [ "${_disconnect_marker_cleared:-0}" = "1" ]; then
+    # Security review 2026-09-24: this run already cleared the
+    # disconnect marker, and the reconnect did not finish. Re-record
+    # the disconnect (config/disconnect.py resolves the same state dir)
+    # so a supervisor relaunch cannot silently undo it.
+    if MORROW_TREE_STATE_DIR="${TREE_STATE_DIR}" \
+      python3 "${TREE}/config/disconnect.py" mark >/dev/null 2>&1; then
+      printf 'rollback: the disconnect record is restored (the reconnect did not finish)\n' >&2
+    else
+      printf 'rollback WARNING: could not restore the disconnect record; run MORROW_TREE_STATE_DIR=%s python3 %s config/disconnect.py mark\n' "${TREE_STATE_DIR}" "${TREE}" >&2
+    fi
+  fi
   if [ -n "${UPGRADE_BACKUP}" ] && [ -d "${UPGRADE_BACKUP}" ]; then
     # W4-P0-7: the backup is restorable ONLY when its completeness
     # marker verifies. A partial backup (e.g. ENOSPC mid-write) is
@@ -258,7 +292,7 @@ fail() {
       else
         printf 'WARNING: could not quarantine the partial backup at %s; inspect it by hand (do NOT restore from it).\n' "${UPGRADE_BACKUP}" >&2
       fi
-      printf 'RECOVERY: free disk space, then restore the tree from your previous release zip: the installer never completed a backup to restore from.\n' >&2
+      printf 'RECOVERY: free disk space, then run bash install.sh again.\n' >&2
       exit 1
     fi
     # W4-P2-15: never rename a symlinked tree root aside: the rename
@@ -273,7 +307,7 @@ fail() {
     _ts="$(date +%Y%m%d-%H%M%S)"
     _failed="${TREE}.failed-${_ts}"
     printf 'upgrade failed: preserving the failed tree at %s\n' "${_failed}" >&2
-    printf 'restoring the pre-upgrade tree from the VERIFIED backup %s ...\n' "${UPGRADE_BACKUP}" >&2
+    printf 'restoring the tree as this installer found it, from the VERIFIED backup %s ...\n' "${UPGRADE_BACKUP}" >&2
     if mv "${TREE}" "${_failed}" 2>/dev/null \
        && mv "${UPGRADE_BACKUP}" "${TREE}" 2>/dev/null; then
       # The backup excluded the live profile (runtime state, 10s of MB);
@@ -284,7 +318,12 @@ fail() {
         mv "${_failed}/helper/profile" "${TREE}/helper/profile" \
           2>/dev/null || true
       fi
-      printf 'restore complete: pre-upgrade tree is back at %s\n' "${TREE}" >&2
+      # The backup was taken when this run started, after the new
+      # release was unpacked over the tree (INSTALL.md step 1), so it
+      # holds the new release, not the previous one.
+      printf 'restore complete: %s is back as this installer found it.\n' "${TREE}" >&2
+      printf 'That is the release you unpacked, not the previous release: unpacking it replaced the previous release'"'"'s files before this installer ran.\n' >&2
+      printf 'Fix the failure above, then run bash install.sh again to finish the upgrade.\n' >&2
       printf 'failed attempt preserved at %s for forensics\n' "${_failed}" >&2
     else
       printf 'RESTORE FAILED: manual recovery needed.\n' >&2
@@ -315,7 +354,7 @@ for _tool in curl ss pgrep flock; do
     || fail "prereq" "${_tool} not found on PATH"
 done
 unset _tool
-# W4-P2-23: floor is 3.11, not 3.10. Python 3.10 reached security
+# W4-P2-23: floor is 3.11, not 3.10. Python 3.10 reaches security
 # end-of-life in October 2026 (PEP 619); a security-sensitive package
 # fails closed on an EOL interpreter rather than warning. The tree
 # has no 3.10-only need (match statements and stdlib use are 3.11+
@@ -323,8 +362,43 @@ unset _tool
 PY_VER="$(python3 --version 2>&1)"
 PY_OK="$(python3 -c 'import sys; print("yes" if sys.version_info >= (3, 11) else "no")')"
 [ "${PY_OK}" = "yes" ] \
-  || fail "python3" "python3 >= 3.11 required (found: ${PY_VER}). Python 3.10 reached security end-of-life in October 2026 (PEP 619) and no longer receives security fixes; install Python 3.11 or newer and rerun."
+  || fail "python3" "python3 >= 3.11 required (found: ${PY_VER}). Python 3.10 reaches security end-of-life in October 2026 (PEP 619) and will stop receiving security fixes; install Python 3.11 or newer and rerun."
 note "ok: ${PY_VER}"
+# All student-data work needs the encrypted learner vault, which needs
+# the 'cryptography' package. Without it the install still works,
+# Morrow refuses student data (fail closed), and student names in
+# course content are hidden without labels, so this warns instead of
+# failing, here and again in the closing summary.
+VAULT_PROBLEM="$(cd / && MORROW_TREE="${TREE}" python3 -c "
+import os, sys
+sys.path.insert(0, os.environ['MORROW_TREE'])
+from privacy.core import learner_vault_problem
+print(learner_vault_problem() or '')
+" 2>&1)" || VAULT_PROBLEM="the learner vault check could not run: $(printf '%s' "${VAULT_PROBLEM}" | tail -1)"
+vault_warning() {
+  printf '%s\n' \
+    "================================================================" \
+    "WARNING: student data will not work until 'cryptography' is installed." \
+    "" \
+    "Morrow keeps student names and ids in an encrypted learner vault," \
+    "and the vault needs the Python package 'cryptography'. Without it," \
+    "Morrow refuses everything that touches student data: finding a" \
+"student by name and reading the course roster." \
+    "Student names in course pages are hidden without labels, so a" \
+    "change that would save one back is refused." \
+    "Everything else works." \
+    "" \
+    "Reason: ${VAULT_PROBLEM}" \
+    "" \
+    "Install it (hash-pinned) from ${TREE}, then rerun this installer:" \
+    "    python3 -m pip install --require-hashes -r requirements-optional.txt" \
+    "================================================================"
+}
+if [ -n "${VAULT_PROBLEM}" ]; then
+  vault_warning
+else
+  note "ok: learner vault ready (cryptography installed)"
+fi
 
 # -- 2. integrity + upgrade -----------------------------------------------
 step "2/10 integrity and upgrade"
@@ -368,8 +442,12 @@ if [ -n "${_PYCACHE_GONE}" ]; then
 fi
 unset _PYCACHE_GONE
 python3 - "${TREE}" "${INSTALLED_MANIFEST_FILE}" "${_UPGRADE}" <<'PYEOF' || fail "integrity" "tree drifted from its carve manifest (see above)"
-import hashlib, json, os, sys
+import hashlib, json, os, re, sys
 tree = sys.argv[1]
+# Same pattern as helper/supervisor.py _LEGACY_RUNTIME.
+LEGACY_RUNTIME = re.compile(
+    r"^(?:(?:keepalive|server|keepalive-supervisor)\.log(?:\.[0-9]+)?"
+    r"|keepalive-supervisor\.json(?:\.lock)?)$")
 # On a version change, files listed in the previous install's manifest
 # but absent from the new one are known-stale, queued for the migration
 # step's loud removal below. They are not drift.
@@ -427,9 +505,11 @@ def _is_allowed_extra(rel):
     # upgrade). It is runtime identity, not drift.
     if rel == ".morrow-tree-id":
         return True
-    # *.log directly under helper/: runtime logs.
-    if rel.startswith("helper/") and "/" not in rel[7:] \
-            and rel.endswith(".log"):
+    # Runtime files an older release wrote into helper/ (keepalive's
+    # and the helper server's logs with their rotated archives, the
+    # keepalive loop's state and log). They are moved to the tree's
+    # state dir right after this walk, before any gate reads the tree.
+    if rel.startswith("helper/") and LEGACY_RUNTIME.match(rel[7:]):
         return True
     # Test scratch: .selftest-* anywhere, .selftest-work/ dirs.
     parts = rel.split("/")
@@ -460,12 +540,6 @@ if extras:
 print("integrity ok: no disallowed extra files")
 PYEOF
 note "tree version: ${TREE_VERSION}"
-# W4-P1-16: stable tree identity. Minted once (atomically: temp file +
-# rename, so a crashed install can never leave a half-written id) and
-# preserved verbatim afterwards: copies, moves, and upgrades keep the
-# same id, so the journal location (and op-id idempotency) follows the
-# tree instead of its path. Runs after the integrity walk so a minted
-# id is never mistaken for drift; the allowlist above exempts it.
 # P1-15 / P2-1: upgrade migration. The last successful install records
 # its version and manifest under MORROW_HOME (outside the tree, so an
 # unzip-over upgrade cannot destroy the record). _UPGRADE was decided
@@ -515,36 +589,6 @@ if [ "${_UPGRADE}" = "1" ]; then
   done < <(find "$(dirname "${TREE}")" -maxdepth 1 \
     -name "$(basename "${TREE}").bak-*" -print0 2>/dev/null | sort -z -r)
   unset _keep_n _seen_n _old_bak
-TREE_ID_FILE="${TREE}/.morrow-tree-id"
-if [ -f "${TREE_ID_FILE}" ]; then
-  note "existing tree id kept at .morrow-tree-id (moves, copies, and upgrades preserve it)"
-else
-  python3 - "${TREE_ID_FILE}" <<'PYEOF' \
-    || fail "tree-id" "cannot mint ${TREE_ID_FILE}"
-import os, sys, uuid
-# W4-P1-16: the canonical file form is the 32-hex-char uuid (no
-# dashes), matching config/paths.py mint_tree_uuid and the
-# 32-hex-only reader in helper/keepalive.sh _tree_uuid. Dashed ids
-# would be rejected by keepalive and silently fall back to the
-# legacy path slug, defeating the stable identity.
-target = sys.argv[1]
-tmp = target + ".tmp.%d" % os.getpid()
-with open(tmp, "w", encoding="utf-8") as f:
-    f.write(uuid.uuid4().hex + "\n")
-os.chmod(tmp, 0o644)
-os.replace(tmp, target)
-PYEOF
-  _track_created "file:${TREE_ID_FILE}"
-  note "minted stable tree id at .morrow-tree-id (0644, non-secret; survives tree moves and renames)"
-fi
-# W4-P1-12: tree-specific cron marker. Each tree's keepalive entry carries
-# its own tree ID, so concurrent installers for different trees preserve
-# each other's entries (the old generic marker caused one installer to
-# delete the other's entry as "stale").
-TREE_ID="$(tr -d '[:space:]' < "${TREE_ID_FILE}" 2>/dev/null || true)"
-if [ -n "${TREE_ID}" ]; then
-  CRON_MARKER="# morrow-muse-connector-keepalive ${TREE_ID}"
-fi
   # P1-15: remove files the new version no longer ships. Stale = in the
   # previous install's manifest but not in this tree's manifest. Each
   # removal is logged loudly. Stale directories are removed only when
@@ -583,7 +627,7 @@ if kept_dirs:
     for rel in kept_dirs:
         print("  kept: " + rel)
 PYEOF
-    [ $? -eq 0 ] || fail "migration" "stale-file removal failed; the pre-upgrade tree was restored from ${UPGRADE_BACKUP}"
+    [ $? -eq 0 ] || fail "migration" "stale-file removal failed"
   else
     note "WARNING: no previous install manifest at ${INSTALLED_MANIFEST_FILE};"
     note "cannot determine which files the new version dropped. If this is an"
@@ -595,15 +639,67 @@ elif [ -n "${_INSTALLED_VERSION}" ]; then
 else
   note "no previous install record; fresh-install path"
 fi
+# W4-P1-16: stable tree identity, on every install (fresh, reinstall,
+# and upgrade). Minted once (atomically: temp file + rename, so a
+# crashed install can never leave a half-written id) and preserved
+# verbatim afterwards: copies, moves, and upgrades keep the same id, so
+# the state dir, the journal location, and op-id idempotency follow the
+# tree instead of its path. Runs after the integrity walk so a minted id
+# is never mistaken for drift; the allowlist above exempts it. (It runs
+# after the upgrade backup, so a restored backup keeps the id too.)
+TREE_ID_FILE="${TREE}/.morrow-tree-id"
+if [ -f "${TREE_ID_FILE}" ]; then
+  note "existing tree id kept at .morrow-tree-id (moves, copies, and upgrades preserve it)"
+else
+  python3 - "${TREE_ID_FILE}" <<'PYEOF' \
+    || fail "tree-id" "cannot mint ${TREE_ID_FILE}"
+import os, sys, uuid
+# W4-P1-16: the canonical file form is the 32-hex-char uuid (no
+# dashes), matching config/paths.py mint_tree_uuid and the
+# 32-hex-only reader in helper/keepalive.sh _tree_uuid. Dashed ids
+# would be rejected by keepalive and silently fall back to the
+# legacy path slug, defeating the stable identity.
+target = sys.argv[1]
+tmp = target + ".tmp.%d" % os.getpid()
+with open(tmp, "w", encoding="utf-8") as f:
+    f.write(uuid.uuid4().hex + "\n")
+os.chmod(tmp, 0o644)
+os.replace(tmp, target)
+PYEOF
+  _track_created "file:${TREE_ID_FILE}"
+  note "minted stable tree id at .morrow-tree-id (0644, non-secret; survives tree moves and renames)"
+fi
+# W4-P1-12: tree-specific cron marker. Each tree's keepalive entry carries
+# its own tree ID, so concurrent installers for different trees preserve
+# each other's entries (the old generic marker caused one installer to
+# delete the other's entry as "stale").
+TREE_ID="$(tr -d '[:space:]' < "${TREE_ID_FILE}" 2>/dev/null || true)"
+if [ -n "${TREE_ID}" ]; then
+  CRON_MARKER="# morrow-muse-connector-keepalive ${TREE_ID}"
+fi
+# Runtime files live in this tree's state dir, never in the tree: the
+# secrets gate (step 8) and the integrity walk read the tree as release
+# content. Same resolution as helper/keepalive.sh and the transport.
+TREE_STATE_DIR="${MORROW_TREE_STATE_DIR:-${MORROW_HOME}/trees/${TREE_ID}}"
+# An older release wrote keepalive's and the helper's logs (with their
+# rotated archives) and the keepalive loop's state into helper/. Move
+# them to the state dir, loudly, and stop a loop recorded there.
+_retired="$(python3 "${TREE}/helper/supervisor.py" retire-legacy 2>&1)" \
+  || fail "runtime-files" "could not move an older release's runtime files out of helper/: ${_retired}"
+case "${_retired}" in
+  *'"moved": []'*) ;;
+  *) note "moved runtime files an older release left in helper/ to ${TREE_STATE_DIR}: ${_retired}" ;;
+esac
+unset _retired
 
 # -- 3. Chromium ----------------------------------------------------------
 step "3/10 chromium locate"
 # P0-14: run with cwd OUTSIDE the tree and an absolute sys.path entry,
 # so CPython never writes transport/__pycache__/ into the tree. (The
 # exported PYTHONDONTWRITEBYTECODE=1 above is the second layer.)
-CHROME_BIN="$(cd / && python3 -c "
-import sys
-sys.path.insert(0, '${TREE}/transport')
+CHROME_BIN="$(cd / && MORROW_TREE="${TREE}" python3 -c "
+import os, sys
+sys.path.insert(0, os.environ['MORROW_TREE'] + '/transport')
 import local_chromium as lc
 try:
     print(lc.default_binary())
@@ -612,15 +708,15 @@ except RuntimeError as exc:
 ")"
 case "${CHROME_BIN}" in
   MISSING*)
-    fail "chromium" "no Chromium binary found. Checked, in order: transport/chromium/chrome, vendor/chromium/chrome, /opt/meta-chromium/chrome." ;;
+    fail "chromium" "no usable Chromium: ${CHROME_BIN#MISSING: }. The Muse VM image has it at /opt/meta-chromium/chrome. To use another Chromium (152.0.7977.82 or newer), add CHROMIUM_BIN=<its path> to helper/env and rerun." ;;
 esac
 note "ok: ${CHROME_BIN}"
 
 # -- 4. egress probe ------------------------------------------------------
 step "4/10 egress probe"
-EGRESS="$(cd / && python3 -c "
-import sys
-sys.path.insert(0, '${TREE}/transport')
+EGRESS="$(cd / && MORROW_TREE="${TREE}" python3 -c "
+import os, sys
+sys.path.insert(0, os.environ['MORROW_TREE'] + '/transport')
 import egress
 p = egress.probe_egress()
 print(p['mode'])
@@ -661,9 +757,8 @@ if [ ! -f "${TREE_ENV_FILE}" ]; then
 # CANVAS_BASE=https://myschool.instructure.com
 # There is no default tenant; the login helper refuses to start without one.
 #
-# Tree-scoped: profile and ports come from this tree's location unless you
-# pin them here:
-# LOGIN_HELPER_PROFILE_DIR=/path/to/profile   (default: <tree>/helper/profile)
+# Tree-scoped: the helper profile is always <tree>/helper/profile
+# (keepalive pins it). The ports can be pinned here:
 # LOGIN_HELPER_PORT=8901                      (default 8901)
 # LOGIN_HELPER_CDP_PORT=19223                 (default 19223)
 # The legacy global ~/.morrow/env is honored for CANVAS_BASE only.
@@ -736,11 +831,18 @@ else
   note "created helper/profile (0700). Your Canvas session will live here after the one-time sign-in."
 fi
 
-# -- 7. keepalive cron ------------------------------------------------------
-step "7/10 keepalive cron"
+# -- 7. keepalive supervision -----------------------------------------------
+# Round-4 M5: supervision does not depend on cron. helper/supervisor.py
+# detects what this machine has: cron (crontab installed and a cron
+# daemon running) gets the per-tree cron entry below; no cron gets a
+# supervised background loop that runs keepalive.sh every 5 minutes,
+# restarted by `bin/morrow start` and by the first morrow command
+# after a reboot.
+step "7/10 keepalive supervision"
+_SUPERVISION="$(python3 "${TREE}/helper/supervisor.py" detect 2>/dev/null || printf 'loop')"
 if [ "${MORROW_CRON:-1}" = "0" ]; then
-  note "MORROW_CRON=0: skipping cron install (you arrange your own scheduler)"
-elif command -v crontab >/dev/null 2>&1; then
+  note "MORROW_CRON=0: skipping keepalive supervision (you arrange your own scheduler)"
+elif [ "${_SUPERVISION}" = "cron" ]; then
   # W4-P1-7: serialize the crontab read-modify-write across concurrent
   # installers with a lock file under MORROW_HOME. Two installers
   # racing used to silently drop one tree's supervision entry; the loser
@@ -761,14 +863,6 @@ elif command -v crontab >/dev/null 2>&1; then
   done
   unset _lock_tries
   _cron_now="$(crontab -l 2>/dev/null || true)"
-  # P0-15: migrate supervision from a previous tree. Any morrow keepalive
-  # entry pointing at a DIFFERENT tree is stale: the old tree's keepalive
-  # would keep running and can SIGKILL this tree's server every 5
-  # minutes. Stale entries are removed loudly; this tree's entry is
-  # (re)installed below. (Multi-tree supervision on one machine is not
-  # supported: entries are per-machine, not per-tree. Use MORROW_CRON=0
-  # and schedule keepalive.sh yourself if you run two trees.)
-  #
   # W3-P2-11: classify each line honestly. A line is one of OURS only
   # when it is an actual schedule entry (never a comment, never blank)
   # naming this tree's keepalive.sh. Comment lines that merely MENTION
@@ -872,7 +966,9 @@ _DEAD_EOF
       _cron_new="$(printf '%s\n%s\n' "${CRON_MARKER}" \
         "${_canonical}")"
     fi
-    printf '%s' "${_cron_new}" | crontab - \
+    # The command substitution above strips the trailing newline, and
+    # cron's crontab refuses a file whose last line has none.
+    printf '%s\n' "${_cron_new}" | crontab - \
       || { flock -u 8; exec 8>&-; fail "cron" "could not install the keepalive cron entry"; }
     _track_created "cron"
     # W4-P1-12: per-tree coexistence; no migration, just installation.
@@ -883,58 +979,67 @@ _DEAD_EOF
   exec 8>&-
   unset _cron_lock _cron_now _cron_base _cron_new _other _mine _mine_first _mine_n _line _canonical
 else
-  note "WARNING: crontab not found; the helper will not self-heal."
-  note "Arrange your own scheduler for ${TREE}/helper/keepalive.sh"
+  # No cron on this machine: the supervised background loop. Its first
+  # keepalive run comes one interval after start (step 10 launches the
+  # helper now). Its state and log live in the tree's state dir. A
+  # rerun keeps a loop that already runs, and a failed rerun leaves it
+  # running.
+  _had_state_dir=0; [ -d "${TREE_STATE_DIR}" ] && _had_state_dir=1
+  if _loop_out="$(python3 "${TREE}/helper/supervisor.py" install-loop 2>&1)"; then
+    [ "${_had_state_dir}" = "0" ] && _track_created "dir:${TREE_STATE_DIR}"
+    case "${_loop_out}" in
+      *'"started": true'*) _track_created "supervisor" ;;
+    esac
+    note "no cron on this machine: keepalive runs as a supervised background loop every 5 minutes (${_loop_out})"
+    note "after a reboot, run 'bin/morrow start' (the first morrow command also restarts it)"
+  else
+    fail "supervision" "could not start the keepalive background loop: ${_loop_out}"
+  fi
+  unset _loop_out _had_state_dir
 fi
+unset _SUPERVISION
 
-# -- 8. secrets gate (BEFORE any runtime logs exist) --------------------------
+# -- 8. secrets gate -----------------------------------------------------------
 step "8/10 secrets gate"
-# P0-12: the gate runs BEFORE the helper launch, so the installer's own
-# runtime logs (helper/keepalive.log, helper/server.log) can never trip it.
+# P0-12: the gate runs BEFORE the helper launch, so a dirty tree never
+# starts a browser. Runtime logs and the keepalive loop's state live in
+# the tree's state dir, never in the tree, so they cannot trip it on a
+# fresh install or on a rerun after the helper ran.
 # The gate runs against the installed tree, excluding the runtime
 # helper/profile the installer itself just created (it is empty on
 # first install and holds the educator's live session on reinstalls;
-# neither may fail an install). The carve-time gate runs without
-# exclusions, so a dist shipping a profile is rejected before install.
-VERIFY_EXCLUDE="helper/profile" "${TREE}/scripts/verify-no-secrets.sh" "${TREE}" \
+# neither may fail an install). helper/env names the educator's own
+# Canvas address, so the tenant rule skips it; every other rule still
+# checks it. The carve-time gate runs without exclusions, so a dist
+# shipping a profile is rejected before install.
+VERIFY_EXCLUDE="helper/profile" VERIFY_TENANT_EXEMPT="helper/env" "${TREE}/scripts/verify-no-secrets.sh" "${TREE}" \
   || fail "secrets" "scripts/verify-no-secrets.sh reported violations (see above)"
 
 # -- 9. selftests ------------------------------------------------------------
 step "9/10 selftest suites"
-SUITES="transport/chromium_session_selftest.py
-transport/egress_selftest.py
-dispatch/executor_selftest.py
-dispatch/admission_selftest.py
-dispatch/executor_write_hardening_selftest.py
-dispatch/journal_integrity_selftest.py
-dispatch/wave4_dispatch_integrity_selftest.py
-dispatch/integration_selftest.py
-privacy/source_privacy_selftest.py
-privacy/deidentif_selftest.py
-privacy/learner_vault_selftest.py
-helper/helper_selftest.py
-helper/cdp_http_auth_selftest.py
-reauth/session_lifecycle_selftest.py
-helper/cookie_expiry_selftest.py
-modes/test_modes_integration.py
-settings/test_settings.py
-failures/selftest_smoke.py
-failures/selftest_wiring.py
-failures/test_error_translation.py
-learners/test_resolve_student.py
-query/selftest_query.py
-catalog/a11y/runner_selftest.py"
-PASS=0
-TOTAL=0
-for suite in ${SUITES}; do
-  TOTAL=$((TOTAL + 1))
-  if (cd "${TREE}" && python3 "${suite}" >/dev/null 2>&1); then
-    PASS=$((PASS + 1))
+# scripts/install-suites.sh holds the suite list and runs each suite in
+# a scratch home with every live state path removed (round-4 H2). CI
+# runs the same script on the carved release tree. Its scratch lives
+# under .selftest-work/, which is removed below (and by rollback on
+# failure).
+if [ "${MORROW_INSTALL_TEST_SHOW_SELFTEST_FAILURES:-0}" = "1" ]; then
+  _SUITES_OUT="$(bash "${TREE}/scripts/install-suites.sh" --show-failures)"
+else
+  _SUITES_OUT="$(bash "${TREE}/scripts/install-suites.sh")"
+fi
+_SUITES_RC=$?
+if [ "${_SUITES_RC}" -ne 0 ]; then
+  _FAILED="$(printf '%s\n' "${_SUITES_OUT}" | sed -n 's/^FAIL //p' \
+    | tr '\n' ' ')"
+  [ -n "${_FAILED}" ] || _FAILED="scripts/install-suites.sh (exit ${_SUITES_RC}) "
+  if [ "${MORROW_INSTALL_TEST_SHOW_SELFTEST_FAILURES:-0}" = "1" ]; then
+    fail "selftest" "${_FAILED}failed; suite output follows:"$'\n'"${_SUITES_OUT}"
   else
-    fail "selftest" "${suite} failed; run 'python3 ${suite}' from ${TREE} for details"
+    fail "selftest" "${_FAILED}failed; run 'bash scripts/install-suites.sh --show-failures' from ${TREE} for details"
   fi
-done
-note "ok: ${PASS}/${TOTAL} selftest suites pass"
+fi
+note "ok: ${_SUITES_OUT##*$'\n'}"
+unset _SUITES_OUT _SUITES_RC _FAILED
 # Test scratch is regenerable residue: remove it so it never lingers in
 # the install. (The secrets gate ran above, before the suites; this just
 # keeps the tree clean.)
@@ -952,6 +1057,8 @@ if [ -f "${TREE_ENV_FILE}" ]; then
   # shellcheck disable=SC1090
   . "${TREE_ENV_FILE}"
 fi
+# Read after helper/env: keepalive starts the helper on the port pinned there.
+HELPER_PORT="${LOGIN_HELPER_PORT:-8901}"
 if [ -z "${CANVAS_BASE:-}" ] && [ -f "${LEGACY_ENV_FILE}" ]; then
   # Legacy global env: CANVAS_BASE only (W2-P1-27).
   _LEGACY_CB="$(sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}CANVAS_BASE=\(.*\)/\2/p' "${LEGACY_ENV_FILE}" | tail -1)"
@@ -965,12 +1072,63 @@ if [ -z "${CANVAS_BASE:-}" ] && [ -f "${LEGACY_ENV_FILE}" ]; then
 fi
 if [ -z "${CANVAS_BASE:-}" ]; then
   note "CANVAS_BASE is not set yet: skipping the helper launch."
-  note "Set it in ${ENV_FILE}, then rerun this installer (or wait for the keepalive cron). The one-time sign-in comes after."
+  note "Set it in ${ENV_FILE}, then rerun this installer: it checks the address before it starts the helper. The one-time sign-in comes after."
 else
+  HELPER_STATUS_URL="http://127.0.0.1:${HELPER_PORT}/status"
+  HELPER_STATUS_TLS=0
+  if [ -n "${LOGIN_HELPER_TLS_CERT:-}" ] \
+      || [ -n "${LOGIN_HELPER_TLS_KEY:-}" ]; then
+    [ -n "${LOGIN_HELPER_TLS_CERT:-}" ] \
+      && [ -n "${LOGIN_HELPER_TLS_KEY:-}" ] \
+      || fail "helper" "LOGIN_HELPER_TLS_CERT and LOGIN_HELPER_TLS_KEY must both be set; the helper cannot start with only one."
+    [ -f "${LOGIN_HELPER_TLS_CERT}" ] \
+      && [ -f "${LOGIN_HELPER_TLS_KEY}" ] \
+      || fail "helper" "the configured helper TLS certificate or key file is missing; refusing an unverified status probe."
+    HELPER_STATUS_URL="https://127.0.0.1:${HELPER_PORT}/status"
+    HELPER_STATUS_TLS=1
+  fi
+  _install_helper_status() {
+    if [ "${HELPER_STATUS_TLS}" = "1" ]; then
+      if [ "${LOGIN_HELPER_TLS_INSECURE:-}" = "1" ]; then
+        curl -sf -m 20 -k "${HELPER_STATUS_URL}"
+      else
+        curl -sf -m 20 --cacert "${LOGIN_HELPER_TLS_CERT}" "${HELPER_STATUS_URL}"
+      fi
+    else
+      curl -sf -m 20 "${HELPER_STATUS_URL}"
+    fi
+  }
   if [ -n "${_SHELL_CANVAS_BASE}" ] \
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then
     fail "env" "CANVAS_BASE is set in this shell but absent from ${ENV_FILE}; the keepalive cron sources only that file, so helper recovery would fail later. Add CANVAS_BASE=${_SHELL_CANVAS_BASE} to ${ENV_FILE} and rerun."
   fi
+  # Muse UX audit 3 (2026-09-23): the helper's tenant rule runs BEFORE
+  # the network probe, from the shared validator in
+  # config/tree_config.py (the same function the helper uses). A pasted
+  # address that embeds an account and password, an http:// address, a
+  # private IP literal, or an unconfirmed custom domain now fails the
+  # install with the helper's plain reason instead of being sent to the
+  # network (the old probe sent embedded credentials over plain HTTP
+  # and reached addresses the helper then refused, with no reason on
+  # the helper's later refusal).
+  # Security review 2026-09-24: CANVAS_BASE is passed as an environment
+  # variable, never interpolated into the python source: a value
+  # containing ''' used to close the triple-quoted string early and
+  # execute injected Python (inject_proof.py under the final-sweep
+  # scratchpad).
+  _TENANT_CHECK="$(cd / && CANVAS_BASE="${CANVAS_BASE}" MORROW_TREE="${TREE}" python3 -c "
+import os, sys
+sys.path.insert(0, os.environ['MORROW_TREE'])
+from config.tree_config import normalize_tenant_base
+try:
+    normalize_tenant_base(os.environ['CANVAS_BASE'])
+except ValueError as exc:
+    print(exc)
+" 2>&1)"
+  if [ -n "${_TENANT_CHECK}" ]; then
+    fail "tenant" "CANVAS_BASE=${CANVAS_BASE} is not a Canvas address the helper accepts: ${_TENANT_CHECK} Fix it in ${ENV_FILE} and rerun."
+  fi
+  unset _TENANT_CHECK
   # P1-26: probe the tenant before launching the helper against it.
   # (The error-title match is apostrophe-agnostic: Canvas renders the
   # apostrophe as U+2019, so match "find your login page" bare.)
@@ -999,8 +1157,47 @@ else
   "${TREE}/helper/keepalive.sh" >/dev/null 2>&1
   KEEP_RC=$?
   case "${KEEP_RC}" in
+    0|2)
+      # A second keepalive can return 0 because the supervisor owns the
+      # lock. Its tick has a 600-second timeout; allow cleanup margin.
+      if [ "${KEEP_RC}" = "0" ]; then
+        flock -w 610 "${TREE_STATE_DIR}/keepalive.lock" true \
+          || fail "helper" "another keepalive still holds the lock after 610 seconds; no helper state was accepted. Check ${TREE_STATE_DIR}/keepalive.log and rerun."
+      fi
+      STATUS="$(_install_helper_status 2>/dev/null)" \
+        || fail "helper" "keepalive returned ${KEEP_RC}, but no helper answered /status on port ${HELPER_PORT}. A concurrent keepalive may have held the lock. Check ${TREE_STATE_DIR}/keepalive.log and rerun after the helper is available."
+      _STATUS_STATE="$(printf '%s' "${STATUS}" | TREE="${TREE}" TREE_VERSION="${TREE_VERSION}" python3 -c '
+import json, os, sys
+try:
+    d = json.load(sys.stdin)
+except (ValueError, UnicodeError):
+    sys.exit(1)
+if not isinstance(d, dict) or d.get("helper_version") != os.environ["TREE_VERSION"]:
+    sys.exit(1)
+profile = d.get("profile_dir")
+expected = os.path.realpath(os.path.join(os.environ["TREE"], "helper", "profile"))
+if not isinstance(profile, str) or not os.path.isabs(os.path.expanduser(profile)) \
+        or os.path.realpath(os.path.expanduser(profile)) != expected:
+    sys.exit(1)
+if d.get("chromium_alive") is not True or d.get("starting") is not False \
+        or type(d.get("logged_in")) is not bool \
+        or type(d.get("profile_has_cookies")) is not bool:
+    sys.exit(1)
+if d["logged_in"] and not d["profile_has_cookies"]:
+    sys.exit(1)
+print("signed-in" if d["logged_in"] else "signed-out")
+')" || fail "helper" "keepalive returned ${KEEP_RC}, but /status on port ${HELPER_PORT} did not prove this tree's helper and browser are ready. Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log; rerun after the helper is available."
+      # A lock skip returns 0 even when the concurrent run found a
+      # genuine sign-out. The verified status decides which notice to show.
+      if [ "${_STATUS_STATE}" = "signed-in" ]; then
+        KEEP_RC=0
+      else
+        KEEP_RC=2
+      fi
+      ;;
+  esac
+  case "${KEEP_RC}" in
     0)
-      STATUS="$(curl -sf -m 8 "http://127.0.0.1:${HELPER_PORT}/status" 2>/dev/null || true)"
       note "helper healthy: ${STATUS}"
       # P0-7: the onboarded sentinel is a real authenticated signal only:
       # keepalive exit 0 already implies logged_in=true, and the profile
@@ -1037,9 +1234,10 @@ else:
           "================================================================" \
           "SIGN-IN NEEDED (this notice repeats until you are signed in)" \
           "" \
-          "The helper is running. Open the helper page your agent points" \
-          "you to (it reaches http://127.0.0.1:${HELPER_PORT}/) and sign" \
-          "in to Canvas yourself, SSO and MFA included." \
+          "The helper is running. Ask your agent for a one-time sign-in" \
+          "link and open THAT (it reaches http://127.0.0.1:${HELPER_PORT}/;" \
+          "the bare address loads no token, each link works once), then" \
+          "sign in to Canvas yourself, SSO and MFA included." \
           "" \
           "Leave Canvas's \"Stay signed in\" (or \"Remember me\") ON: that" \
           "is what keeps your session alive across helper and machine" \
@@ -1051,10 +1249,34 @@ else:
       fi
       ;;
     *)
-      note "WARNING: the helper did not come up (keepalive exit ${KEEP_RC})."
-      note "Check ${TREE}/helper/keepalive.log and ${TREE}/helper/server.log, then run ${TREE}/helper/keepalive.sh by hand."
+      # Muse UX audit 3 (2026-09-23): a helper that will not come up is
+      # a failed install, not a warning followed by "Install complete":
+      # the agent needs the helper's plain reason to relay.
+      _KEEP_LOG="$(tail -c 4000 "${TREE_STATE_DIR}/keepalive.log" 2>/dev/null | tail -6)"
+      [ -n "${_KEEP_LOG}" ] && note "--- keepalive.log tail"
+      [ -n "${_KEEP_LOG}" ] && printf '%s\n' "${_KEEP_LOG}"
+      _SERVER_LOG="$(tail -c 4000 "${TREE_STATE_DIR}/server.log" 2>/dev/null | tail -6)"
+      [ -n "${_SERVER_LOG}" ] && note "--- server.log tail"
+      [ -n "${_SERVER_LOG}" ] && printf '%s\n' "${_SERVER_LOG}"
+      unset _KEEP_LOG _SERVER_LOG
+      fail "helper" "the helper did not come up (keepalive exit ${KEEP_RC}). Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log for the helper's reason, fix it, and rerun this installer. Do not tell the educator the install succeeded."
       ;;
   esac
+  # Security review 2026-09-24: a completed install reconnects, and the
+  # marker is cleared only here, after the helper-launch branch has
+  # succeeded. Clearing it earlier let any later install failure
+  # (selftest, helper down) leave the marker gone while the keepalive
+  # cron was already installed: within five minutes the helper relaunched
+  # and silently undid the educator's recorded disconnect. fail() re-marks
+  # the disconnect when a failure happens after this clear.
+  _disconnect_marker="${TREE_STATE_DIR}/disconnected"
+  if [ -f "${_disconnect_marker}" ]; then
+    rm -f "${_disconnect_marker}" \
+      || fail "disconnect" "could not remove the disconnect marker ${_disconnect_marker}"
+    _disconnect_marker_cleared=1
+    note "reconnected: the disconnect record is cleared (the educator asked for this)"
+  fi
+  unset _disconnect_marker
 fi
 
 # Record this install: version + manifest under MORROW_HOME (outside the
@@ -1097,6 +1319,9 @@ mv -f "${_version_tmp}" "${INSTALLED_VERSION_FILE}" \
 unset _manifest_tmp _version_tmp _had_manifest _had_version
 
 note ""
+if [ -n "${VAULT_PROBLEM}" ]; then
+  vault_warning
+fi
 note "Install complete. What is next for you:"
 note "  1. If CANVAS_BASE is still unset, set it in ${ENV_FILE} and rerun this installer."
 note "  2. Sign in once through the helper page (the notice above repeats until you are signed in)."

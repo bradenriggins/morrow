@@ -8,6 +8,10 @@ fixtures only; no network, no credentials, no tenant.
 Run from the tree root: python3 -m unittest learners.test_resolve_student
 Stdlib unittest only.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import os
 import sys
@@ -200,11 +204,17 @@ class LadderTests(unittest.TestCase):
         self.assertEqual(res.user_id, 8)
         self.assertEqual(res.match_kind, "name_exact")
 
-    def test_fuzzy_typo_single_match_resolves(self):
+    def test_fuzzy_typo_single_match_asks_the_educator(self):
+        # Round-4 privacy audit H3: a close spelling is never
+        # auto-picked; the one fuzzy candidate goes back to the
+        # educator for confirmation.
         cands = _cands(_user(1, "John Smith"), _user(2, "Zara Khan"))
-        res = match_query(cands, "Jonh Smith")
-        self.assertEqual(res.user_id, 1)
-        self.assertEqual(res.match_kind, "name_fuzzy")
+        with self.assertRaises(StudentAmbiguous) as ctx:
+            match_query(cands, "Jonh Smith")
+        self.assertEqual(ctx.exception.resolution_evidence["match_kind"],
+                         "name_fuzzy")
+        self.assertEqual(ctx.exception.resolution_evidence["match_count"],
+                         1)
 
     def test_fuzzy_multiple_matches_ambiguous(self):
         # CORRECT: a typo near two similar names is ambiguous.
@@ -474,6 +484,107 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("Student A2", public)
         self.assertNotIn("Jane", public)
         self.assertNotIn("Jane", str(exc))
+
+
+class CliPrivacyBoundaryTests(unittest.TestCase):
+    """The CLI output is agent-visible: it must carry course-scoped
+    labels, never raw Canvas user ids or names, and must fail closed
+    when no label can be issued."""
+
+    def _run_cli(self, argv, labeler, roster=None):
+        import contextlib
+        import io
+        import json as _json
+        from learners import resolve_student as rs
+        body = _json.dumps(roster or [
+            _user(5550101, "Jane Doe", login_id="jdoe"),
+            _user(5550102, "Omar Haddad", section_id=12),
+        ])
+        fetch = _fetcher([(200, {}, body)])
+        fetch.close = lambda: None
+        saved = (rs.helper_fetch_factory, rs.vault_label_for, sys.argv)
+        rs.helper_fetch_factory = lambda base, timeout=60: fetch
+        rs.vault_label_for = labeler
+        sys.argv = ["resolve_student.py", "--tenant-base",
+                    "https://canvas.example.edu", "--course-id", "89585"] \
+            + argv
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                code = rs._cli()
+        finally:
+            rs.helper_fetch_factory, rs.vault_label_for, sys.argv = saved
+        return code, out.getvalue()
+
+    def _labeler(self, tenant_base, course_id, candidates):
+        labels = {c["user_id"]: "Student A%d" % (i + 1)
+                  for i, c in enumerate(candidates)}
+        return lambda uid: labels[uid]
+
+    def test_resolved_prints_label_not_raw_id(self):
+        code, out = self._run_cli(["--query", "jdoe"], self._labeler)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Student A1", out)
+        for raw in ("5550101", "Jane", "jdoe\"", "user_id"):
+            self.assertNotIn(raw, out)
+
+    def test_ambiguous_lists_labels_not_names(self):
+        # Failure mode (final sweep 2026-09-23): this test queried
+        # "Student", which matches no roster row, so it only checked a
+        # "not found" answer and never reached the ambiguous branch.
+        import json as _json
+        roster = [
+            _user(5550101, "Jane Doe", login_id="jdoe",
+                  email="jdoe@school.example.edu", sis_user_id="S-1001"),
+            _user(5550103, "Jane Doe", section_id=12, login_id="jdoe2",
+                  email="jdoe2@school.example.edu", sis_user_id="S-1003"),
+        ]
+        code, out = self._run_cli(["--query", "Jane Doe"], self._labeler,
+                                  roster=roster)
+        self.assertNotEqual(code, 0, out)
+        payload = _json.loads(out)
+        self.assertEqual(payload["error_class"], "StudentAmbiguous", out)
+        public = payload["evidence"]["candidates_public"]
+        self.assertIn("Student A1", public)
+        self.assertIn("Student A2", public)
+        for raw in ("Jane", "Doe", "jdoe", "school.example.edu", "S-100",
+                    "5550101", "5550103"):
+            self.assertNotIn(raw, out)
+
+    def test_a_course_not_given_by_its_number_is_refused_first(self):
+        # Muse engine audit 2026-09-23: labels are numbered per course
+        # scope, so a course given another way ("sis_course_id:BIO101")
+        # got labels that name different students than the same numbers
+        # in the course given by number. Refused before any read.
+        import contextlib
+        import io
+        from learners import resolve_student as rs
+
+        def no_helper(*_a, **_k):
+            raise AssertionError("the helper was reached for a bad course")
+        saved = (rs.helper_fetch_factory, sys.argv)
+        rs.helper_fetch_factory = no_helper
+        out = io.StringIO()
+        try:
+            for course in ("sis_course_id:BIO101", "1/../2", "0101"):
+                sys.argv = ["resolve_student.py", "--tenant-base",
+                            "https://canvas.example.edu", "--course-id",
+                            course, "--query", "jdoe"]
+                with contextlib.redirect_stdout(out):
+                    code = rs._cli()
+                self.assertNotEqual(code, 0, out.getvalue())
+        finally:
+            rs.helper_fetch_factory, sys.argv = saved
+        self.assertIn("not as its Canvas course number", out.getvalue())
+
+    def test_no_vault_fails_closed(self):
+        def broken(*_a):
+            raise RuntimeError("vault unavailable (cryptography missing)")
+        code, out = self._run_cli(["--query", "jdoe"], broken)
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("5550101", out)
+        self.assertNotIn("Jane", out)
+        self.assertIn("label", out)
 
 
 if __name__ == "__main__":

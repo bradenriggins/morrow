@@ -8,11 +8,18 @@ Cert fixtures are generated under transport/.selftest-work/ (never /tmp).
 
 Run: python3 transport/egress_selftest.py
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
+import atexit
 import contextlib
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -20,13 +27,41 @@ sys.path.insert(0, _HERE)
 import egress
 import local_chromium as lc
 
-WORK = os.path.join(_HERE, ".selftest-work")
+# A fresh scratch dir per run, removed at exit: two runs from one tree
+# (parallel CI jobs, a test beside an install) must not share or delete
+# each other's certificate fixtures.
+os.makedirs(os.path.join(_HERE, ".selftest-work"), exist_ok=True)
+WORK = tempfile.mkdtemp(prefix="egress-",
+                        dir=os.path.join(_HERE, ".selftest-work"))
+atexit.register(shutil.rmtree, WORK, True)
 FAKE_USER = "selftestuser"
 FAKE_PASS = "selftestpass"
 FAKE_PROXY_AUTH = "http://%s:%s@proxy.example:3128" % (FAKE_USER, FAKE_PASS)
 FAKE_PROXY_BARE = "http://proxy.example:3128"
 
 passed = []
+
+# Every loopback listener here takes a free port from the kernel (port
+# 0) and reports it: a fixed port fails the suite whenever another
+# program, or a second install running at the same time, holds it.
+_SERVING = re.compile(r"forwarder on 127\.0\.0\.1:(\d+)")
+
+
+def _serving_port(proc, what):
+    """Wait for the forwarder's startup line and return the port it
+    bound, reading line by line until it appears or the process ends."""
+    seen = ""
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        line = proc.stdout.readline()
+        if not line:
+            break
+        seen += line
+        m = _SERVING.search(line)
+        if m:
+            return int(m.group(1)), seen
+    raise SystemExit("selftest failed at: forwarder serve (%s): %s"
+                     % (what, seen[-300:]))
 
 
 def check(name, cond, detail=""):
@@ -195,9 +230,8 @@ def main():
             egress.CA_PEM_CANDIDATES = orig
 
     # ---- 6. launcher defaults: explicit profile, canonical port -------
-    helper_profile = os.path.expanduser(
-        "~/workspace/canvas-login-helper/profile")
-    check("helper_profile_dir is the helper profile",
+    helper_profile = lc.tree_helper_profile_dir()
+    check("helper_profile_dir is this tree's helper profile",
           lc.helper_profile_dir() == helper_profile,
           lc.helper_profile_dir())
     check("no morrow-chromium default",
@@ -211,8 +245,18 @@ def main():
           retired_raised)
     check("canonical CDP port",
           lc.HELPER_CDP_PORT == 19223, str(lc.HELPER_CDP_PORT))
-    launcher = lc.ChromiumLauncher(
-        lc.default_binary(), lc.helper_profile_dir())
+    # These checks never start a browser, so they need no real
+    # Chromium: a stub executable stands in when none is installed
+    # (a dev machine), and the real binary is used when it is.
+    try:
+        _binary = lc.default_binary()
+    except RuntimeError:
+        os.makedirs(WORK, exist_ok=True)
+        _binary = os.path.join(WORK, "stub-chrome")
+        with open(_binary, "w") as fh:
+            fh.write("#!/bin/sh\nexit 1\n")
+        os.chmod(_binary, 0o755)
+    launcher = lc.ChromiumLauncher(_binary, lc.helper_profile_dir())
     check("launcher default port is 19223",
           launcher.cdp_port == 19223, str(launcher.cdp_port))
 
@@ -223,13 +267,10 @@ def main():
     # The egress-relevant assertions survive without any browser: the
     # launcher's probe reports proxy_auth, wants the forwarder, and
     # never leaks credentials into detail/proxy.
-    probe_profile = os.path.join(
-        os.path.expanduser(
-            "~/workspace/audits/adversarial-wave-4-2026-09-21/scratch/worker-browser"),
-        ".egress-selftest-probe-profile")
+    # Round-4 L6: scratch under this tree, never an external path.
+    probe_profile = os.path.join(WORK, "egress-selftest-probe-profile")
     with fake_env(https_proxy=FAKE_PROXY_AUTH, HTTPS_PROXY=None):
-        launcher = lc.ChromiumLauncher(
-            lc.default_binary(), probe_profile)
+        launcher = lc.ChromiumLauncher(_binary, probe_profile)
         probe = launcher._probe()
         check("launcher probe mode here", probe["mode"] == "proxy_auth",
               probe["mode"])
@@ -259,7 +300,7 @@ def main():
         sys.modules["egress"] = fake
         # The forwarder reads sys.argv[1] as the listen port at import.
         saved_argv = sys.argv[:]
-        sys.argv = [fw, "18999"]
+        sys.argv = [fw, "0"]
         buf = io.StringIO()
         code, msg = None, ""
         try:
@@ -307,7 +348,7 @@ def main():
     env = {k: v for k, v in os.environ.items()
            if k not in ("https_proxy", "HTTPS_PROXY",
                         "http_proxy", "HTTP_PROXY")}
-    r = subprocess.run([sys.executable, fw, "18099"],
+    r = subprocess.run([sys.executable, fw, "0"],
                        capture_output=True, text=True, timeout=30, env=env)
     out = (r.stdout or "") + (r.stderr or "")
     if r.returncode == 0:
@@ -322,20 +363,23 @@ def main():
     # W4-P2-9: the forwarder now requires MORROW_FORWARDER_LAUNCHER_PID;
     # the selftest passes its own PID (it spawns no authorized client
     # here, it only checks the serving line).
-    fw_env = dict(os.environ)
+    # The check sets up its own authenticated proxy env: the caller's
+    # environment may have no proxy or an unauthenticated one (direct
+    # egress is supported), and the forwarder then rightly declines to
+    # serve.
+    fw_env = {k: v for k, v in os.environ.items()
+              if k not in ("https_proxy", "HTTPS_PROXY",
+                           "http_proxy", "HTTP_PROXY")}
+    fw_env["https_proxy"] = FAKE_PROXY_AUTH
+    fw_env["HTTPS_PROXY"] = FAKE_PROXY_AUTH
     fw_env["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
     r = subprocess.Popen(
-        [sys.executable, fw, "18098"],
+        [sys.executable, fw, "0"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, start_new_session=True, env=fw_env)
     try:
-        line = r.stdout.readline()
-        deadline = time.time() + 15
-        serving = "forwarder on 127.0.0.1:18098" in line
-        while not serving and time.time() < deadline:
-            line = r.stdout.readline()
-            serving = "forwarder on 127.0.0.1:18098" in line
-        check("forwarder serves with auth proxy", serving, line[:200])
+        _port_b, line = _serving_port(r, "b")
+        check("forwarder serves with auth proxy", _port_b > 0, line[:200])
         check("forwarder startup line redacted",
               "@" not in line and FAKE_USER not in line, line[:200])
     finally:
@@ -348,7 +392,7 @@ def main():
               if k != "MORROW_FORWARDER_LAUNCHER_PID"}
     env_nc["https_proxy"] = FAKE_PROXY_AUTH
     env_nc["HTTPS_PROXY"] = FAKE_PROXY_AUTH
-    r = subprocess.run([sys.executable, fw, "18097"],
+    r = subprocess.run([sys.executable, fw, "0"],
                        capture_output=True, text=True, timeout=30,
                        env=env_nc)
     out_nc = (r.stdout or "") + (r.stderr or "")
@@ -375,7 +419,7 @@ def main():
         saved_argv = sys.argv[:]
         saved_pid = os.environ.get("MORROW_FORWARDER_LAUNCHER_PID")
         os.environ["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
-        sys.argv = [fw, "18998"]
+        sys.argv = [fw, "0"]
         out_buf, err_buf = io.StringIO(), io.StringIO()
         code = None
         try:
@@ -430,7 +474,8 @@ def main():
     import socket as _socket
     dummy = _socket.socket()
     dummy.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-    dummy.bind(("127.0.0.1", 18095))
+    dummy.bind(("127.0.0.1", 0))
+    dummy_port = dummy.getsockname()[1]
     dummy.listen(5)
     dummy.settimeout(10)
 
@@ -457,22 +502,18 @@ def main():
     fw_env2 = dict(os.environ)
     # W4-P2-19: use format-string credentials (not a literal user:pass@ URL)
     # so the packaging secrets gate does not flag this selftest.
-    fw_env2["https_proxy"] = "http://%s:%s@127.0.0.1:18095" % (FAKE_USER, FAKE_PASS)
-    fw_env2["HTTPS_PROXY"] = "http://%s:%s@127.0.0.1:18095" % (FAKE_USER, FAKE_PASS)
+    fw_env2["https_proxy"] = "http://%s:%s@127.0.0.1:%d" % (
+        FAKE_USER, FAKE_PASS, dummy_port)
+    fw_env2["HTTPS_PROXY"] = fw_env2["https_proxy"]
     fw_env2["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
     r = subprocess.Popen(
-        [sys.executable, fw, "18096"],
+        [sys.executable, fw, "0"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, start_new_session=True, env=fw_env2)
     try:
-        line = ""
-        deadline = time.time() + 15
-        while "forwarder on 127.0.0.1:18096" not in line:
-            line = r.stdout.readline()
-            if not line or time.time() > deadline:
-                raise SystemExit("selftest failed at: forwarder serve (d)")
+        fw_port, _line = _serving_port(r, "d")
         # Direct CONNECT from this (non-descendant) process -> 403.
-        s = _socket.create_connection(("127.0.0.1", 18096), timeout=10)
+        s = _socket.create_connection(("127.0.0.1", fw_port), timeout=10)
         try:
             s.sendall(b"CONNECT example.com:443 HTTP/1.1\r\n"
                       b"Host: example.com:443\r\n\r\n")
@@ -488,11 +529,11 @@ def main():
         t.start()
         child_code = (
             "import socket,sys;"
-            "s=socket.create_connection(('127.0.0.1',18096),timeout=10);"
+            "s=socket.create_connection(('127.0.0.1',%d),timeout=10);"
             "s.sendall(b'CONNECT example.com:443 HTTP/1.1\\r\\n"
             "Host: example.com:443\\r\\n\\r\\n');"
             "d=s.recv(32);"
-            "sys.stdout.write(d.decode('latin1'))")
+            "sys.stdout.write(d.decode('latin1'))" % fw_port)
         cr = subprocess.run([sys.executable, "-c", child_code],
                             capture_output=True, text=True, timeout=20)
         t.join(timeout=10)
@@ -519,14 +560,14 @@ def main():
          "-addext", "subjectAltName=IP:127.0.0.1"],
         check=True, capture_output=True)
     tls_seen = {}
+    ls = _socket.socket()
+    ls.bind(("127.0.0.1", 0))
+    tls_port = ls.getsockname()[1]
+    ls.listen(1)
 
     def _fake_tls_proxy():
         ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(tls_cert, tls_key)
-        ls = _socket.socket()
-        ls.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-        ls.bind(("127.0.0.1", 18094))
-        ls.listen(1)
         ls.settimeout(20)
         try:
             raw, _ = ls.accept()
@@ -563,32 +604,25 @@ def main():
     pt.start()
     fw_env3 = dict(os.environ)
     fw_env3["https_proxy"] = (
-        "https://%s:%s@127.0.0.1:18094" % (FAKE_USER, FAKE_PASS))
+        "https://%s:%s@127.0.0.1:%d" % (FAKE_USER, FAKE_PASS, tls_port))
     fw_env3["HTTPS_PROXY"] = fw_env3["https_proxy"]
     fw_env3["SSL_CERT_FILE"] = tls_cert
     fw_env3["MORROW_FORWARDER_LAUNCHER_PID"] = str(os.getpid())
     r = subprocess.Popen(
-        [sys.executable, fw, "18093"],
+        [sys.executable, fw, "0"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, start_new_session=True, env=fw_env3)
     try:
-        line = ""
-        boot_lines = ""
-        deadline = time.time() + 15
-        while "forwarder on 127.0.0.1:18093" not in line:
-            line = r.stdout.readline()
-            boot_lines += line
-            if not line or time.time() > deadline:
-                raise SystemExit("selftest failed at: forwarder serve (e)")
+        fw_port, boot_lines = _serving_port(r, "e")
         check("forwarder https upstream logs tls: yes",
               "tls: yes" in boot_lines, boot_lines[:200])
         child_code = (
             "import socket,sys;"
-            "s=socket.create_connection(('127.0.0.1',18093),timeout=15);"
+            "s=socket.create_connection(('127.0.0.1',%d),timeout=15);"
             "s.sendall(b'CONNECT example.com:443 HTTP/1.1\\r\\n"
             "Host: example.com:443\\r\\n\\r\\n');"
             "d=s.recv(64);"
-            "sys.stdout.write(d.decode('latin1'))")
+            "sys.stdout.write(d.decode('latin1'))" % fw_port)
         cr = subprocess.run([sys.executable, "-c", child_code],
                             capture_output=True, text=True, timeout=30)
         check("forwarder relays through https upstream (200)",
@@ -698,86 +732,94 @@ def main():
     check("W5-P2-3: _read_headers times out on stalled peer",
           got is None and dt < 5, "got=%r dt=%.1f" % (got, dt))
 
-    # f4. PID hints: after one verified lookup, the pid becomes a hint,
-    # so a second connection from the same process is found without a
-    # full /proc scan.
-    import socket as _sock3
-    srv = _sock3.socket()
-    srv.setsockopt(_sock3.SOL_SOCKET, _sock3.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(1)
-    srv_port = srv.getsockname()[1]
-    holder = subprocess.Popen(
-        [sys.executable, "-c",
-         "import socket,time;"
-         "a=socket.create_connection(('127.0.0.1',%d));"
-         "b=socket.create_connection(('127.0.0.1',%d));"
-         "time.sleep(10)" % (srv_port, srv_port)],
-        start_new_session=True)
-    try:
-        srv.settimeout(10)
-        c1, _ = srv.accept()
-        c2, _ = srv.accept()
-        fwmod._PID_HINTS.clear()
-
-        def _inode_of(sock):
-            tgt = os.readlink("/proc/self/fd/%d" % sock.fileno())
-            assert tgt.startswith("socket:["), tgt
-            return int(tgt[8:-1])
-
-        # Server-side inodes differ from the holder's; find the
-        # holder's inodes via the snapshot instead.
-        snap = fwmod._proc_socket_snapshot()
-        holder_inodes = [ino for ino, (p, _st) in snap.items()
-                         if p == holder.pid]
-        assert len(holder_inodes) >= 2, \
-            "expected 2 holder sockets, got %d" % len(holder_inodes)
-
-        # First lookup: hint miss -> snapshot scan -> pid remembered.
-        scans_before = len(fwmod._PID_HINTS)
-        p1 = fwmod._socket_holder_pid_verified(holder_inodes[0])
-        check("W5-P2-3: verified lookup finds the holder pid",
-              p1 == holder.pid, repr(p1))
-        check("W5-P2-3: holder pid becomes a hint",
-              len(fwmod._PID_HINTS) == scans_before + 1)
-
-        # Second lookup (different inode, same pid): served from the
-        # hint. Prove no full scan by breaking the snapshot builder.
-        orig_snap = fwmod._proc_socket_snapshot
-        fwmod._proc_socket_snapshot = lambda: (_ for _ in ()).throw(
-            AssertionError("full scan on hint hit"))
+    # f4/f5 exercise the /proc snapshot implementation, which exists
+    # only where there is /proc (Linux, the product platform). Without
+    # /proc the forwarder authenticates clients with lsof/ps instead
+    # (covered by the descendant-client checks above).
+    if not os.path.isdir("/proc"):
+        print("SKIP W5-P2-3 /proc snapshot checks: no /proc on this "
+              "machine (Linux only)")
+    else:
+        # f4. PID hints: after one verified lookup, the pid becomes a hint,
+        # so a second connection from the same process is found without a
+        # full /proc scan.
+        import socket as _sock3
+        srv = _sock3.socket()
+        srv.setsockopt(_sock3.SOL_SOCKET, _sock3.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        srv_port = srv.getsockname()[1]
+        holder = subprocess.Popen(
+            [sys.executable, "-c",
+             "import socket,time;"
+             "a=socket.create_connection(('127.0.0.1',%d));"
+             "b=socket.create_connection(('127.0.0.1',%d));"
+             "time.sleep(10)" % (srv_port, srv_port)],
+            start_new_session=True)
         try:
-            p2 = fwmod._socket_holder_pid_verified(holder_inodes[1])
-        finally:
-            fwmod._proc_socket_snapshot = orig_snap
-        check("W5-P2-3: second connection served from pid hint (no scan)",
-              p2 == holder.pid, repr(p2))
-    finally:
-        holder.terminate()
-        holder.wait(timeout=10)
-        srv.close()
+            srv.settimeout(10)
+            c1, _ = srv.accept()
+            c2, _ = srv.accept()
+            fwmod._PID_HINTS.clear()
 
-    # f5. _socket_holder_pid_verified: this process's own sockets are
-    # never attributed (the snapshot excludes self: fail closed).
-    import socket as _sock2
-    a, b = _sock2.socketpair()
-    try:
-        inode = None
-        for fd in (a.fileno(), b.fileno()):
+            def _inode_of(sock):
+                tgt = os.readlink("/proc/self/fd/%d" % sock.fileno())
+                assert tgt.startswith("socket:["), tgt
+                return int(tgt[8:-1])
+
+            # Server-side inodes differ from the holder's; find the
+            # holder's inodes via the snapshot instead.
+            snap = fwmod._proc_socket_snapshot()
+            holder_inodes = [ino for ino, (p, _st) in snap.items()
+                             if p == holder.pid]
+            assert len(holder_inodes) >= 2, \
+                "expected 2 holder sockets, got %d" % len(holder_inodes)
+
+            # First lookup: hint miss -> snapshot scan -> pid remembered.
+            scans_before = len(fwmod._PID_HINTS)
+            p1 = fwmod._socket_holder_pid_verified(holder_inodes[0])
+            check("W5-P2-3: verified lookup finds the holder pid",
+                  p1 == holder.pid, repr(p1))
+            check("W5-P2-3: holder pid becomes a hint",
+                  len(fwmod._PID_HINTS) == scans_before + 1)
+
+            # Second lookup (different inode, same pid): served from the
+            # hint. Prove no full scan by breaking the snapshot builder.
+            orig_snap = fwmod._proc_socket_snapshot
+            fwmod._proc_socket_snapshot = lambda: (_ for _ in ()).throw(
+                AssertionError("full scan on hint hit"))
             try:
-                tgt = os.readlink("/proc/self/fd/%d" % fd)
-            except OSError:
-                continue
-            if tgt.startswith("socket:["):
-                inode = int(tgt[8:-1])
-                break
-        assert inode is not None, "no socket inode found"
-        found = fwmod._socket_holder_pid_verified(inode)
-        check("W5-P2-3: verified lookup excludes own process (fail closed)",
-              found is None, repr(found))
-    finally:
-        a.close()
-        b.close()
+                p2 = fwmod._socket_holder_pid_verified(holder_inodes[1])
+            finally:
+                fwmod._proc_socket_snapshot = orig_snap
+            check("W5-P2-3: second connection served from pid hint (no scan)",
+                  p2 == holder.pid, repr(p2))
+        finally:
+            holder.terminate()
+            holder.wait(timeout=10)
+            srv.close()
+
+        # f5. _socket_holder_pid_verified: this process's own sockets are
+        # never attributed (the snapshot excludes self: fail closed).
+        import socket as _sock2
+        a, b = _sock2.socketpair()
+        try:
+            inode = None
+            for fd in (a.fileno(), b.fileno()):
+                try:
+                    tgt = os.readlink("/proc/self/fd/%d" % fd)
+                except OSError:
+                    continue
+                if tgt.startswith("socket:["):
+                    inode = int(tgt[8:-1])
+                    break
+            assert inode is not None, "no socket inode found"
+            found = fwmod._socket_holder_pid_verified(inode)
+            check("W5-P2-3: verified lookup excludes own process (fail closed)",
+                  found is None, repr(found))
+        finally:
+            a.close()
+            b.close()
 
     # f6. Connection shedding: a full semaphore gets an immediate 503
     # and never reaches the inner handler.
@@ -894,13 +936,9 @@ def main():
     check("W6-P2-6: missing peer cert fails closed", _nc_ok)
 
     # Self-clean: throwaway CA material is deny-list-matching residue
-    # (*.key/*.pem) and must not linger in the tree.
-    for _f in ("throwaway-ca.pem", "throwaway-ca.key",
-               "tls-proxy.pem", "tls-proxy.key"):
-        try:
-            os.unlink(os.path.join(WORK, _f))
-        except FileNotFoundError:
-            pass
+    # (*.key/*.pem) and must not linger in the tree. (atexit removes
+    # WORK on a failed run too.)
+    shutil.rmtree(WORK, ignore_errors=True)
 
     print("\nAll %d checks passed." % len(passed))
 

@@ -57,6 +57,10 @@ test_shipped() {
     # inherits it; the memory-watch cases below assert against
     # ${TREE_STATE_DIR}, which the keepalive itself computes from this.
     export MORROW_TREE_STATE_DIR="${SCRATCH}/tree-state"
+    # Everything else under MORROW_HOME (the legacy env, lane state)
+    # resolves under scratch too, never the real ~/.morrow.
+    export MORROW_HOME="${SCRATCH}/morrow-home"
+    mkdir -p "${MORROW_HOME}"
     export KEEPALIVE_SOURCE_ONLY=1
     # shellcheck disable=SC1090
     . "${ka}"
@@ -88,7 +92,10 @@ test_shipped() {
     # the deploy copy's skew check recycles instead of adopting. The live
     # copy predates the marker, so the extra field is harmless there.
     BODY_HEALTHY_V="{\"logged_in\": true, \"chromium_alive\": true, \"starting\": false, \"helper_version\": \"${TREE_VERSION:-unknown}\"}"
-    HELPER_DIR="${SCRATCH}"           # recover_helper's cd + server.log land here
+    # Runtime logs resolve under the tree state dir, never the tree
+    # (install.sh's secrets gate and integrity walk read the tree).
+    _ka_log_real="${KEEPALIVE_LOG}"; _srv_log_real="${SERVER_LOG}"
+    HELPER_DIR="${SCRATCH}"           # recover_helper's cd lands here
     CANVAS_BASE="https://example.instructure.com"
     PROBE_BODY=""
     probe_status() { status_body="${PROBE_BODY}"; return 0; }
@@ -97,6 +104,11 @@ test_shipped() {
     t() { # $1=name $2=expected $3=actual
       if [ "$2" = "$3" ]; then pass; else fail "${label}" "$1" "$2" "$3"; fi
     }
+
+    t "keepalive.log lives in the tree state dir" \
+      "${TREE_STATE_DIR}/keepalive.log" "${_ka_log_real}"
+    t "server.log lives in the tree state dir" \
+      "${TREE_STATE_DIR}/server.log" "${_srv_log_real}"
 
     # --- genuine_signout(): true only for the exact sign-out state ------
     got="$(genuine_signout "${BODY_SIGNOUT}")"
@@ -221,7 +233,7 @@ test_shipped() {
           "a helper_token file" "none found"
       else
         t "helper auth token file is mode 0600" "600" \
-          "$(stat -c '%a' "${_tokfile}" 2>/dev/null)"
+          "$(python3 -c 'import os, sys; print("%o" % (os.stat(sys.argv[1]).st_mode & 0o777))' "${_tokfile}" 2>/dev/null)"
         if grep -qE '^[0-9a-f]{64}$' "${_tokfile}"; then pass; else
           fail "${label}" "helper auth token is 64 hex chars" \
             "64 hex" "malformed"; fi
@@ -292,6 +304,24 @@ test_shipped() {
         OWN_PID=$!
         sleep 60 &
         OTHER_PID=$!
+        # A host without /proc (macOS) would refuse all three for lack of
+        # /proc, not because of the gate. The gate reads only
+        # PROC_ROOT/<pid>/cmdline and PROC_ROOT/<pid>/cwd, so describe
+        # the same three processes there.
+        if [ ! -d /proc/self ]; then
+          PROC_ROOT="${SCRATCH}/proc-kill-gate"
+          _fake_proc() {  # pid cwd argv...
+            local _p="$1" _c="$2"
+            shift 2
+            mkdir -p "${PROC_ROOT}/${_p}"
+            printf '%s\0' "$@" > "${PROC_ROOT}/${_p}/cmdline"
+            ln -s "${_c}" "${PROC_ROOT}/${_p}/cwd"
+          }
+          _fake_proc "${FOREIGN_PID}" "${HELPER_DIR}" \
+            "/other/tree/helper/server.py" 60
+          _fake_proc "${OWN_PID}" "${HELPER_DIR}" "${HELPER_DIR}/server.py" 60
+          _fake_proc "${OTHER_PID}" "${HELPER_DIR}" sleep 60
+        fi
         SS_PID="${FOREIGN_PID}"
         ss() { printf 'tcp LISTEN 0 127.0.0.1:%s *:* users:(("python3",pid=%s,fd=3))\n' \
           "${SERVER_PORT}" "${SS_PID}"; }
@@ -550,6 +580,13 @@ print(lc._slug_old(sys.argv[2]))
     if declare -F acquire_keepalive_lock >/dev/null 2>&1; then
       (
         _lockdir="$(mktemp -d "${HOME}/workspace/.keepalive-locktest-XXXXXX")"
+        # A host without flock (macOS; the Muse VM has it, and install
+        # step 1 requires it) could never take the lock. What is under
+        # test is that opening the lockfile keeps stderr, so a stand-in
+        # grants the lock there.
+        if ! command -v flock >/dev/null 2>&1; then
+          flock() { return 0; }
+        fi
         # Success path: fd 9 is held AND later stderr is intact.
         (
           LOCKFILE="${_lockdir}/keepalive.lock"

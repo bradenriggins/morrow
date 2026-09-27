@@ -2,7 +2,7 @@
 """Self-tests for the failed-students query chain (query/).
 
 Run: python3 query/selftest_query.py
-Covers: intent parsing, week-window/date semantics, quiz resolution
+Covers: typed argument checks, week-window/date semantics, quiz resolution
 (zero/one/multiple matches, undated, unpublished), threshold math
 (points, percent, grading standards, excused, missing, pass_fail,
 not_graded), pagination merging, and translator routing. No live
@@ -13,6 +13,10 @@ Exit code 0 = all pass.
 """
 
 from __future__ import annotations
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 
 import os
 import sys
@@ -22,7 +26,6 @@ _TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE_ROOT not in sys.path:
     sys.path.insert(0, _TREE_ROOT)
 
-from query import intent as I
 from query import quiz_resolve as Q
 from query import thresholds as T
 from query import chain as C
@@ -35,7 +38,10 @@ from failures import translator as TR
 # explicitly to run_query. No live reads: every provider call goes
 # through FakeReader or StubReader.
 _TEST_TENANT = "https://school.example.edu"
-L.TENANT_BASE = _TEST_TENANT
+L.tenant_base = lambda: _TEST_TENANT
+# The fixtures' calendar is written in Chicago time; the chain itself
+# takes the educator's zone (query/test_chain_timezone.py).
+CHI = "America/Chicago"
 
 PASS = []
 FAIL = []
@@ -47,32 +53,24 @@ def check(name, cond, detail=""):
           ((" -- " + detail) if detail and not cond else ""))
 
 
-# ---------------------------------------------------------------- intent
-def t_intent():
-    p = I.parse("show me all the students that failed last week's quiz")
-    check("intent/canonical", p["action"] == "failed_students"
-          and p["quiz_ref"]["kind"] == "last_week"
-          and p["threshold"] is None)
-    p = I.parse("Which students failed the quiz below 70%?")
-    check("intent/pct-threshold",
-          p["threshold"] == {"kind": "percent", "value": 70.0})
-    p = I.parse("list learners who scored under 40 points on last week's quiz")
-    check("intent/points-threshold",
-          p["threshold"] == {"kind": "points", "value": 40.0}
-          and p["quiz_ref"]["kind"] == "last_week")
-    p = I.parse("who got an F on last week's quiz")
-    check("intent/letter-f", p["threshold"] == {"kind": "letter_f"})
-    p = I.parse("show me students that didn't pass \"Mid-Term Exam\"")
-    check("intent/quoted-title",
-          p["quiz_ref"]["kind"] == "named_title"
-          and p["quiz_ref"]["title"] == "Mid-Term Exam")
-    for bad in ("what is the weather", "create a quiz",
-                "show me the gradebook", ""):
+# ------------------------------------------------------------- arguments
+def t_arguments():
+    ref, th = C._checked_arguments("last_week", None, None, False)
+    check("args/default", ref == {"kind": "last_week"} and th is None)
+    _, th = C._checked_arguments("last_week", 70, None, False)
+    check("args/percent", th == {"kind": "percent", "value": 70.0})
+    _, th = C._checked_arguments("this_week", None, 40, False)
+    check("args/points", th == {"kind": "points", "value": 40.0})
+    _, th = C._checked_arguments("last_week", None, None, True)
+    check("args/letter-f", th == {"kind": "letter_f"})
+    for bad in (("yesterday", None, None, False),
+                ("last_week", 70, 40, False),
+                ("last_week", 150, None, False)):
         try:
-            I.parse(bad)
-            check("intent/rejects-%r" % bad[:20], False, "parsed, want raise")
-        except I.IntentNotRecognized:
-            check("intent/rejects-%r" % bad[:20], True)
+            C._checked_arguments(*bad)
+            check("args/rejects-%r" % (bad,), False, "accepted")
+        except C.QueryArgumentsInvalid:
+            check("args/rejects-%r" % (bad,), True)
 
 
 # ---------------------------------------------------------------- dates
@@ -80,11 +78,11 @@ def t_dates():
     # Tue 2026-09-22 12:00 UTC = 07:00 CDT. Last week (Chicago):
     # Mon 2026-09-14 .. Sun 2026-09-20.
     now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
-    start, end = Q.last_week_window(now)
+    start, end = Q.last_week_window(CHI, now)
     check("dates/last-week-window",
-          (Q.chicago_ymd(start), Q.chicago_ymd(end)) ==
+          (Q.local_ymd(start, CHI), Q.local_ymd(end, CHI)) ==
           ("2026-09-14", "2026-09-20"),
-          "got %s..%s" % (Q.chicago_ymd(start), Q.chicago_ymd(end)))
+          "got %s..%s" % (Q.local_ymd(start, CHI), Q.local_ymd(end, CHI)))
 
     q = {"id": 1, "created_at": "2026-09-01T00:00:00Z"}
     a = {"id": 9, "due_at": "2026-09-16T05:00:00Z",
@@ -112,20 +110,20 @@ def t_dates():
     # DST transitions (spring forward 2026-03-08, fall back 2026-11-01):
     # last week must stay exact in Chicago terms.
     spring = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)  # Tue
-    s, e = Q.last_week_window(spring)
+    s, e = Q.last_week_window(CHI, spring)
     check("dates/dst-spring-window",
-          (Q.chicago_ymd(s), Q.chicago_ymd(e)) == ("2026-03-02", "2026-03-08"),
-          "got %s..%s" % (Q.chicago_ymd(s), Q.chicago_ymd(e)))
+          (Q.local_ymd(s, CHI), Q.local_ymd(e, CHI)) == ("2026-03-02", "2026-03-08"),
+          "got %s..%s" % (Q.local_ymd(s, CHI), Q.local_ymd(e, CHI)))
     check("dates/dst-spring-utc-start", s.isoformat() ==
           "2026-03-02T06:00:00+00:00", s.isoformat())  # CST (-6) before flip
     check("dates/dst-spring-utc-end",
           e.isoformat() == "2026-03-09T04:59:59.999999+00:00",
           e.isoformat())  # CDT (-5) after flip
     fall = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)  # Tue
-    s, e = Q.last_week_window(fall)
+    s, e = Q.last_week_window(CHI, fall)
     check("dates/dst-fall-window",
-          (Q.chicago_ymd(s), Q.chicago_ymd(e)) == ("2026-10-26", "2026-11-01"),
-          "got %s..%s" % (Q.chicago_ymd(s), Q.chicago_ymd(e)))
+          (Q.local_ymd(s, CHI), Q.local_ymd(e, CHI)) == ("2026-10-26", "2026-11-01"),
+          "got %s..%s" % (Q.local_ymd(s, CHI), Q.local_ymd(e, CHI)))
     check("dates/dst-fall-utc-start", s.isoformat() ==
           "2026-10-26T05:00:00+00:00", s.isoformat())  # CDT (-5) before flip
     check("dates/dst-fall-utc-end",
@@ -142,6 +140,8 @@ class FakeReader:
         self.nq_error = nq_error
 
     def get_paginated(self, path):
+        if path.split("?", 1)[0].endswith(("/users", "/enrollments")):
+            return 200, [], None  # the course roster the chain reads first
         if path.startswith("/api/quiz/v1/"):
             if self.nq_error:
                 raise self.nq_error
@@ -177,7 +177,7 @@ def t_resolve():
         [_quiz(1, "Pop Quiz #1", aid=11), _quiz(2, "Draft", False, 12)],
         [_assign(11, "2026-09-16T05:00:00Z"), _assign(12, "2026-09-16T05:00:00Z")])
     quiz, assignment, ctx = Q.resolve(r, "89585", {"kind": "last_week"},
-                                     now_utc=NOW)
+                                     CHI, now_utc=NOW)
     check("resolve/one-match", quiz["id"] == 1 and assignment["id"] == 11)
 
     # Zero matches: nothing dated in the window.
@@ -185,7 +185,8 @@ def t_resolve():
         [_quiz(1, "Undated", aid=11), _quiz(2, "Draft", False, 12)],
         [_assign(11, None), _assign(12, None)])
     try:
-        Q.resolve(r, "89585", {"kind": "last_week"}, now_utc=NOW)
+        Q.resolve(r, "89585", {"kind": "last_week"}, CHI,
+                  now_utc=NOW)
         check("resolve/zero-raises", False, "no raise")
     except Q.QuizNotFound as e:
         check("resolve/zero-raises", True)
@@ -206,7 +207,8 @@ def t_resolve():
          _assign(13, "2026-09-21T05:00:00Z"),
          _assign(14, "2026-12-01T05:00:00Z")])
     try:
-        Q.resolve(r, "89585", {"kind": "last_week"}, now_utc=NOW)
+        Q.resolve(r, "89585", {"kind": "last_week"}, CHI,
+                  now_utc=NOW)
         check("resolve/nearest-raises", False, "no raise")
     except Q.QuizNotFound as e:
         titles = [t for t, _i, _e, _f in e.nearest]
@@ -221,7 +223,8 @@ def t_resolve():
         [_assign(11, "2026-09-15T05:00:00Z"),
          _assign(12, "2026-09-18T05:00:00Z")])
     try:
-        Q.resolve(r, "89585", {"kind": "last_week"}, now_utc=NOW)
+        Q.resolve(r, "89585", {"kind": "last_week"}, CHI,
+                  now_utc=NOW)
         check("resolve/multi-raises", False, "no raise")
     except Q.QuizAmbiguous as e:
         check("resolve/multi-raises", True)
@@ -236,7 +239,8 @@ def t_resolve():
     r = FakeReader([_quiz(1, "Undated", aid=11)],
                    [_assign(11, None)])
     try:
-        Q.resolve(r, "89585", {"kind": "last_week"}, now_utc=NOW)
+        Q.resolve(r, "89585", {"kind": "last_week"}, CHI,
+                  now_utc=NOW)
         check("resolve/undated-excluded", False, "matched an undated quiz")
     except Q.QuizNotFound:
         check("resolve/undated-excluded", True)
@@ -250,7 +254,7 @@ def t_resolve():
              "due_at": "2026-09-17T05:00:00Z", "published": True,
              "grading_type": "pass_fail", "points_possible": 100.0}])
     quiz, assignment, ctx = Q.resolve(r, "89585", {"kind": "last_week"},
-                                     now_utc=NOW)
+                                     CHI, now_utc=NOW)
     check("resolve/nq-included", str(quiz["id"]) == "55"
           and str(assignment["id"]) == "55")
 
@@ -261,14 +265,15 @@ def t_resolve():
                    [_assign(11, "2026-09-16T05:00:00Z")],
                    nq_error=Boom("HTTP 401"))
     quiz, assignment, ctx = Q.resolve(r, "89585", {"kind": "last_week"},
-                                     now_utc=NOW)
+                                     CHI, now_utc=NOW)
     check("resolve/nq-401-degrades",
           quiz["id"] == 1 and ctx["new_quizzes_skipped"] is not None
           and "401" in ctx["new_quizzes_skipped"])
 
     # Unsupported reference kinds raise instead of guessing.
     try:
-        Q.resolve(FakeReader([], []), "89585", {"kind": "unspecified"})
+        Q.resolve(FakeReader([], []), "89585", {"kind": "unspecified"},
+                  CHI)
         check("resolve/unsupported-raises", False, "no raise")
     except Q.UnsupportedQuizRef:
         check("resolve/unsupported-raises", True)
@@ -374,6 +379,7 @@ def t_pagination():
         def __init__(self, pages):
             self._pages = pages  # {url: (status, payload, headers)}
             self._tab_id = "stub"
+            self._tenant = _TEST_TENANT
 
         def _fetch(self, url):
             return self._pages[url]
@@ -425,20 +431,21 @@ def t_translator():
     te = TR.translate("op", Q.QuizNotFound(
         datetime(2026, 9, 14, 5, 0, tzinfo=timezone.utc),   # 00:00 CDT
         datetime(2026, 9, 21, 4, 59, 59, tzinfo=timezone.utc),  # 23:59 CDT
-        5, 3, 1, []))
+        5, 3, 1, [], CHI))
     check("tr/no-match", te.mode_id == "quiz-resolution-no-match"
           and "no published quiz" in te.agent_message, te.mode_id)
     check("tr/no-match-placeholders",
-          "2026-09-14..2026-09-20" in te.agent_message
+          "between 2026-09-14 and 2026-09-20" in te.agent_message
           and "(unknown)" not in te.agent_message, te.agent_message[:200])
     te = TR.translate("op", Q.QuizAmbiguous(
         datetime(2026, 9, 14), datetime(2026, 9, 20),
         [("Quiz A", 1, "2026-09-15T05:00:00+00:00", "assignment.due_at",
-          50.0)]))
+          50.0)], CHI))
     check("tr/ambiguous", te.mode_id == "quiz-resolution-ambiguous"
           and "Quiz A" in te.agent_message, te.mode_id)
-    te = TR.translate("op", I.IntentNotRecognized("blah"))
-    check("tr/intent", te.mode_id == "query-intent-unrecognized", te.mode_id)
+    te = TR.translate("op", C.QueryArgumentsInvalid("blah"))
+    check("tr/arguments", te.mode_id == "query-arguments-invalid",
+          te.mode_id)
     te = TR.translate("op", T.ThresholdUndefined("no points"))
     check("tr/threshold", te.mode_id == "query-threshold-undefined",
           te.mode_id)
@@ -457,41 +464,25 @@ def t_translator():
           te.mode_id)
     # ChainFailure is raisable and carries the translation.
     try:
-        C.run_query("what is the weather", "89585", reader=FakeReader([], []),
+        C.run_query("89585", "yesterday", reader=FakeReader([], []),
                     tenant_base=_TEST_TENANT)
         check("tr/chainfailure-raisable", False, "no raise")
     except C.ChainFailure as e:
         check("tr/chainfailure-raisable", True)
         check("tr/chainfailure-mode",
-              e.translated.mode_id == "query-intent-unrecognized",
+              e.translated.mode_id == "query-arguments-invalid",
               e.translated.mode_id)
         check("tr/chainfailure-message",
-              "did not match the failed-students phrasing"
-              in e.translated.agent_message)
+              "not one it can run" in e.translated.agent_message)
     try:
-        C.run_query("show me all the students that failed last week's quiz",
-                    "89585", reader=FakeReader([], []), now_utc=NOW,
-                    tenant_base=_TEST_TENANT)
+        C.run_query("89585", "last_week", reader=FakeReader([], []), now_utc=NOW,
+                    tenant_base=_TEST_TENANT, timezone=CHI,
+                    synthetic_rows=[])
         check("tr/chainfailure-no-match", False, "no raise")
     except C.ChainFailure as e:
         check("tr/chainfailure-no-match",
               e.translated.mode_id == "quiz-resolution-no-match",
               e.translated.mode_id)
-    # A "yesterday's quiz" reference parses but does not resolve: the
-    # chain must raise ChainFailure with the unsupported-reference
-    # mode, never a raw UnsupportedQuizRef.
-    try:
-        C.run_query("show me the students that failed yesterday's quiz",
-                    "89585", reader=FakeReader([], []), now_utc=NOW,
-                    tenant_base=_TEST_TENANT)
-        check("tr/chainfailure-yesterday", False, "no raise")
-    except C.ChainFailure as e:
-        check("tr/chainfailure-yesterday",
-              e.translated.mode_id == "quiz-reference-unsupported",
-              e.translated.mode_id)
-    except Exception as e:  # noqa: BLE001 - must not leak raw
-        check("tr/chainfailure-yesterday", False,
-              "raw %s escaped" % type(e).__name__)
     # A reader-side LiveReadError must arrive as a translated
     # ChainFailure (query-live-read-failed), never a raw traceback.
     class _BoomReader(FakeReader):
@@ -499,9 +490,9 @@ def t_translator():
             raise L.LiveReadError("helper Chromium is not alive")
 
     try:
-        C.run_query("show me all the students that failed last week's quiz",
-                    "89585", reader=_BoomReader([], []), now_utc=NOW,
-                    tenant_base=_TEST_TENANT)
+        C.run_query("89585", "last_week", reader=_BoomReader([], []), now_utc=NOW,
+                    tenant_base=_TEST_TENANT, timezone=CHI,
+                    synthetic_rows=[])
         check("tr/chainfailure-read-error", False, "no raise")
     except C.ChainFailure as e:
         check("tr/chainfailure-read-error",
@@ -513,17 +504,18 @@ def t_translator():
     # main()'s except clause catches ChainFailure: the old clause
     # caught TranslatedError (a dataclass, not an exception) and
     # raised TypeError whenever an error was in flight. Exercise the
-    # real CLI: no helper token file here, so the read fails closed,
-    # the CLI must print the translated message and exit 2.
+    # real CLI: the submissions row is not live-proven, so the query is
+    # refused before any read; the CLI must print the translated message
+    # and exit 2.
     import subprocess as _sp
     _proc = _sp.run(
         [sys.executable, os.path.join(_TREE_ROOT, "query", "chain.py"),
-         "show me all the students that failed last week's quiz",
-         "--course", "89585", "--tenant", _TEST_TENANT],
+         "--course", "89585", "--quiz", "last-week",
+         "--canvas-base", _TEST_TENANT],
         cwd=_TREE_ROOT, capture_output=True, text=True, timeout=120)
     check("tr/cli-exit-2", _proc.returncode == 2,
           "exit %s: %s" % (_proc.returncode, _proc.stderr[-200:]))
-    check("tr/cli-mode", "query-live-read-failed" in _proc.stdout,
+    check("tr/cli-mode", "catalog-not-proven" in _proc.stdout,
           _proc.stdout[-200:])
 
 
@@ -552,9 +544,8 @@ def t_end_to_end():
         [_quiz(1, "Pop Quiz #1", aid=11)],
         [_assign(11, "2026-09-16T05:00:00Z")])
     res = C.run_query(
-        "show me all the students that failed last week's quiz",
-        "89585", reader=r, now_utc=NOW, synthetic_rows=_SYNTH,
-        tenant_base=_TEST_TENANT)
+        "89585", "last_week", reader=r, now_utc=NOW, synthetic_rows=_SYNTH,
+        tenant_base=_TEST_TENANT, timezone=CHI)
     txt = res.text
     check("e2e/synthetic-banner", txt.startswith("*** SYNTHETIC"),
           txt[:60])
@@ -571,7 +562,7 @@ def t_end_to_end():
 
 
 def main():
-    t_intent()
+    t_arguments()
     t_dates()
     t_resolve()
     t_thresholds()

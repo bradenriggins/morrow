@@ -1,7 +1,8 @@
 # Morrow for Muse: Operation Catalog (authoritative)
 
-Date: 2026-09-20. Product: Morrow for Muse (no-PAT Canvas-only connector, no MCP).
-This file is the authoritative operation catalog for the proof battery. It supersedes proof-battery/LEDGER.md, which is kept as-is for history.
+Date: 2026-09-20. Product: Morrow for Muse (Canvas connector and separate Moodle session lane, no MCP).
+Package note (0.4.6): Moodle runtime and agent instructions ship in the release. Moodle claims remain limited to the live-proven rows and lane-level evidence below; catalog status is provider-specific.
+This file is the authoritative operation catalog for the proof battery. It supersedes the older proof ledger (proof-battery/LEDGER.md), which the source repository keeps as-is for history; it is not in the release.
 
 Path convention: the desktop catalog records paths without the /api prefix; every Canvas REST path below is shown with the real /api prefix added.
 
@@ -10,9 +11,12 @@ Each operation needs: (1) a batch rendered by transport/batch.py or the equivale
 
 ## Evidence citations: what is in this tree and what is not
 Citations in row notes name where the evidence was recorded, not
-always a file in this tree. In-tree evidence lives under
-`proof-battery/evidence/`, `proof-battery/waves/`, and
-`proof-battery/live-product-proof/`. The following are external
+always a file in this tree. In the source repository, evidence lives
+under `proof-battery/evidence/`, `proof-battery/waves/`, and
+`proof-battery/live-product-proof/`, and row notes also cite
+`DEPLOY.md` (the 2026-09-20 deployment record) and `LEDGER.md` (the
+older proof ledger). The release does not carry any of them. The
+following are external
 evidence history from the operator's 2026-09-20/21 proof campaign;
 they do not exist in this tree and are not carried into the package:
 `proofs/quiz-lane/battery2.py`, `proofs/dress-rehearsal/stage4_driver.py`,
@@ -27,11 +31,13 @@ Do not go looking for these files in the tree.
 ## Transport mechanisms
 - canvas-batch: transport/batch.py browser-task transport. Mechanism proven live 2026-09-20 (assignment lifecycle 4045368, course read, users/self). Per-operation proof still required. Integrated behind dispatch/executor.py as the default --backend chromium lane (transport/local_chromium.py over CDP on 127.0.0.1:19223); canvas-batch remains the proof-battery reference transport.
 - quiz-api-token: provision/provision.py LTI chain plus dispatch/executor.py. Proven for the banks.build scope (bank lifecycle 4040/4041/4037).
-- moodle-ajax: moodle/session.py AJAX envelope (lib/ajax/service.php). Proven for allowed_from_ajax functions.
+- moodle-ajax: moodle/session.py AJAX envelope (lib/ajax/service.php). Proven for allowed_from_ajax functions. The Moodle code ships as a separate session lane; use its site-level capability probe and do not infer capability from the Canvas catalog.
 - moodle-form: moodle/session.py form-path fallback. Proven for forum discussion create/delete.
 - executor-plain: dispatch/executor.py plain HTTPS. Works with PAT; session-cookie replay is OTP-walled on the CHCP tenant class, so no-PAT proof goes through canvas-batch.
 
 ## Audit corrections vs LEDGER.md
+The older proof ledger is in the source repository only, not in the release.
+
 1. C-R2 (list assignments) was marked PROVEN on 'lifecycle readbacks'. Audit found no explicit list-assignments receipt, only single-assignment GETs. Corrected to pending.
 2. NQ-R1/NQ-R2 (list/get New Quiz) were marked PROVEN on 'provisioning battery'. The battery2 proof used quiz-api host paths (/api/quizzes/{id}), not the /api/quiz/v1 Canvas paths. The /api/quiz/v1 ops are corrected to pending; the quiz-api host read/edit are recorded in the New Quiz sequence table.
 3. NQ-W1 was marked PROVEN. SUPERSEDED 2026-09-20 by the full New Quiz lifecycle (quiz 4045369): quiz-API DELETE returns HTTP 200 and cleans both quiz and assignment, no orphan. The old 401/orphan-506477 reading was wrong; that orphan came from deleting assignment 4045366 through the Canvas assignment endpoint first. Correct lifecycle: always delete a New Quiz through the quiz API. Orphan 506477 itself remains Braden's call.
@@ -448,7 +454,7 @@ Do not go looking for these files in the tree.
 | # | Tool | Method | Path | RO | Mechanism | Status | Evidence / notes |
 |---|------|--------|------|----|-----------|--------|------------------|
 | C-226 | canvas_bulk_fetch_user_tags_for_multiple_users_in_course | GET | /api/v1/courses/{course_id}/bulk_user_tags | R | canvas-batch | live-proven | 2026-09-21 Chromium GET battery: HTTP 200 verified live (in-page fetch, CDP); body object keys: . |
-| C-227 | canvas_list_groups_available_in_context_courses | GET | /api/v1/courses/{course_id}/groups | R | canvas-batch | live-proven | 2026-09-21 Chromium GET battery: HTTP 200 verified live (in-page fetch, CDP); body array[0]. |
+| C-227 | canvas_list_groups_available_in_context_courses | GET | /api/v1/courses/{course_id}/groups | R | canvas-batch | live-proven [LEARNER-DATA] | 2026-09-21 Chromium GET battery: HTTP 200 verified live (in-page fetch, CDP); body array[0]. |
 
 ### late_policy (3)
 
@@ -831,19 +837,19 @@ Do not go looking for these files in the tree.
 | # | Tool | Method | Path | RO | Mechanism | Status | Evidence / notes |
 |---|------|--------|------|----|-----------|--------|------------------|
 | C-409 | canvas_clear_unread_status_for_all_submissions_courses | PUT | /api/v1/courses/{course_id}/submissions/{user_id}/clear_unread | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-410 | canvas_get_document_annotations_read_state_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/document_annotations/read | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-411 | canvas_get_rubric_assessments_read_state_courses_rubric_assessments | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/rubric_assessments/read | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-412 | canvas_get_rubric_assessments_read_state_courses_rubric_comments | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/rubric_comments/read | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-413 | canvas_get_single_submission_by_anonymous_id_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/anonymous_submissions/{anonymous_id} | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-414 | canvas_get_single_submission_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id} | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
+| C-410 | canvas_get_document_annotations_read_state_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/document_annotations/read | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
+| C-411 | canvas_get_rubric_assessments_read_state_courses_rubric_assessments | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/rubric_assessments/read | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
+| C-412 | canvas_get_rubric_assessments_read_state_courses_rubric_comments | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/rubric_comments/read | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
+| C-413 | canvas_get_single_submission_by_anonymous_id_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/anonymous_submissions/{anonymous_id} | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
+| C-414 | canvas_get_single_submission_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id} | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
 | C-415 | canvas_grade_or_comment_on_multiple_submissions_courses_assignments | POST | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/update_grades | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
 | C-416 | canvas_grade_or_comment_on_multiple_submissions_courses_submissions | POST | /api/v1/courses/{course_id}/submissions/update_grades | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
 | C-417 | canvas_grade_or_comment_on_submission_by_anonymous_id_courses | PUT | /api/v1/courses/{course_id}/assignments/{assignment_id}/anonymous_submissions/{anonymous_id} | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
 | C-418 | canvas_grade_or_comment_on_submission_courses | PUT | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id} | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-419 | canvas_list_assignment_submissions_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-420 | canvas_list_gradeable_students | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/gradeable_students | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-421 | canvas_list_multiple_assignments_gradeable_students | GET | /api/v1/courses/{course_id}/assignments/gradeable_students | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-422 | canvas_list_submissions_for_multiple_assignments_courses | GET | /api/v1/courses/{course_id}/students/submissions | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
+| C-419 | canvas_list_assignment_submissions_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
+| C-420 | canvas_list_gradeable_students | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/gradeable_students | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
+| C-421 | canvas_list_multiple_assignments_gradeable_students | GET | /api/v1/courses/{course_id}/assignments/gradeable_students | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
+| C-422 | canvas_list_submissions_for_multiple_assignments_courses | GET | /api/v1/courses/{course_id}/students/submissions | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
 | C-423 | canvas_mark_bulk_submissions_as_read_courses | PUT | /api/v1/courses/{course_id}/submissions/bulk_mark_read | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
 | C-424 | canvas_mark_document_annotations_as_read_courses | PUT | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/document_annotations/read | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
 | C-425 | canvas_mark_rubric_assessments_as_read_courses_rubric_assessments | PUT | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/rubric_assessments/read | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
@@ -851,7 +857,7 @@ Do not go looking for these files in the tree.
 | C-427 | canvas_mark_submission_as_read_courses | PUT | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/read | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
 | C-428 | canvas_mark_submission_as_unread_courses | DELETE | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/read | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
 | C-429 | canvas_mark_submission_item_as_read_courses | PUT | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/read/{item} | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
-| C-430 | canvas_submission_summary_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submission_summary | R | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
+| C-430 | canvas_submission_summary_courses | GET | /api/v1/courses/{course_id}/assignments/{assignment_id}/submission_summary | R | canvas-batch | pending [LEARNER-DATA] | READY: de-identification boundary landed (136/136 privacy selftests); live proof pending proof-battery/learner_data_reads_battery.py (port 8902) |
 | C-431 | canvas_submit_assignment_courses | POST | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
 | C-432 | canvas_upload_file_courses | POST | /api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/files | W | canvas-batch | pending [LEARNER-DATA] | GATED: not live-tested until learner tokenization lands |
 
@@ -923,7 +929,7 @@ Note: battery2.py also covered the accessibility-relevant check (title non-empty
 
 ## Moodle course-level operations
 
-Reference: the desktop Moodle browser catalog (250 operations). Live proof: proofs/moodle-lane-proof.md (2026-09-20, sandbox.moodledemo.net, Moodle 5.2, teacher demo account). The sandbox resets hourly; production SSO variants and session lifetimes are unproven (proof section 6). Context 2026-09-21: the Moodle read battery (moodle-read-battery/MATRIX.md) enumerated 352 registered external functions on sandbox.moodledemo.net (Moodle 5.2.3): 110 PROVEN / 65 FAILED / 177 BLOCKED over AJAX. The Moodle lane is out of v1, so catalog M-rows keep their existing statuses; this battery is context only, not per-op proof. Context 2026-09-21: the Moodle read battery (moodle-read-battery/MATRIX.md) enumerated 352 registered external functions on sandbox.moodledemo.net (Moodle 5.2.3): 110 PROVEN / 65 FAILED / 177 BLOCKED over AJAX. The Moodle lane is out of v1, so catalog M-rows keep their existing statuses; this battery is context only, not per-op proof.
+Reference: the desktop Moodle browser catalog (250 operations). Live proof: proofs/moodle-lane-proof.md (2026-09-20, sandbox.moodledemo.net, Moodle 5.2, teacher demo account). The sandbox resets hourly; production SSO variants and session lifetimes are unproven (proof section 6). Context 2026-09-21: the Moodle read battery (moodle-read-battery/MATRIX.md) enumerated 352 registered external functions on sandbox.moodledemo.net (Moodle 5.2.3): 110 PROVEN / 65 FAILED / 177 BLOCKED over AJAX. Morrow for Muse includes the separate Moodle session lane. Each M-row keeps its operation-specific evidence status; this battery is context only, not per-op proof.
 
 ### moodle.core_backup (2)
 
@@ -1414,4 +1420,3 @@ educator decisions)
 Canvas course-scoped ops in reference catalog: 436, plus 20 Item Bank quiz-api ops.
 Moodle ops in reference catalog: 250, plus 10 lane-level rows.
 Learner-data flagged: 146 Canvas, 26 Moodle.
-

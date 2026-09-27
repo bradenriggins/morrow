@@ -1,18 +1,12 @@
 # First-run checklist: brand-new educator, first hour
 
-V1 (2026-09-22). The agent-facing checklist for taking an educator
-from zero to their first real task. The educator does everything by
+V1 (2026-09-22). This checklist covers the Canvas first-run path. Moodle
+has a separate HTTPS module, described in `moodle/SKILL.md`; the release
+package has no command to transfer a signed-in VM browser session into
+that Python module. Confirm the working VM Moodle path before describing
+its setup or sending a course change. The educator does everything by
 talking to Muse; shell commands below are operator diagnostics, never
 educator homework.
-
-## 0. Pre-flight (agent only)
-
-- Fresh, isolated state: a clean `MORROW_HOME`, no live profile, no
-  real credentials anywhere in the test path.
-- Nonproduction helper and CDP ports; no port may collide with the
-  live helper (8901/19223) or any other tree.
-- The carved dist under test is exactly the carved file set
-  (`pack/carve-manifest.json` verifies this at install step 2).
 
 ## 1. Install
 
@@ -32,20 +26,34 @@ Run `install.sh` from the dist root. Expected:
 2. Agent shows `content/consent.md` and waits for agreement.
 3. Agent asks for the school's Canvas URL only if it cannot determine
    it safely; confirms it with the educator otherwise.
-4. The tenant is probed before anything else: placeholder hosts
-   (`your-school`, `example.com`, bare `instructure.com`) and
-   unreachable hosts fail loudly here, not three minutes into a
-   browser launch.
+4. Agent writes `CANVAS_BASE=<address>` to the tree's `helper/env`
+   (plus `CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=<exact host>` when the
+   host does not end in `.instructure.com` and the educator confirmed
+   it is their school's Canvas), then runs `bash install.sh` again.
+   The installer probes the tenant before anything else: placeholder
+   hosts (`your-school`, `example.com`, bare `instructure.com`),
+   unreachable hosts, and Canvas error pages fail loudly here, not
+   three minutes into a browser launch. Only then does it start the
+   helper.
 
 ## 3. Sign in (educator's hands only)
 
-1. The educator signs in on the login helper page, exactly as they
-   normally would, including MFA. The agent never sees the password.
-2. Agent verifies immediately: GET /api/v1/users/self must return the
-   educator's profile. The principal id and name are pinned into the
-   lane state. A login page here means the sign-in did not stick: ask
-   once more, then stop and report.
-3. The one-time notice stops repeating only when a genuinely
+1. The agent mints a one-time sign-in link (`bin/morrow page-link`)
+   and the educator opens THAT link and signs in on the login helper
+   page, exactly as they normally would, including MFA. The agent never
+   sees the password. (The bare helper address loads no token; each
+   link works once, so a spent link means minting a fresh one.)
+2. Agent verifies immediately and pins the account:
+   `python3 reauth/state_machine.py pin --first-signin`. It checks the
+   helper `/status` shows a live session, reads GET
+   /api/v1/users/self, and pins that principal id and name into the
+   lane state (`~/.morrow/browser_lane.json`). Confirm the printed
+   name with the educator. (keepalive also runs this on its first
+   healthy tick, so a pin exists even if this step is skipped.) A
+   failure here means the sign-in did not stick: ask once more, then
+   stop and report. Later re-sign-ins lift the pause on changes only
+   for this pinned account.
+3. The sign-in notice stops repeating only when a genuinely
    authenticated session with stored cookies is confirmed
    (`logged_in=true`, `profile_has_cookies=true`).
 
@@ -64,8 +72,10 @@ Expected behavior:
 
 - Plan mode is the default: reads need no approval, writes require
   approval of a validated plan.
-- Edit mode is one blanket grant: "make edit mode my default". Reads
-  stay unrestricted; writes stop surfacing per-change approval.
+- Edit mode is one blanket grant with no time limit: "use edit mode"
+  turns it on, "turn off edit mode" puts the educator back in plan
+  mode everywhere. Reads stay unrestricted; in edit mode writes stop
+  surfacing per-change approval.
   That is the only difference between the two modes: reads never
   need approval in either one, and the agent confirms the course
   with you conversationally instead of guessing, in either mode.
@@ -78,7 +88,7 @@ Expected behavior:
 |---|---|
 | Canvas not connected yet | `setup-tenant-not-configured`: Morrow is not connected yet; tell me your school's Canvas URL, sign in on the helper page, I verify and retry. |
 | Login helper not running | `helper-down`: the helper is asleep; I am waking it up, then checking your sign-in. |
-| Signed out / session expired | Session-expired flow: your sign-in expired, nothing was lost, sign in again on the helper page; I verify it is still you before resuming. |
+| Signed out / session expired | Session-expired flow: your sign-in expired; sign in again on the helper page, and I check it is still you before I make any change again. A change I had not sent yet did not change anything in Canvas, and it waits for your OK. A change I was sending may already be in Canvas: I check the course first and ask for your OK before I prepare it again. |
 | Bad school URL | Tenant probe failure at configure time: the address did not load; check it and try again. |
 
 None of these may surface as the generic unknown-failure message.
@@ -87,15 +97,19 @@ every setup state above has a classified mode with a regression test.
 
 ## 7. Reinstall and idempotence
 
-- Rerunning `install.sh` revalidates everything, migrates keepalive
-  entries, and never wipes an existing helper profile.
-- Revocation: signing out in the helper browser ends the session;
-  removing the tree state directory disconnects fully. Reconnecting
-  repeats steps 2 to 4.
+- Rerunning `install.sh` revalidates the installation, keeps keepalive
+  entries for other installed trees, and never wipes the helper profile.
+- Revocation: signing out in the helper browser ends the session.
+  `bin/morrow disconnect --yes` disconnects fully: it stops the helper,
+  stops the keepalive background loop and removes the keepalive cron
+  entry (either would otherwise relaunch the
+  signed-in helper within 5 minutes), deletes `<tree>/helper/profile/`
+  and the pinned account, and verifies each step. Reconnecting is
+  rerunning `install.sh`, then steps 2 to 4.
 
 ## Regression coverage
 
-- `failures/test_error_translation.py`: every catalog mode (now 77)
+- `failures/test_error_translation.py`: every catalog mode (now 97)
   has a fixture; `setup-tenant-not-configured` and `helper-down`
   fixtures use evidence the producers actually emit.
 - `failures/selftest_smoke.py` and `failures/selftest_wiring.py`:

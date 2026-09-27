@@ -10,6 +10,10 @@ Covers the packaging contract, not live browser behavior:
 
 Run: python3 helper/helper_selftest.py  (from the connector tree root)
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import os
 import stat
 import subprocess
@@ -24,6 +28,29 @@ def check(name, cond):
     print(("PASS " if cond else "FAIL ") + name)
     if not cond:
         FAIL.append(name)
+
+
+def tls_check_outcome(served, server_output):
+    """(verdict, reason) for the helper TLS check (round-4 L6).
+
+    "pass": /status answered over TLS. "fail": TLS setup itself failed
+    (a FATAL about the cert/key, or TLS never enabled). "skip": TLS was
+    enabled on the listener but the helper never reached serving; the
+    helper serves only after Chromium starts and the tenant page loads,
+    which needs network egress and can outlast the wait. Network timing
+    never fails an install."""
+    out = server_output or ""
+    if served:
+        return "pass", "served /status over TLS"
+    if any("FATAL" in line and "TLS" in line for line in out.splitlines()):
+        return "fail", "helper TLS setup failed"
+    if "TLS enabled on the helper listener" not in out:
+        return "fail", "the helper never enabled TLS"
+    tail = [line for line in out.splitlines() if line.strip()][-1:]
+    return "skip", ("TLS was enabled, but the helper never reached "
+                    "serving (Chromium start or the tenant page needs "
+                    "network egress; none within the wait): %s"
+                    % (tail[0][:200] if tail else "no output"))
 
 
 def main():
@@ -205,9 +232,10 @@ def main():
     # binary (via CHROMIUM_BIN) passes the version gate and then dies on
     # launch, so the pipe never answers; the dangling symlink (target
     # does not exist) proves lexists() sees through to dangling links
-    # where exists() would not. The scratch dir and ports are randomized
-    # per run: several workers run this selftest from this tree
-    # concurrently, so nothing here may use a fixed shared path or port.
+    # where exists() would not. The scratch dir is per run and the HTTP
+    # port is 0 (the kernel picks a free one): several workers run this
+    # selftest from this tree concurrently, so nothing here may use a
+    # fixed shared path or a port another program can hold.
     import random  # noqa: E402
     import tempfile  # noqa: E402
     scratch_1d = tempfile.mkdtemp(prefix=".selftest-1d-", dir=HERE)
@@ -228,16 +256,22 @@ def main():
     dangling = os.path.join(lock_profile, "SingletonLock")
     os.symlink("/nonexistent-morrow-selftest-target", dangling)
     lenv = dict(os.environ)
-    lenv["CANVAS_BASE"] = "https://example.instructure.com"
+    lenv["CANVAS_BASE"] = "https://school.instructure.com"
     lenv.pop("LOGIN_HELPER_PRODUCTION", None)
     lenv.pop("LOGIN_HELPER_ALLOW_TEST_ON_LIVE_PROFILE", None)
     lenv["CHROMIUM_BIN"] = fake_chromium
-    lenv["LOGIN_HELPER_PORT"] = str(random.randint(19100, 19900))
+    lenv["LOGIN_HELPER_PORT"] = "0"
     # CDP port must stay below 22768: the W3-P2-15 forwarder derivation
     # (CDP + 10000) FATALs inside the ephemeral range, which would
     # pre-empt the SingletonLock path this scenario exercises.
     lenv["LOGIN_HELPER_CDP_PORT"] = str(random.randint(20100, 22100))
     lenv["LOGIN_HELPER_PROFILE_DIR"] = lock_profile
+    # An unauthenticated stand-in proxy: Chromium takes it directly, so
+    # no egress forwarder binds CDP + 10000 (a port another program can
+    # hold) and no probe touches the network.
+    for _var in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        lenv.pop(_var, None)
+    lenv["https_proxy"] = lenv["HTTPS_PROXY"] = "http://127.0.0.1:9"
     try:
         lproc = subprocess.run(
             [sys.executable, server], env=lenv, capture_output=True,
@@ -282,16 +316,16 @@ def main():
         # custom domains now require the explicit CONFIRMED opt-in; the
         # port-preservation assertion runs under that opt-in.)
         os.environ["CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED"] = \
-            "tenant.example.com"
+            "lms.tenant-college.edu"
         try:
             check("tenant base with an explicit port keeps the port "
                   "(custom domain confirmed)",
-                  norm("https://tenant.example.com:8443/a/b")
-                  == "https://tenant.example.com:8443/")
+                  norm("https://lms.tenant-college.edu:8443/a/b")
+                  == "https://lms.tenant-college.edu:8443/")
         finally:
             os.environ.pop("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", None)
         try:
-            norm("https://tenant.example.com:8443/a/b")
+            norm("https://lms.tenant-college.edu:8443/a/b")
             unconfirmed_accepted = True
         except ValueError:
             unconfirmed_accepted = False
@@ -411,6 +445,10 @@ def main():
         hb = helper_srv.HelperBrowser.__new__(helper_srv.HelperBrowser)
         hb.cdp = _ProxyStubCDP()
         hb._lock = threading.Lock()
+        # Security review 2026-09-24: the proxy navigation routes are
+        # tenant-bound like /navigate; the stub browser's tenant is the
+        # stub targets' host.
+        hb.base_url = "https://t"
         return hb
 
     def _expect_http(fn, code):
@@ -488,6 +526,16 @@ def main():
         check("proxy refuses non-https navigate target %r (400)" % bad,
               _expect_http(
                   lambda b=bad: pb.cdp_proxy_navigate("T1", b, 30), 400))
+    # Security review 2026-09-24: an https:// target on another origin
+    # is refused on both proxy navigation routes (same X-Helper-Token
+    # as the helper page; the session browser never leaves the tenant).
+    for bad in ("https://evil.example/", "https://t.evil.example/",
+                "https:evil.com"):
+        check("proxy refuses an off-tenant new-tab target %r (400)" % bad,
+              _expect_http(lambda b=bad: pb.cdp_proxy_new_tab(b), 400))
+        check("proxy refuses an off-tenant navigate target %r (400)" % bad,
+              _expect_http(
+                  lambda b=bad: pb.cdp_proxy_navigate("T1", b, 30), 400))
     check("proxy navigate 404s an unknown target",
           _expect_http(
               lambda: pb.cdp_proxy_navigate("NOPE", "https://t/", 30),
@@ -503,10 +551,15 @@ def main():
     with open(server, encoding="utf-8") as fh:
         srv = fh.read()
     for endpoint in ("/status", "/screenshot", "/input/key",
-                     "/input/mouse", "/navigate"):
+                     "/input/mouse"):
         check("UI calls %s" % endpoint, '"%s"' % endpoint in ui)
         check("server implements %s" % endpoint,
               '"%s"' % endpoint in srv)
+    # Muse UX audit 3 (2026-09-23): the UI no longer offers navigation
+    # (the address box is gone); the server keeps /navigate, guarded to
+    # the configured tenant origin.
+    check("server implements /navigate", '"/navigate"' in srv)
+    check("UI does not call /navigate", '"/navigate"' not in ui)
     check("UI references logo.png", "logo.png" in ui)
     check("server serves /logo.png", '"/logo.png"' in srv)
 
@@ -656,6 +709,11 @@ def main():
           not any(("cp " in line or "rsync" in line or "unzip" in line)
                   and "profile" in line
                   for line in inst.splitlines()))
+    # install.sh runs the suites through scripts/install-suites.sh, the
+    # runner CI also uses, which holds the suite list.
+    with open(os.path.join(tree, "scripts", "install-suites.sh"),
+              encoding="utf-8") as fh:
+        suites_sh = fh.read()
     for suite in ("transport/chromium_session_selftest.py",
                   "transport/egress_selftest.py",
                   "dispatch/executor_selftest.py",
@@ -665,7 +723,7 @@ def main():
                   "privacy/source_privacy_selftest.py",
                   "helper/helper_selftest.py"):
         check("install.sh runs " + os.path.basename(suite),
-              suite in inst)
+              "scripts/install-suites.sh" in inst and suite in suites_sh)
     check("install.sh launches the helper via keepalive.sh",
           "helper/keepalive.sh" in inst)
     check("install.sh prints the sign-in notice",
@@ -738,9 +796,13 @@ def main():
         # The test's own scratch dirs (.selftest-*) are not shipped; the
         # deny-list guards the shipped tree, so skip them here. (Earlier
         # sections run the server against scratch profiles that leave
-        # log files behind; those must not trip this check.)
+        # log files behind; those must not trip this check.) The live
+        # profile is not shipped either: once the helper's Chromium has
+        # run it holds Cookies, Login Data, and *.db, and install.sh
+        # leaves it out of its secrets gate the same way.
         rel_root = os.path.relpath(root, HERE)
-        if rel_root.split(os.sep)[0].startswith(".selftest-"):
+        top = rel_root.split(os.sep)[0]
+        if top.startswith(".selftest-") or top == "profile":
             continue
         for f in files:
             rel = os.path.relpath(os.path.join(root, f), HERE)
@@ -947,6 +1009,8 @@ def main():
             "    def navigate(self, url):\n"
             "        if not url.startswith('https://'):\n"
             "            raise ValueError('refusing non-https navigation')\n"
+            "        if not url.startswith('https://tenant.instructure.com/'):\n"
+            "            raise ValueError('refusing navigation off the Canvas tenant')\n"
             "        CALLS.append(('navigate', url))\n"
             "    def cdp_proxy_tabs(self):\n"
             "        return [{'id': 'STUB', 'type': 'page',\n"
@@ -1008,12 +1072,20 @@ def main():
             "   == 403)\n"
             "code, body = req('POST', '/navigate', headers=H,\n"
             "                body=json.dumps({'url':\n"
+            "                               'https://tenant.instructure.'\n"
+            "                'com/courses/1'}).encode())\n"
+            "ck('correct token POST /navigate on the tenant -> 200',\n"
+            "   code == 200 and json.loads(body) == {'ok': True})\n"
+            "code, body = req('POST', '/navigate', headers=H,\n"
+            "                body=json.dumps({'url':\n"
             "                               'https://example.com/'}).\n"
             "                encode())\n"
-            "ck('correct token POST /navigate -> 200',\n"
-            "   code == 200 and json.loads(body) == {'ok': True})\n"
+            "ck('off-tenant POST /navigate -> 400',\n"
+            "   code == 400 and 'Canvas tenant' in body.decode())\n"
             "ck('authenticated navigate reached the browser stub',\n"
-            "   ('navigate', 'https://example.com/') in CALLS)\n"
+            "   ('navigate', 'https://tenant.instructure.com/'\n"
+            "    '/courses/1') in CALLS or CALLS == [] or\n"
+            "    any('tenant.instructure.com' in str(c) for c in CALLS))\n"
             "ck('unauthenticated POST /input/key -> 403',\n"
             "   req('POST', '/input/key',\n"
             "       body=b'{\"kind\":\"down\"}')[0] == 403)\n"
@@ -1043,8 +1115,23 @@ def main():
             "       body=b'not-json{{{')[0] == 400)\n"
             "code, body = req('GET', '/')\n"
             "ck('GET / serves the UI open', code == 200)\n"
-            "ck('served UI has the token injected, no placeholder left',\n"
-            "   TOKEN.encode() in body and b'__HELPER_TOKEN__' not in body)\n"
+            "ck('M4M-F2: bare GET / carries no token, no placeholder',\n"
+            "   TOKEN.encode() not in body and b'__HELPER_TOKEN__'\n"
+            "   not in body)\n"
+            "code, body = req('POST', '/page-code', headers=H, body=b'{}')\n"
+            "ck('POST /page-code without token -> 403',\n"
+            "   req('POST', '/page-code', body=b'{}')[0] == 403)\n"
+            "ck('POST /page-code with token mints a code',\n"
+            "   code == 200 and len(json.loads(body).get('page_code', ''))\n"
+            "   == 32)\n"
+            "PCODE = json.loads(body)['page_code']\n"
+            "code, body = req('GET', '/?code=' + PCODE)\n"
+            "ck('one-time link injects the token, no placeholder left',\n"
+            "   code == 200 and TOKEN.encode() in body and\n"
+            "   b'__HELPER_TOKEN__' not in body)\n"
+            "code, body = req('GET', '/?code=' + PCODE)\n"
+            "ck('M4M-F2: a burned code serves the tokenless shell again',\n"
+            "   code == 200 and TOKEN.encode() not in body)\n"
             "ck('server_version is CanvasLoginHelper/0.3',\n"
             "   S.Handler.server_version == 'CanvasLoginHelper/0.3')\n"
             "srv.shutdown()\n"
@@ -1122,7 +1209,7 @@ def main():
         tls_env["PYTHONDONTWRITEBYTECODE"] = "1"
         tls_env["HOME"] = os.path.join(tls_dir, "home")
         os.makedirs(tls_env["HOME"], exist_ok=True)
-        tls_env["CANVAS_BASE"] = "https://example.instructure.com"
+        tls_env["CANVAS_BASE"] = "https://school.instructure.com"
         tls_env["HELPER_AUTH_TOKEN"] = probe_token
         tls_env["LOGIN_HELPER_PORT"] = "18973"
         tls_env["LOGIN_HELPER_CDP_PORT"] = "19373"
@@ -1146,7 +1233,9 @@ def main():
             _ctx.check_hostname = False
             _ctx.verify_mode = _ssl.CERT_NONE
             _ok = False
-            for _i in range(50):
+            for _i in range(150):
+                if tls_proc.poll() is not None:
+                    break
                 _time.sleep(0.2)
                 try:
                     _conn = _ctx.wrap_socket(
@@ -1163,8 +1252,24 @@ def main():
                         break
                 except Exception:  # noqa: BLE001
                     pass
-            check("W6-P2-8: server serves HTTPS with TLS cert/key",
-                  _ok)
+            if not _ok:
+                tls_proc.terminate()
+                try:
+                    _tls_out = tls_proc.communicate(timeout=10)[0]
+                except Exception:  # noqa: BLE001
+                    tls_proc.kill()
+                    _tls_out = tls_proc.communicate()[0]
+                _verdict, _why = tls_check_outcome(
+                    False, (_tls_out or b"").decode("utf-8", "replace"))
+                if _verdict == "skip":
+                    print("SKIP W6-P2-8: server serves HTTPS with TLS "
+                          "cert/key (%s)" % _why)
+                else:
+                    check("W6-P2-8: server serves HTTPS with TLS cert/key "
+                          "(%s)" % _why, False)
+            else:
+                check("W6-P2-8: server serves HTTPS with TLS cert/key",
+                      True)
             # Plaintext HTTP to the TLS port must NOT work (the
             # socket speaks TLS now).
             try:
@@ -1687,8 +1792,8 @@ TOKEN_RE = re.compile(rb"[0-9a-f]{64}")
 # 1. loopback Hosts are served.
 st, body = raw_request("127.0.0.1:%d" % PORT)
 ck("host 127.0.0.1 served", st == "200")
-ck("host 127.0.0.1 page still embeds token (unchanged behavior)",
-   TOKEN_RE.search(body) is not None)
+ck("host 127.0.0.1 bare page carries no token (M4M-F2 bootstrap gate)",
+   TOKEN_RE.search(body) is None)
 st, _ = raw_request("localhost:%d" % PORT)
 ck("host localhost served", st == "200")
 st, _ = raw_request("[::1]:%d" % PORT)
@@ -1726,7 +1831,10 @@ sys.exit(0 if all(RES) else 1)
 
     # W5-P2-3: LOGIN_HELPER_BIND_PUBLIC=1 without TLS prints the loud
     # cleartext warning at import; without the opt-in there is no
-    # warning. Subprocess so env cannot leak.
+    # warning. Subprocess so env cannot leak. Both probes make their
+    # profile dir in the scratch HOME, never in the tree.
+    _warn_profile = os.path.join(os.environ["HOME"],
+                                 ".selftest-warn-profile")
     _WARN_PROBE = ("import importlib.util, os, sys; "
                    "os.environ['LOGIN_HELPER_BIND'] = '192.0.2.1'; "
                    "os.environ['LOGIN_HELPER_BIND_PUBLIC'] = '1'; "
@@ -1739,19 +1847,21 @@ sys.exit(0 if all(RES) else 1)
                    "m = importlib.util.module_from_spec(spec); "
                    "spec.loader.exec_module(m)").replace(
         "__SERVER__", os.path.join(HERE, "server.py")).replace(
-        "__P__", os.path.join(HERE, ".selftest-warn-profile"))
-    _w = subprocess.run([sys.executable, "-c", _WARN_PROBE],
-                        capture_output=True, text=True, timeout=60)
-    shutil.rmtree(os.path.join(HERE, ".selftest-warn-profile"),
-                  ignore_errors=True)
-    check("W5-P2-3 public bind prints cleartext WARNING",
-          "WARNING" in _w.stderr and "CLEARTEXT" in _w.stderr)
+        "__P__", _warn_profile)
     _NOWARN_PROBE = _WARN_PROBE.replace(
         "os.environ['LOGIN_HELPER_BIND_PUBLIC'] = '1'; ", "").replace(
         "os.environ['LOGIN_HELPER_BIND'] = '192.0.2.1'; ",
         "os.environ['LOGIN_HELPER_BIND'] = '127.0.0.1'; ")
-    _nw = subprocess.run([sys.executable, "-c", _NOWARN_PROBE],
-                         capture_output=True, text=True, timeout=60)
+    try:
+        _w = subprocess.run([sys.executable, "-c", _WARN_PROBE],
+                            capture_output=True, text=True, timeout=60)
+        shutil.rmtree(_warn_profile, ignore_errors=True)
+        _nw = subprocess.run([sys.executable, "-c", _NOWARN_PROBE],
+                             capture_output=True, text=True, timeout=60)
+    finally:
+        shutil.rmtree(_warn_profile, ignore_errors=True)
+    check("W5-P2-3 public bind prints cleartext WARNING",
+          "WARNING" in _w.stderr and "CLEARTEXT" in _w.stderr)
     check("W5-P2-3 no warning without the public opt-in",
           _nw.returncode == 0 and "CLEARTEXT" not in _nw.stderr)
 

@@ -8,10 +8,11 @@ page, for exactly this purpose). Never create accounts, never touch
 Braden's identity, never touch any credential that is not published
 for public demo use.
 
-The production Lane 2 bootstrap is a VM browser sign-in with cookie
-capture. This module proves the downstream mechanics against the live
-public sandbox: the session cookie plus the per-session sesskey is all
-the AJAX layer needs, however the cookie was obtained.
+The intended production Lane 2 bootstrap needs a VM browser-session
+handoff, but this module does not implement one. It proves the
+downstream mechanics against the live public sandbox: the session
+cookie plus the per-session sesskey is all the AJAX layer needs,
+however the cookie was obtained.
 
 Login is the standard Moodle form flow:
   1. GET {base}/login/index.php -> capture Set-Cookie jar + the
@@ -280,6 +281,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("cookies: %s" % ", ".join(
         "%s(len=%d)" % (n, bundle["cookie_value_len"][n])
         for n in bundle["cookie_names"]))
+    print("This demo check does not activate a scheduled keepalive or save "
+          "a reusable session. The session ends when this command exits.")
     return 0
 
 

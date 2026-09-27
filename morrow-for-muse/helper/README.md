@@ -14,9 +14,14 @@ nobody signs in again unless Canvas itself expires the session.
 - `LOGIN_HELPER_PROFILE_DIR` overrides the default (tests and special
   setups). The override is expanded (`~` etc.) at startup.
 - **Production-port guard:** requesting EITHER production port
-  (HTTP 8901 OR CDP 19223) without `LOGIN_HELPER_PROFILE_DIR` set is a
-  FATAL error (exit 3), regardless of which profile would be used. This
-  keeps a stray bare launch from ever squatting the production ports.
+  without `LOGIN_HELPER_PROFILE_DIR` set is a FATAL error (exit 3),
+  regardless of which profile would be used. The production ports are
+  the tree's deployed pins (`LOGIN_HELPER_PORT` / `LOGIN_HELPER_CDP_PORT`
+  from this tree's `helper/env`, 8902/19224 here) plus the code defaults
+  (HTTP 8901 / CDP 19223, the standalone helper's ports); the guard
+  reads the pins from the tree env file, never hardcoded literals
+  (M4M-F1). This keeps a stray bare launch from ever squatting the
+  production ports.
   (`LOGIN_HELPER_PRODUCTION=1` is the explicit escape hatch; it exists so
   tooling can bind the production ports deliberately. The helper itself
   never needs it, because keepalive.sh always exports the profile var.)
@@ -27,22 +32,28 @@ nobody signs in again unless Canvas itself expires the session.
   non-loopback address (e.g. `0.0.0.0`) without `LOGIN_HELPER_BIND_PUBLIC=1`
   is a FATAL error (exit 1) at startup. Publishing the helper's
   session-driving API to the network requires the explicit opt-in.
-- **Public-bind cleartext warning (W5-P2-3):** the helper has NO TLS
-  mode. With `LOGIN_HELPER_BIND_PUBLIC=1` the launch token, `/screenshot`
-  bytes, and the `/cdp/*` proxy cross the LAN in cleartext; anyone able to
-  observe LAN traffic can steal the token and drive the session-bearing
-  browser. Startup prints a loud WARNING to stderr on every launch with
-  the opt-in set. Keep the loopback bind unless remote access is genuinely
-  required; there is currently no TLS mode to choose instead.
+- **Public-bind cleartext warning (W5-P2-3):** without
+  `LOGIN_HELPER_TLS_CERT` and `LOGIN_HELPER_TLS_KEY`, a public bind sends
+  the launch token, `/screenshot` bytes, and the `/cdp/*` proxy across the
+  LAN in cleartext. Startup warns on a public bind without TLS. Keep the
+  loopback bind unless remote access is required. When both TLS files are
+  set, the helper serves HTTPS. Clients verify the configured certificate
+  by default; `LOGIN_HELPER_TLS_INSECURE=1` explicitly skips verification.
 - **Host-header validation (W5-P0-1, DNS-rebinding defense):** every
   request's `Host` header must name this listener: `127.0.0.1`,
-  `localhost`, `::1`, or the configured `LOGIN_HELPER_BIND`. A hostile
-  page in the helper's own Chromium can rebind its DNS to 127.0.0.1 and
-  become same-origin with the helper; without this gate it could fetch
-  the open `GET /` page, steal the injected token, and drive the full
-  browser API. The gate runs before rate limiting, routing, and auth on
-  every method; a foreign Host gets `403` JSON with a generic body (no
-  token material), and the offending host is logged.
+  `localhost`, `::1`, the configured `LOGIN_HELPER_BIND`, or (M4M-F7,
+  wildcard bind only) one of the server's own LAN names enumerated at
+  startup. A hostile page in the helper's own Chromium can rebind its
+  DNS to 127.0.0.1 and become same-origin with the helper; without this
+  gate it could fetch the served page and drive the full browser API
+  with it (and since M4M-F2 a code-less fetch learns no token). The
+  gate runs before rate limiting, routing, and auth on every method; a
+  foreign Host gets `403` JSON with a generic body (no token material),
+  and the offending host is logged. A wildcard `LOGIN_HELPER_BIND`
+  (`0.0.0.0`/`::`, explicit `LOGIN_HELPER_BIND_PUBLIC=1` still
+  required) accepts the server's own LAN addresses instead of the
+  verbatim wildcard, which matches no Host; until the enumeration
+  covers a name, pin an explicit LAN IP instead.
 - **Tree-default-profile guard:** when the resolved profile is this
   tree's own `helper/profile/` default AND the ports are not the
   production pair, startup is refused (exit 3) unless the profile was
@@ -161,9 +172,15 @@ session, click, navigate it anywhere, or watch the page (including
 password entry) through `/screenshot`.
 
 - **Minting:** `keepalive.sh` mints a 64-hex token at launch, writes it
-  to `${TREE_STATE_DIR}/helper_token` (mode 0600), and exports
-  `HELPER_AUTH_TOKEN` into the server's environment. The file persists
-  across restarts, so the token is stable per tree.
+  to `${TREE_STATE_DIR}/helper_token` (mode 0600), and exports only its
+  path as `HELPER_AUTH_TOKEN_FILE` (the value never enters the
+  environment, so it never appears in `/proc/<pid>/environ`). The file
+  persists across restarts, so the token is stable per tree.
+- **Owner-only reads (M4M-F6):** the server stats the token file before
+  reading and refuses to launch when it is readable by group/other
+  (tighten to 0600 and relaunch); the pre-rotation file is ignored with
+  a warning under the same condition, and `transport/local_chromium.py`
+  refuses to use a loosened file the same way.
 - **Rotation:** delete `${TREE_STATE_DIR}/helper_token` and relaunch the
   helper; a fresh token is minted.
 - **Dev/bare launches:** with `HELPER_AUTH_TOKEN` unset the server mints
@@ -172,10 +189,19 @@ password entry) through `/screenshot`.
 - **Protected:** every POST/PUT/DELETE/PATCH endpoint on any path, plus
   `GET /screenshot`. They require the `X-Helper-Token` header to equal
   the token; anything else gets `403` JSON `{"error":"forbidden"}`.
-- **Open:** `GET /status` (health only), `GET /` (the sign-in UI),
-  `GET /logo.png`. The server injects the token into a
-  `__HELPER_TOKEN__` placeholder when serving the UI, so the page's own
-  fetch calls carry the header.
+- **Open:** `GET /status` (health only), `GET /` (the sign-in UI
+  shell, served WITHOUT the token), `GET /logo.png`. The live token
+  reaches a browser only through the single-use bootstrap exchange
+  (M4M-F2): the token holder mints a page code with `POST /page-code`
+  (authenticated, like every POST) and shows the educator a one-time
+  link `/?code=<code>` (mint with `bin/morrow page-link`); the first
+  load burns the code and gets the token injected into the
+  `__HELPER_TOKEN__` placeholder, so the page's own fetch calls carry
+  the header. Any other load gets an empty token and a notice naming
+  the fresh link. Codes are 128-bit, 10 minute TTL, at most 32
+  outstanding, never logged (page URLs log the route only).
+- **Minting page codes:** `POST /page-code` requires `X-Helper-Token`
+  and returns `{"page_code": ...}`; `GET /screenshot` stays protected.
 - **Python consumers:** `transport/local_chromium.py` reads the token
   from `${TREE_STATE_DIR}/helper_token` and sends `X-Helper-Token` on
   every helper request through the single `_helper_request` path
@@ -187,8 +213,13 @@ password entry) through `/screenshot`.
 
 Honest statement of the security property: the token stops
 blind/off-origin API use and port-forward exposure (the unauthenticated
-tunnel scenario). It does not stop a party that can already read the
-locally served page, since the token is injected into that page.
+tunnel scenario). Reading the served page no longer yields it: a bare
+`GET /` carries an empty token, and only a holder of a single-use page
+code (conveyed out of band to the educator) receives the injected
+token, once. What the page code does not stop is a party that already
+holds a live code, or that can read the educator's loaded browser
+document itself; codes therefore stay single-use, short-lived, and
+unlogged.
 
 ## Hardening (W3-P2-7)
 
@@ -233,6 +264,12 @@ before anything else, and under the limits the auth matrix is unchanged.
   call carries its own shorter timeout (10-20s), so a stuck handler is
   released when its CDP call times out. Each connection serves exactly
   one request, so the deadline is per-request.
+- **Where the logs live:** `server.log` (this server's output) and
+  `keepalive.log` (the keepalive runs), with their rotated archives,
+  live in the tree's state dir, `~/.morrow/trees/<tree id>/` (the same
+  place as the helper token), never in the tree. The keepalive
+  background loop keeps `keepalive-supervisor.json` and
+  `keepalive-supervisor.log` there too.
 - **Log rotation:** `server.log` rotates when it passes **1 MiB**,
   keeping **4** archives (`server.log.1` newest through `server.log.4`),
   so the log can never grow past about 5 MiB. Rotation is copytruncate

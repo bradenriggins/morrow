@@ -86,7 +86,7 @@ SESSKEY_ERRORCODES = {"invalidsesskey"}
 
 
 def normalize_moodle_base(raw):
-    """W4-P1-5: Moodle bases must be HTTPS unless explicitly overridden.
+    """Require HTTPS and keep a simple Moodle site path when provided.
 
     The lane carries the educator's session cookies, credentials, and
     sesskey, so a plaintext base would ship them unencrypted. An
@@ -96,21 +96,42 @@ def normalize_moodle_base(raw):
     created or any cookie is attached, so no secret ever touches
     plaintext.
     """
-    raw = (raw or "").strip().rstrip("/")
+    raw = (raw or "").strip()
     if not raw:
         raise ValueError("Moodle base URL is empty")
     parsed = urlparse(raw if "://" in raw else "https://" + raw)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid Moodle base URL port") from exc
+    if (parsed.username is not None or parsed.password is not None
+            or "?" in raw or "#" in raw or "\\" in raw
+            or "%" in raw or parsed.params):
+        raise ValueError("Moodle base URL must contain only a site host and path")
     if parsed.scheme == "http" and os.environ.get(
             "MOODLE_BASE_ALLOW_HTTP") != "1":
         raise ValueError(
-            "refusing plaintext http:// Moodle base %r: session cookies "
+            "refusing plaintext http:// Moodle base: session cookies "
             "and credentials would cross the network unencrypted. Use "
             "https://, or set MOODLE_BASE_ALLOW_HTTP=1 to acknowledge "
             "the risk (test fixtures and LAN-only deployments only)."
-            % raw)
+        )
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError("could not parse Moodle base URL: %r" % raw)
-    return parsed.scheme + "://" + parsed.netloc
+        raise ValueError("could not parse Moodle base URL")
+    if not parsed.hostname or (port is not None and port == 0):
+        raise ValueError("Moodle base URL must contain only a site host and path")
+    path = parsed.path
+    if path not in ("", "/"):
+        if "//" in path or not path.startswith("/"):
+            raise ValueError("Moodle base URL has an ambiguous site path")
+        path = path.rstrip("/")
+        segments = path[1:].split("/")
+        if any(segment in (".", "..") or not re.fullmatch(
+                r"[A-Za-z0-9._~-]+", segment) for segment in segments):
+            raise ValueError("Moodle base URL has an unsafe site path")
+    else:
+        path = ""
+    return parsed.scheme + "://" + parsed.netloc + path
 
 
 class MoodleLaneError(Exception):
@@ -143,8 +164,9 @@ class SafeRedirectSession(requests.Session if requests is not None else object):
       the generator, which only sees each hop AFTER requests has
       already sent it: the downgraded request would already be on
       the wire. Never check post-send.)
-    - STRIPS Authorization and Proxy-Authorization when the host
-      changes (stock requests behavior, kept) AND on any scheme
+    - REFUSES a redirect to another host or port (a 307/308 would
+      re-send the body, e.g. the login form with the password).
+    - STRIPS Authorization and Proxy-Authorization on any scheme
       change, even same-host (stricter than stock requests). The
       stripping lives in rebuild_auth(), which requests calls
       before sending each redirected request.
@@ -177,7 +199,19 @@ class SafeRedirectSession(requests.Session if requests is not None else object):
         prev_scheme = urlparse(prev_url).scheme
         # Location may be relative ("/foo"); resolve it against the
         # URL that produced the redirect before judging the scheme.
-        new_scheme = urlparse(urljoin(resp.url or prev_url, target)).scheme
+        resolved = urlparse(urljoin(resp.url or prev_url, target))
+        new_scheme = resolved.scheme
+        prev_parts = urlparse(prev_url)
+        if (resolved.hostname or "").lower() != \
+                (prev_parts.hostname or "").lower() \
+                or resolved.port != prev_parts.port:
+            # A 307/308 re-sends the body (the login form carries the
+            # password), so the lane never follows a redirect off the
+            # Moodle host.
+            raise MoodleLaneError(
+                "network",
+                "refused redirect off the Moodle host: %s -> %s (no "
+                "request was sent to the other host)" % (prev_url, target))
         if prev_scheme == "https" and new_scheme == "http":
             raise MoodleLaneError(
                 "network",
@@ -346,6 +380,13 @@ class MoodleSession:
     @classmethod
     def from_bundle(cls, bundle: Dict[str, Any],
                     **kw: Any) -> "MoodleSession":
+        if not isinstance(bundle, dict):
+            raise TypeError("Moodle bundle must be an in-memory mapping")
+        transport = bundle.get("session")
+        if (not callable(getattr(transport, "get", None))
+                or not callable(getattr(transport, "post", None))):
+            raise TypeError("Moodle bundle needs a live in-memory session; "
+                            "persisted JSON is unsupported")
         return cls(bundle["base"], bundle["session"], bundle["sesskey"],
                    principal=bundle.get("principal", {}), **kw)
 

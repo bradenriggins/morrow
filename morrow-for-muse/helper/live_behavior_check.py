@@ -338,7 +338,11 @@ def phase_restart_persistence(profile_dir, origin):
     # dir (server.py is the symlink there, so the profile resolves to
     # the dev profile), CANVAS_BASE from the live tenant origin.
     print("relaunching helper server ...")
-    log_path = os.path.join(HELPER_DIR, "server.log")
+    # Like keepalive.sh: the server's log lives in the tree's state dir,
+    # never in the tree.
+    state_dir = lc.tree_state_dir(os.path.dirname(HELPER_DIR))
+    os.makedirs(state_dir, mode=0o700, exist_ok=True)
+    log_path = os.path.join(state_dir, "server.log")
     env = dict(os.environ)
     env["CANVAS_BASE"] = origin
     with open(log_path, "ab") as lf:

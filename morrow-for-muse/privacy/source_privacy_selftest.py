@@ -27,6 +27,10 @@ Vault scratch lives under privacy/.selftest-work/, never /tmp and never
 the educator's real state files. No live sessions; all fixtures are
 synthetic and live in this file.
 """
+import os as _home_os, sys as _home_sys  # noqa: E401
+_home_sys.path.insert(0, _home_os.path.join(
+    _home_os.path.dirname(_home_os.path.abspath(__file__)), '..'))
+import config.selftest_home  # noqa: E402,F401  (scratch HOME/MORROW_HOME)
 import json
 import os
 import re
@@ -991,6 +995,32 @@ def test_w2_zero_width_reversed_name_redacted():
     assert result.get("isError") is not True, text(result)[:200]
     assert "ackson" not in text(result)
     assert "Mary" not in text(result).replace("Student A1", "")
+    assert "Student A1" in text(result)
+
+
+def test_accented_spelling_of_a_roster_name_redacted():
+    # Muse engine audit 2026-09-23: the roster spells "Alice B.
+    # Thornton"; text written with accents ("Álice B. Thörnton") or a
+    # word processor's apostrophe must still match.
+    result = alice_setup().invoke(
+        "canvas_read", ALICE_REQUEST, None,
+        lambda args: envelope("Álice B. Thörnton submitted; Thörnton "
+                              "agreed"))
+    assert result.get("isError") is not True, text(result)[:200]
+    assert "Thörnton" not in text(result), text(result)[:200]
+    assert "Álice" not in text(result), text(result)[:200]
+    assert "Student A1" in text(result)
+
+
+def test_curly_apostrophe_spelling_of_a_roster_name_redacted():
+    learners = source_privacy_roster([{"id": 777002,
+                                       "name": "Liam O'Brien"}])
+    result = alice_setup(load_roster=lambda binding: learners).invoke(
+        "canvas_read", ALICE_REQUEST, None,
+        lambda args: envelope("Liam O\u2019Brien wrote; O\u2019Brien "
+                              "agreed"))
+    assert result.get("isError") is not True, text(result)[:200]
+    assert "Brien" not in text(result), text(result)[:200]
     assert "Student A1" in text(result)
 
 

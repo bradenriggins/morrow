@@ -15,14 +15,21 @@ Mechanism (all inside the educator's Chromium via CDP):
   1. Resolve the Item Banks LTI tool id dynamically:
      GET /api/v1/courses/{course_id}/external_tools, first tool whose
      name contains "Item Banks" (case-insensitive). Never hardcoded:
-     the old 54065 id was one tenant's id, not a contract.
+     the old 54065 id was one tenant's id, not a contract. The same
+     list with include_parents=true names the tenant's New Quizzes
+     account (<account>.quiz-lti-<region>.instructure.com), which a
+     tenant on its own domain (canvas.school.edu) has no other way to
+     learn; a *.instructure.com tenant's own first label is its
+     account too.
   2. Open one persistent CDP session on a dedicated tab, enable the
      Network domain, and navigate to
      {canvas_base}/courses/{course_id}/external_tools/{tool_id}
      (fallback: {canvas_base}/courses/{course_id}/banks, the route the
      2026-09-21 Chromium write battery proved on this tenant).
      The Item Banks app boots and issues API calls to the tenant's
-     quiz-api host; the Authorization header of the first such request
+     quiz-api host (<account>.quiz-api-<region>.instructure.com, for one
+     of the tenant's own accounts only); the Authorization header of the
+     first such request
      is captured through CDP Network interception (requestWillBeSent),
      together with its AuthType header. (The banks.build response body
      is not used: on the /banks route the app issues its calls from a
@@ -170,65 +177,108 @@ def origin_of(url: str) -> str:
     return "%s://%s" % (parts.scheme, parts.netloc)
 
 
-def _is_quiz_lti_host(host: str, tenant_host=None) -> bool:
-    """True when host is a quiz-lti host, optionally bound to a tenant.
+# Instructure hosts New Quizzes and Item Banks for every Canvas tenant,
+# including a tenant whose Canvas runs on the school's own domain
+# (canvas.school.edu): <account>.quiz-lti[-<region>].instructure.com and
+# <account>.quiz-api[-<region>].instructure.com.
+_QUIZ_HOSTING_SUFFIX = ".instructure.com"
 
-    Structural check (always): one of the host's dot-separated labels is
-    exactly "quiz-lti" or starts with "quiz-lti-". A bare substring match
-    would trust "https://evil.example/?x=quiz-lti" or any page whose URL
-    merely contains the fragment.
-    Tenant binding (when tenant_host is known): the host must be the
-    tenant's own quiz-lti host, "<first-label>.quiz-lti[-.]...<parent>",
-    which defeats sibling hosts like
-    "https://school.quiz-lti-iad-prod.example.com.evil.example/".
-    """
+
+def _instructure_quiz_account(host: str, service: str):
+    """The account label of an Instructure New Quizzes host.
+
+    service is "quiz-lti" or "quiz-api". Returns <account> for
+    <account>.<service>[-<region>]...instructure.com, "" for the bare
+    service domain (<service>[-<region>].instructure.com), and None for
+    any other host."""
     host = str(host or "").lower().rstrip(".")
-    if not host:
-        return False
-    labels = host.split(".")
-    if not any(label == "quiz-lti" or label.startswith("quiz-lti-")
-               for label in labels):
+    if not host.endswith(_QUIZ_HOSTING_SUFFIX):
+        return None
+    labels = host[:-len(_QUIZ_HOSTING_SUFFIX)].split(".")
+    for index, label in enumerate(labels[:2]):
+        if label == service or label.startswith(service + "-"):
+            return "" if index == 0 else labels[0] or None
+    return None
+
+
+def _tool_host(raw) -> str:
+    """The host of an external tool's url or domain field ("" if none)."""
+    raw = str(raw or "").strip()
+    if not raw:
+        return ""
+    try:
+        return (urllib.parse.urlparse(
+            raw if "://" in raw else "https://" + raw).hostname
+            or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+
+
+def quiz_account_labels(tenant_host, tools=()) -> frozenset:
+    """The New Quizzes accounts that belong to this tenant.
+
+    The first label of a *.instructure.com Canvas host, plus the account
+    of every Instructure quiz-lti host a tool in the tenant's own
+    external tools list names (the Item Banks or New Quizzes tool). A
+    tenant on its own domain learns its account only from its tools."""
+    labels = set()
+    tenant = str(tenant_host or "").lower().rstrip(".")
+    if tenant.endswith(_QUIZ_HOSTING_SUFFIX):
+        first = tenant.partition(".")[0]
+        if first:
+            labels.add(first)
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        for key in ("url", "domain"):
+            account = _instructure_quiz_account(_tool_host(tool.get(key)),
+                                                "quiz-lti")
+            if account:
+                labels.add(account)
+    return frozenset(labels)
+
+
+def _is_quiz_host(host, service, tenant_host, labels) -> bool:
+    account = _instructure_quiz_account(host, service)
+    if not account:
         return False
     if tenant_host:
-        tenant = str(tenant_host).lower().rstrip(".")
-        first, dot, parent = tenant.partition(".")
-        if not (host.startswith(first + ".quiz-lti-")
-                or host.startswith(first + ".quiz-lti.")):
-            return False
-        if dot and not host.endswith("." + parent):
-            return False
+        allowed = set(labels or ()) | quiz_account_labels(tenant_host)
+        return account in allowed
     return True
 
 
-def _is_quiz_api_host(host: str, tenant_host=None) -> bool:
-    """True when host is a quiz-api host, optionally bound to a tenant.
+def _is_quiz_lti_host(host: str, tenant_host=None, labels=()) -> bool:
+    """True when host is a New Quizzes quiz-lti host, optionally bound to
+    a tenant.
+
+    Structural check (always): the host is
+    <account>.quiz-lti[-<region>]...instructure.com. A bare substring
+    match would trust "https://evil.example/?x=quiz-lti", and a suffix
+    match would trust a real quiz-lti host name with ".evil.example"
+    appended.
+    Tenant binding (when tenant_host is known): <account> is one of the
+    tenant's own accounts (quiz_account_labels: the tenant's
+    *.instructure.com first label, plus labels, the accounts its
+    external tools name).
+    """
+    return _is_quiz_host(host, "quiz-lti", tenant_host, labels)
+
+
+def _is_quiz_api_host(host: str, tenant_host=None, labels=()) -> bool:
+    """True when host is a New Quizzes quiz-api host, optionally bound to
+    a tenant.
 
     Mirrors _is_quiz_lti_host for the sibling API origin
-    (<tenant>.quiz-api-<region>.instructure.com): one dot-separated label
-    is exactly "quiz-api" or starts with "quiz-api-", and with a tenant
-    the host must be "<first-label>.quiz-api[-.]...<parent>". The SDK's
-    item calls go to this origin, so the launch credential is captured
-    from requests to exactly this host shape.
+    (<account>.quiz-api[-<region>].instructure.com). The SDK's item calls
+    go to this origin, so the launch credential is captured from
+    requests to exactly this host shape, for one of the tenant's own
+    accounts.
     """
-    host = str(host or "").lower().rstrip(".")
-    if not host:
-        return False
-    labels = host.split(".")
-    if not any(label == "quiz-api" or label.startswith("quiz-api-")
-               for label in labels):
-        return False
-    if tenant_host:
-        tenant = str(tenant_host).lower().rstrip(".")
-        first, dot, parent = tenant.partition(".")
-        if not (host.startswith(first + ".quiz-api-")
-                or host.startswith(first + ".quiz-api.")):
-            return False
-        if dot and not host.endswith("." + parent):
-            return False
-    return True
+    return _is_quiz_host(host, "quiz-api", tenant_host, labels)
 
 
-def _quiz_lti_frame(frame_tree, tenant_host=None):
+def _quiz_lti_frame(frame_tree, tenant_host=None, labels=()):
     """(frame_id, frame_url) of the validated quiz-lti frame, or (None, None).
 
     The whole tree (root included) is walked; the /banks fallback route
@@ -246,7 +296,8 @@ def _quiz_lti_frame(frame_tree, tenant_host=None):
         except Exception:  # noqa: BLE001 - unparsable URL is not the frame
             parts = None
         if parts is not None and parts.scheme == "https" \
-                and _is_quiz_lti_host(parts.hostname or "", tenant_host):
+                and _is_quiz_lti_host(parts.hostname or "", tenant_host,
+                                      labels):
             return frame.get("id"), url
         for child in node.get("childFrames") or []:
             found = _walk(child)
@@ -259,11 +310,12 @@ def _quiz_lti_frame(frame_tree, tenant_host=None):
     return _walk(frame_tree.get("frameTree"))
 
 
-def find_quiz_lti_frame_id(frame_tree, tenant_host=None) -> object:
+def find_quiz_lti_frame_id(frame_tree, tenant_host=None,
+                           labels=()) -> object:
     """First frame id in a Page.getFrameTree result whose URL is a
     validated quiz-lti origin, or None. The whole tree (root included)
     is walked; the /banks fallback route may host the app top-level."""
-    frame_id, _url = _quiz_lti_frame(frame_tree, tenant_host)
+    frame_id, _url = _quiz_lti_frame(frame_tree, tenant_host, labels)
     return frame_id
 
 
@@ -308,8 +360,10 @@ def find_item_banks_tool_id(tools, tenant_host=None) -> object:
     (raises ItemBankSdkError) when more than one tool matches: an
     ambiguous name match must never silently pick the first lookalike.
     When a matched tool carries a url/domain and the tenant host is
-    known, the tool's host must belong to the tenant's domain family;
-    a foreign-hosted "Item Banks" tool is refused rather than launched.
+    known, the tool's host must belong to the tenant's domain family or
+    be Instructure's New Quizzes service (which hosts Item Banks for
+    tenants on their own domain too); a foreign-hosted "Item Banks" tool
+    is refused rather than launched.
     """
     matches = []
     for tool in tools or []:
@@ -338,15 +392,14 @@ def find_item_banks_tool_id(tools, tenant_host=None) -> object:
             raw = str(tool.get(key) or "").strip()
             if not raw:
                 continue
-            host = (urllib.parse.urlparse(
-                raw if "://" in raw else "https://" + raw).hostname
-                or "").lower().rstrip(".")
+            host = _tool_host(raw)
             if not host:
                 raise ItemBankSdkError(
                     "refusing Item Banks tool %r: its %s %r has no "
                     "parseable host" % (tool.get("id"), key, raw))
             in_family = (host == tenant) or (
-                bool(dot) and host.endswith("." + parent))
+                bool(dot) and host.endswith("." + parent)) or (
+                _instructure_quiz_account(host, "quiz-lti") is not None)
             if not in_family:
                 raise ItemBankSdkError(
                     "refusing Item Banks tool %r: its %s host %r is "
@@ -431,12 +484,22 @@ class ItemBankSdkMaybeAttempted(ItemBankSdkError):
 # course_id is json.dumps-encoded at format time (a double-quoted JS string
 # constant), exactly like _ITEM_FETCH_JS encodes its params: the value is
 # educator-supplied and must never break out of the string literal.
+# The course's own tools pick the Item Banks launch; the tools installed
+# above the course (include_parents) name the tenant's New Quizzes
+# account, which a tenant on its own domain has no other way to learn.
 _LAUNCH_TOOLS_JS = """(async () => {
-  const r = await fetch('/api/v1/courses/' + %(course_id)s + '/external_tools',
-    {headers: {'Accept': 'application/json'}, credentials: 'same-origin'});
+  const path = '/api/v1/courses/' + %(course_id)s + '/external_tools';
+  const init = {headers: {'Accept': 'application/json'},
+                credentials: 'same-origin'};
+  const r = await fetch(path, init);
   if (r.status !== 200) return {ok: false, status: r.status};
   const tools = await r.json();
-  return {ok: true, tools: tools};
+  let accountTools = [];
+  try {
+    const a = await fetch(path + '?include_parents=true&per_page=100', init);
+    if (a.status === 200) accountTools = await a.json();
+  } catch (e) { accountTools = []; }
+  return {ok: true, tools: tools, account_tools: accountTools};
 })()"""
 
 # One page-context program per item call, evaluated in the quiz-lti
@@ -661,6 +724,7 @@ class ItemBankSdk:
                 "through the login helper")
         tool_id = None
         tenant_host = urllib.parse.urlparse(self._base).hostname or ""
+        tools = []
         # W4-P1-12: the external-tools lookup runs in an isolated
         # world, never the page's default realm.
         try:
@@ -674,6 +738,16 @@ class ItemBankSdk:
         if isinstance(found, dict) and found.get("ok"):
             tool_id = find_item_banks_tool_id(found.get("tools"),
                                               tenant_host or None)
+            for key in ("tools", "account_tools"):
+                if isinstance(found.get(key), list):
+                    tools.extend(found[key])
+        accounts = quiz_account_labels(tenant_host, tools)
+        if tenant_host and not accounts:
+            raise ItemBankSdkError(
+                "this Canvas runs on its own domain (%s), and none of its "
+                "external tools names its New Quizzes service on "
+                "instructure.com, so the Item Banks service that belongs "
+                "to it is unknown; not launching" % tenant_host)
         if tool_id is not None:
             launch_url = ("%s/courses/%s/external_tools/%s"
                           % (self._base, self._course_id, tool_id))
@@ -689,7 +763,7 @@ class ItemBankSdk:
                     str(request_url)).hostname or ""
             except Exception:  # noqa: BLE001 - unparsable URL never matches
                 return False
-            if not _is_quiz_api_host(host, tenant_host or None):
+            if not _is_quiz_api_host(host, tenant_host or None, accounts):
                 return False
             lowered = {str(k).lower(): v
                        for k, v in (headers or {}).items()}
@@ -828,7 +902,10 @@ class ItemBankSdk:
                 # connection dropped after the request was sent).
                 raise ItemBankSdkMaybeAttempted(
                     "SDK page-context call failed: %s" % error)
-            raise ItemBankSdkError("SDK page-context call failed: %s" % error)
+            # The program was dispatched and did not return its own
+            # outcome shape, so its fetch may have run.
+            raise ItemBankSdkMaybeAttempted(
+                "SDK page-context call failed: %s" % error)
         return int(outcome.get("status", 0)), str(outcome.get("body", ""))
 
     # -- convenience item operations ---------------------------------------

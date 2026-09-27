@@ -1,1 +1,0 @@
-JSON.stringify({url: location.href, title: document.title})

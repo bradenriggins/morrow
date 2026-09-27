@@ -1,0 +1,14 @@
+# Morrow for Muse: educator config for THIS tree. Uncomment and set your tenant:
+# CANVAS_BASE=https://myschool.instructure.com
+# There is no default tenant; the login helper refuses to start without one.
+#
+# Tree-scoped: the helper profile is always <tree>/helper/profile
+# (keepalive pins it). The ports can be pinned here:
+# LOGIN_HELPER_PORT=8901                      (default 8901)
+# LOGIN_HELPER_CDP_PORT=19223                 (default 19223)
+# The legacy global ~/.morrow/env is honored for CANVAS_BASE only.
+
+# Set 2026-09-25: tenant + loopback ports (standalone helper keeps 8901/19223).
+CANVAS_BASE=https://chcp.instructure.com
+LOGIN_HELPER_PORT=8902
+LOGIN_HELPER_CDP_PORT=19224

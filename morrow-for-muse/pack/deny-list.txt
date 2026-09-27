@@ -120,7 +120,6 @@ https?://[^/ '"@%]+:[^/ '"@%]+@
 
 [content_exempt]
 # Proof evidence: sanitized example output under the PROOF-EVIDENCE banner.
-defects/DEFECTS.md
 proof-battery/OPERATION_CATALOG.md
 
 [tenant_allow]

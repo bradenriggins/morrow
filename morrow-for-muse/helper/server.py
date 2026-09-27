@@ -31,9 +31,14 @@ ${TREE_STATE_DIR}/helper_token (0600), and exports HELPER_AUTH_TOKEN
 into this process. Every POST/PUT/DELETE/PATCH endpoint and
 GET /screenshot require the X-Helper-Token header (else 403
 {"error":"forbidden"}). Open without a token: GET /status, GET / (the
-sign-in UI, which gets the token injected server-side), GET /logo.png.
-The token stops blind/off-origin API use and port-forward exposure; it
-does not stop a party that can already read the locally served page.
+sign-in UI shell, served WITHOUT the token), GET /logo.png. The live
+token reaches a browser only through the single-use bootstrap exchange
+(M4M-F2): the token holder mints a page code with POST /page-code and
+shows the educator a one-time link /?code=<code>; the first load burns
+the code and gets the token injected, any other reader gets an empty
+token and a notice. The token stops blind/off-origin API use and
+port-forward exposure; a party that can already read the served page
+learns no token without a page code.
 
 Usage:
   CANVAS_BASE=https://myschool.instructure.com python3 helper/server.py
@@ -45,7 +50,13 @@ There is no default tenant: the helper refuses to start without one.
 
 Endpoints (all on 127.0.0.1):
   GET  /                 -> the helper UI (index.html); the server injects
-                           the auth token into a __HELPER_TOKEN__ placeholder
+                           the auth token into a __HELPER_TOKEN__
+                           placeholder ONLY when the request carries a
+                           valid single-use page code (?code=, minted via
+                           POST /page-code); otherwise the placeholder is
+                           served empty with a notice
+  POST /page-code        -> authenticated (X-Helper-Token): mints one
+                           single-use sign-in page code (10 min TTL)
   GET  /logo.png         -> the Morrow logo for the UI
   GET  /status           -> open: {"url", "logged_in", "chromium_alive",
                                "starting", "profile_dir",
@@ -69,7 +80,7 @@ Endpoints (all on 127.0.0.1):
                            (HTTPS targets only, W4-P2-8)
   POST /cdp/tabs         -> PROTECTED: {}  list live targets
   POST /cdp/new-tab      -> PROTECTED: {"url"}  open a tab (about:blank or
-                           https only); returns the tab
+                           this tenant's https only); returns the tab
   POST /cdp/call         -> PROTECTED: {"target_id", "method", "params"}
                            one allowlisted CDP method on a live target
                            (no target_id = browser-level); returns
@@ -79,7 +90,8 @@ Endpoints (all on 127.0.0.1):
                            on a live target; returns {"ok", "value"} or
                            {"ok": false, "error"}
   POST /cdp/navigate     -> PROTECTED: {"target_id", "url"}  Page.navigate
-                           on a live target (https only); {"ok": true}
+                           on a live target (this tenant's https only);
+                           {"ok": true}
   POST /cdp/close-tab    -> PROTECTED: {"target_id"}  close the tab;
                            {"ok": true}
   GET  /cdp/events       -> PROTECTED: ?target_id=&timeout_s=  drain
@@ -122,6 +134,7 @@ env tuning knobs.
 """
 
 import base64
+import fcntl
 import hashlib
 import hmac
 import ipaddress
@@ -173,33 +186,6 @@ _TREE_ENV_VARS_IGNORED_FROM_GLOBAL = (
 )
 
 
-def _parse_env_file(path):
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            lines = fh.read().splitlines()
-    except OSError:
-        return {}
-    out = {}
-    for raw in lines:
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):].lstrip()
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if (len(value) >= 2 and value[0] == value[-1]
-                and value[0] in ("'", '"')):
-            value = value[1:-1]
-        # Shell-identifier keys only (letters/digits/underscore, not
-        # digit-first): anything else cannot be a real env assignment.
-        if (key and (key[0].isalpha() or key[0] == "_")
-                and all(c.isalnum() or c == "_" for c in key)):
-            out[key] = value
-    return out
-
-
 def _tighten_env_perms(path):
     """W4-P1-2: helper env files may hold deployment config and, in the
     legacy global file, CANVAS_BASE. They must not be readable by other
@@ -235,6 +221,8 @@ def _source_morrow_env():
     if _root not in sys.path:
         sys.path.insert(0, _root)
     from config.paths import morrow_home  # noqa: E402
+    # The same parser every agent-side reader uses (config/tree_config).
+    from config.tree_config import parse_env_file as _parse_env_file  # noqa: E402
     # W4-P1-18: test seam. MORROW_HELPER_ENV_FILE overrides the tree env
     # file location (default <tree>/helper/env). The selftests point it
     # at an empty scratch file so they never mutate, move, or depend on
@@ -298,23 +286,32 @@ def _educator_write_halt_active():
 
 
 def _educator_principal_name():
-    # W6-P2-A4: who the pinned session belongs to, so the helper UI
-    # can show WHO is signed in (not just that someone is). Reads the
-    # session.json principal pinned at re-sign-in; name only, never
-    # secrets. None when no session is pinned yet.
+    # W6-P2-A4: who the pinned account is, so the helper UI can show
+    # WHO is signed in (not just that someone is). Reads the principal
+    # pinned at first sign-in (browser_lane.json), with the rig
+    # session.json as fallback; name only, never secrets. None when no
+    # account is pinned yet.
     try:
         _root = os.path.normpath(os.path.join(_HERE, ".."))
         if _root not in sys.path:
             sys.path.insert(0, _root)
         from config.paths import morrow_home  # noqa: E402
-        with open(os.path.join(morrow_home(), "session.json"),
-                  encoding="utf-8") as fh:
-            principal = (json.load(fh) or {}).get("canvas", {}) \
-                .get("principal", {})
-        name = principal.get("name")
-        return name if isinstance(name, str) and name.strip() else None
-    except (OSError, ValueError, AttributeError):
+        home = morrow_home()
+    except (ImportError, OSError):
         return None
+    for fname in ("browser_lane.json", "session.json"):
+        try:
+            with open(os.path.join(home, fname), encoding="utf-8") as fh:
+                principal = (json.load(fh) or {}).get("canvas", {}) \
+                    .get("principal", {})
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError, AttributeError):
+            return None
+        name = principal.get("name") if isinstance(principal, dict) else None
+        if isinstance(name, str) and name.strip():
+            return name
+    return None
 
 
 _source_morrow_env()
@@ -377,6 +374,22 @@ def _load_helper_token():
         return secret_bytes(raw.encode("utf-8"))
     path = os.environ.get("HELPER_AUTH_TOKEN_FILE", "").strip()
     if path:
+        # M4M-F6 (2026-09-26): the token is minted 0600 but a later
+        # chmod, umask accident, or backup restore can loosen it. Honor
+        # the file only while it is still owner-only: stat before
+        # reading and fail closed when group/other can read it, or a
+        # loosened file silently leaks browser control beyond the owner.
+        try:
+            st = os.stat(path)
+        except OSError as exc:
+            _fatal_token("cannot stat HELPER_AUTH_TOKEN_FILE=%r (%s); "
+                         "refusing to launch unauthenticated"
+                         % (path, exc))
+        if st.st_mode & 0o077:
+            _fatal_token("token file %r is readable by group/other "
+                         "(mode %o); refusing to serve a leaked token "
+                         "(tighten to 0600 and relaunch)"
+                         % (path, st.st_mode & 0o777))
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 file_token = fh.read().strip()
@@ -427,6 +440,18 @@ def _load_helper_token_prev():
     path = os.environ.get("HELPER_AUTH_TOKEN_PREV_FILE", "").strip()
     if not path:
         return None, 0
+    # M4M-F6 (2026-09-26): same owner-only discipline as the live token
+    # file. A loosened prev file is ignored (fail closed to
+    # current-token-only, never fatal: rotation bookkeeping must not
+    # wedge the server), with a loud warning so the leak is fixed.
+    try:
+        if os.stat(path).st_mode & 0o077:
+            print("WARNING: ignoring pre-rotation token file %r: readable "
+                  "by group/other (tighten to 0600)" % path,
+                  file=sys.stderr)
+            return None, 0
+    except OSError:
+        return None, 0
     try:
         with open(path, "r", encoding="utf-8") as fh:
             raw = fh.read().strip()
@@ -445,6 +470,54 @@ def _load_helper_token_prev():
 HELPER_TOKEN_PREV, HELPER_TOKEN_PREV_REPLACED_AT = _load_helper_token_prev()
 HELPER_TOKEN_PREV_GRACE_SECONDS = _int_env(
     "HELPER_TOKEN_PREV_GRACE_SECONDS", 300)
+
+
+# M4M-F2 (2026-09-26): single-use bootstrap exchange for the sign-in UI.
+# A bare GET / used to carry the live token to any loopback reader. Now
+# the page is served WITHOUT the token unless the request presents a
+# page code: a 128-bit secret minted via authenticated POST /page-code,
+# shown to the educator as a one-time link, burned on first page load
+# (10 minute TTL, at most 32 outstanding). Loopback readers, rebound
+# pages, and port-forward parties without a code get an empty token and
+# a notice; the educator with the link gets the full UI. Codes are
+# never logged (see _redacted_page_path).
+_PAGE_CODE_TTL_SECONDS = 600
+_PAGE_CODE_MAX_OUTSTANDING = 32
+_PAGE_CODES = {}
+_PAGE_CODES_LOCK = threading.Lock()
+
+
+def _mint_page_code():
+    import secrets as _secrets
+    code = _secrets.token_hex(16)
+    now = time.time()
+    with _PAGE_CODES_LOCK:
+        for old, exp in [item for item in _PAGE_CODES.items()
+                         if item[1] <= now]:
+            _PAGE_CODES.pop(old, None)
+        while len(_PAGE_CODES) >= _PAGE_CODE_MAX_OUTSTANDING:
+            _PAGE_CODES.pop(next(iter(_PAGE_CODES)))
+        _PAGE_CODES[code] = now + _PAGE_CODE_TTL_SECONDS
+    return code
+
+
+def _redeem_page_code(code):
+    if not isinstance(code, str) or not code:
+        return False
+    with _PAGE_CODES_LOCK:
+        exp = _PAGE_CODES.pop(code.strip(), None)
+        if exp is None:
+            return False
+        return exp > time.time()
+
+
+def _redacted_page_path(path):
+    """The request path safe for logs: page routes carry ?code= secrets,
+    so only the route (never the query) is logged for them."""
+    base = path.split("?", 1)[0]
+    if base in ("/", "/index.html"):
+        return base
+    return path
 
 
 def _token_ok(presented):
@@ -526,20 +599,50 @@ if os.environ.get("LOGIN_HELPER_BIND_PUBLIC") == "1" \
           file=sys.stderr, flush=True)
 
 # W5-P0-1: DNS-rebinding defense. The Host header must name this
-# listener: a loopback literal, or the configured BIND. A hostile page
+# listener: a loopback literal, the configured BIND, or (M4M-F7) one of
+# the server's own LAN names when BIND is a wildcard. A hostile page
 # running in the helper's own Chromium can rebind its DNS to 127.0.0.1
 # and become same-origin with the helper; without this gate it could
-# fetch the open GET / page, steal the injected X-Helper-Token, and
-# drive the full browser API with it. The gate runs before rate
-# limiting, routing, and auth on every method, and its 403 body
-# carries no token material. Legitimate clients (the sign-in UI, the
-# transport's _helper_request) all address the helper as 127.0.0.1,
-# so the allowlist is exactly the loopback literals plus BIND (which
-# covers the public-bind opt-in's LAN address/hostname).
+# fetch the served page and drive the full browser API with a stolen
+# credential (M4M-F2: the live token is only injected for a valid
+# single-use page code now, so a code-less rebound fetch learns
+# nothing). The gate runs before rate limiting, routing, and auth on
+# every method, and its 403 body carries no token material. Legitimate
+# clients (the sign-in UI, the transport's _helper_request) all address
+# the helper as 127.0.0.1, so the allowlist is exactly the loopback
+# literals plus BIND (which covers the public-bind opt-in's LAN
+# address/hostname) plus the enumerated LAN names on a wildcard bind.
+# M4M-F7 (2026-09-26): the server's own LAN names, enumerated once at
+# startup. A wildcard BIND (0.0.0.0/::) names no Host header, so adding
+# it verbatim rejects the bind's own LAN clients. Best effort, stdlib
+# only, no packets sent; empty on failure (the wildcard bind is then
+# loopback-only until the operator pins an explicit LAN IP).
+def _local_lan_names():
+    names = set()
+    try:
+        host = socket.gethostname()
+        if host and host.strip():
+            names.add(host.strip().lower())
+        for (_fam, _typ, _proto, _canon, sockaddr) in socket.getaddrinfo(
+                host, None):
+            ip = (sockaddr[0] or "").strip().lower()
+            if ip:
+                names.add(ip.split("%", 1)[0])
+    except OSError:
+        pass
+    return names
+
+
 def _allowed_host_names():
     names = {"127.0.0.1", "localhost", "::1"}
     bind = (BIND or "").strip().lower()
-    if bind:
+    if bind in ("0.0.0.0", "::"):
+        # Wildcard binds cannot name a Host, so accept the server's own
+        # LAN names instead. Still an exact startup-enumerated set: the
+        # DNS-rebinding gate stays exact-match, foreign Hosts still 403.
+        # (A wildcard BIND already requires LOGIN_HELPER_BIND_PUBLIC=1.)
+        names.update(_local_lan_names())
+    elif bind:
         names.add(bind)
     return names
 
@@ -584,6 +687,37 @@ def _steady_now():
     wall0, mono0 = _clock_anchor
     return wall0 + (time.monotonic() - mono0)
 
+# M4M-F1 (2026-09-26): the production ports are the tree's DEPLOYED
+# ports, never literals. helper/env pins LOGIN_HELPER_PORT=8902 and
+# LOGIN_HELPER_CDP_PORT=19224 for this tree while the code defaults stay
+# 8901/19223 (the standalone helper's ports); a guard hardcoded to the
+# defaults lets a bare launch squat the real 8902/19224 helper. Read the
+# pins from the tree env file itself (MORROW_HELPER_ENV_FILE seam
+# honored), never os.environ: an explicit shell export of a scratch port
+# is intent, not production. The union of defaults and pins is guarded.
+def _tree_production_ports():
+    http = {8901}
+    cdp = {19223}
+    try:
+        from config.tree_config import parse_env_file as _parse_env
+        env_path = os.environ.get("MORROW_HELPER_ENV_FILE") \
+            or os.path.join(_HERE, "env")
+        data = _parse_env(env_path)
+        for key, into in (("LOGIN_HELPER_PORT", http),
+                          ("LOGIN_HELPER_CDP_PORT", cdp)):
+            raw = (data.get(key) or "").strip()
+            if raw:
+                try:
+                    into.add(int(raw))
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return http, cdp
+
+
+_PROD_HTTP_PORTS, _PROD_CDP_PORTS = _tree_production_ports()
+
 # P0-1/P0-4 (W2-P1-17 regression 2026-09-21: a rework narrowed this guard to
 # fire only when the profile IS the live profile, letting a bare launch
 # with any other profile squat the production ports. The wave-1 mandate
@@ -591,7 +725,7 @@ def _steady_now():
 # keepalive.sh always exports LOGIN_HELPER_PROFILE_DIR, so this only stops
 # misconfigured bare launches. LOGIN_HELPER_PRODUCTION=1 is the explicit
 # escape hatch.
-if (PORT == 8901 or CDP_PORT == 19223) \
+if (PORT in _PROD_HTTP_PORTS or CDP_PORT in _PROD_CDP_PORTS) \
         and "LOGIN_HELPER_PROFILE_DIR" not in os.environ \
         and os.environ.get("LOGIN_HELPER_PRODUCTION") != "1":
     print("FATAL: refusing production ports without LOGIN_HELPER_PROFILE_DIR "
@@ -609,7 +743,7 @@ if (PORT == 8901 or CDP_PORT == 19223) \
 # that genuinely mean the default profile:
 # LOGIN_HELPER_ALLOW_TEST_ON_LIVE_PROFILE=1.
 if (os.path.realpath(PROFILE_DIR) == os.path.realpath(DEFAULT_PROFILE)
-        and not (PORT == 8901 and CDP_PORT == 19223)
+        and not (PORT in _PROD_HTTP_PORTS and CDP_PORT in _PROD_CDP_PORTS)
         and "LOGIN_HELPER_PROFILE_DIR" not in os.environ
         and os.environ.get("LOGIN_HELPER_ALLOW_TEST_ON_LIVE_PROFILE") != "1"):
     print("FATAL: refusing to run with the tree's live profile "
@@ -634,84 +768,20 @@ if os.environ.get("LOGIN_HELPER_PRODUCTION") == "1":
 # launch, so count rows best-effort (immutable read, no locks taken on
 # the live DB). An unreadable file falls back to True: a Cookies file is
 # still evidence of a used profile.
+
+
 def _normalize_tenant_base(base_url):
-    # P0-7: normalize the tenant base to EXACTLY scheme://netloc/ (with a
-    # trailing slash). Paths, queries, fragments, and any deep link hiding
-    # in CANVAS_BASE are discarded: the helper always lands on the tenant
-    # origin root, and status() keeps a direct href.startswith(base_url)
-    # prefix check against that root, so sibling hostnames like
-    # tenant.instructure.com.evil.com can never match (the trailing slash
-    # makes the prefix check origin-exact).
-    #
-    # W2-P0-11: CANVAS_BASE is a server-side request primitive (the helper
-    # drives Chromium at it), so validation is strict:
-    # - absolute http(s) URL with a host (unchanged);
-    # - https required, unless CANVAS_BASE_ALLOW_HTTP=1 documents an
-    #   explicit local-dev override;
-    # - no userinfo (a URL carrying user:pass credentials is rejected);
-    # - no non-routable IP literals (loopback, link-local, RFC1918,
-    #   multicast, reserved, unspecified);
-    # - a Canvas-shaped tenant: *.instructure.com, or a self-hosted
-    #   Canvas domain the educator explicitly confirms with
-    #   CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=<that exact host>.
-    parsed = urllib.parse.urlsplit(base_url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError(
-            "CANVAS_BASE must be an absolute http(s) URL with a host, "
-            "got %r" % (base_url,))
-    if parsed.username or parsed.password:
-        raise ValueError(
-            "CANVAS_BASE must not embed credentials (userinfo); got %r"
-            % (base_url,))
-    if parsed.scheme != "https" \
-            and os.environ.get("CANVAS_BASE_ALLOW_HTTP") != "1":
-        raise ValueError(
-            "CANVAS_BASE must be https (got %r); set "
-            "CANVAS_BASE_ALLOW_HTTP=1 for a documented local-dev override"
-            % (base_url,))
-    host = (parsed.hostname or "").lower()
-    # Placeholder rejection (first-run audit 2026-09-22): FIRST_RUN.md
-    # promises placeholder hosts fail loudly at the tenant gate. The
-    # install.sh probe rejects the doc placeholders, but the helper is
-    # the runtime gate (CANVAS_BASE can be set or changed after
-    # install), so it must reject them too. Bare instructure.com is
-    # the corporate site, never a Canvas tenant.
-    _PLACEHOLDER_HOSTS = frozenset({
-        "instructure.com",
-        "example.com",
-        "example.instructure.com",
-        "myschool.instructure.com",
-        "canvas.instructure.com",
-    })
-    _PLACEHOLDER_LABELS = frozenset({
-        "your-school", "yourschool", "your_school", "example", "myschool",
-    })
-    labels = host.split(".")
-    if host in _PLACEHOLDER_HOSTS or any(
-            lab in _PLACEHOLDER_LABELS for lab in labels):
-        raise ValueError(
-            "CANVAS_BASE looks like a placeholder (%r); set your school's "
-            "real Canvas URL, e.g. https://yourschool.instructure.com "
-            "(got %r)" % (host, base_url))
-    try:
-        literal = ipaddress.ip_address(host)
-    except ValueError:
-        literal = None
-    if literal is not None and not literal.is_global:
-        raise ValueError(
-            "CANVAS_BASE must not point at a non-routable address "
-            "(loopback, link-local, or private); got %r" % (base_url,))
-    confirmed = os.environ.get(
-        "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", "").strip().lower()
-    if not (host == "instructure.com"
-            or host.endswith(".instructure.com")
-            or (confirmed and host == confirmed)):
-        raise ValueError(
-            "CANVAS_BASE must be a Canvas tenant (*.instructure.com); for "
-            "a self-hosted Canvas domain set "
-            "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=%s (got %r)"
-            % (host, base_url))
-    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
+    """The tenant rule, shared with install.sh (config/tree_config.py).
+
+    Moved 2026-09-23 (muse UX audit 3): install.sh validates CANVAS_BASE
+    with the same function before its curl probe, so the installer and
+    the helper cannot drift apart.
+    """
+    _troot = os.path.normpath(os.path.join(_HERE, ".."))
+    if _troot not in sys.path:
+        sys.path.insert(0, _troot)
+    from config.tree_config import normalize_tenant_base  # noqa: E402
+    return normalize_tenant_base(base_url)
 
 
 def _profile_has_cookies():
@@ -853,8 +923,9 @@ def _display_profile_dir(path):
 # 4. Log rotation: server.log rotates when it passes LOG_ROTATE_BYTES
 #    (default 1 MiB), keeping LOG_ROTATE_KEEP archives (server.log.1 ..
 #    server.log.4, newest first). Rotation is copytruncate against the
-#    file stdout is appended to (discovered via /proc/self/fd/1, which is
-#    how keepalive.sh launches the server): the live file is copied to
+#    file stdout is appended to (discovered via /proc/self/fd/1, or
+#    F_GETPATH where there is no /proc; that file is how keepalive.sh
+#    launches the server): the live file is copied to
 #    server.log.1 and truncated in place, so the O_APPEND descriptor
 #    keepalive holds keeps working and no log line is reformatted. The
 #    server forces O_APPEND on its own stdout at import
@@ -961,12 +1032,22 @@ _ensure_stdout_append()
 
 def _stdout_log_path():
     """Best-effort path of the regular file stdout is appended to (the
-    keepalive launch redirects stdout to <helper dir>/server.log).
+    keepalive launch redirects stdout to server.log in the tree's state
+    dir, <MORROW_HOME>/trees/<tree id>/).
     Returns None when stdout is not a regular file (console, pipe: dev
     runs), in which case rotation is skipped."""
     try:
         path = os.readlink("/proc/self/fd/1")
     except OSError:
+        path = None
+    if path is None and hasattr(fcntl, "F_GETPATH"):
+        # No /proc (macOS): the kernel names the fd's file directly.
+        try:
+            raw = fcntl.fcntl(1, fcntl.F_GETPATH, b"\0" * 1024)
+            path = raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+        except (OSError, ValueError):
+            path = None
+    if not path:
         return None
     try:
         if os.path.isfile(path):
@@ -1128,9 +1209,9 @@ class HelperBrowser:
         except RuntimeError as exc:
             if "no Chromium binary found" in str(exc):
                 raise RuntimeError(
-                    "Chromium was not found at the probed locations; "
-                    "install Chromium or set CHROMIUM_BIN ... see "
-                    "INSTALL.md") from exc
+                    "no Chromium binary found; add CHROMIUM_BIN=<its "
+                    "path> to this tree's helper/env (INSTALL.md, "
+                    "Prerequisites)") from exc
             raise
         self.cdp = self.launcher.cdp
         self.tab = self.cdp.new_tab("about:blank")
@@ -1173,16 +1254,38 @@ class HelperBrowser:
         # educator's session to network interception; file:, data:,
         # javascript:, and other exotic schemes are never legitimate
         # helper navigation targets. Raises ValueError otherwise.
+        # Muse UX audit 3 (2026-09-23): the URL must also be this
+        # tenant. The session browser holds the Canvas sign-in, so a
+        # navigation to any other HTTPS host (a vanity address, a
+        # lookalike domain) leaves the session uncountable by status()
+        # and lets the page drive the browser off the tenant playbook.
+        # Security review 2026-09-24: a target with no host
+        # ("https:evil.com" is scheme https, netloc none) slipped past
+        # the old gate and CDP Page.navigate normalized it to
+        # https://evil.com/; and a string-prefix gate accepted sibling
+        # hosts the base URL is a prefix of. The host must be present,
+        # and the tenant question is decided with the exact origin
+        # comparison the API egress uses (local_chromium.is_tenant_url).
         if not isinstance(url, str) or not url:
             raise ValueError("refusing empty navigation target")
         try:
-            scheme = urllib.parse.urlsplit(url).scheme.lower()
+            split = urllib.parse.urlsplit(url)
+            scheme = split.scheme.lower()
         except ValueError:
             raise ValueError("refusing malformed navigation target")
         if scheme != "https":
             raise ValueError(
                 "refusing non-HTTPS navigation target: only https:// "
                 "targets are allowed")
+        if not split.netloc:
+            raise ValueError(
+                "refusing navigation target with no host; the helper's "
+                "browser goes to your Canvas sign-in only")
+        if self.base_url and not lc.is_tenant_url(url, self.base_url):
+            raise ValueError(
+                "refusing navigation off the Canvas tenant %s; the "
+                "helper's browser goes to your Canvas sign-in only" %
+                self.base_url.rstrip("/"))
         with self._lock:
             self.cdp.navigate(self.tab, url)
 
@@ -1415,12 +1518,23 @@ class HelperBrowser:
             return self._proxy_live_tabs()
 
     def cdp_proxy_new_tab(self, url):
-        if not _cdp_proxy_nav_ok(url):
+        if not _cdp_proxy_nav_ok(url) or not self._proxy_tenant_ok(url):
             raise _HttpError(
                 400, "refusing new-tab target: only about:blank and "
-                "https:// URLs are allowed")
+                "this tenant's https:// URLs are allowed")
         with self._lock:
             return self.cdp.new_tab(url)
+
+    def _proxy_tenant_ok(self, url):
+        """Security review 2026-09-24: the /cdp/* routes carry the same
+        X-Helper-Token the helper page holds, so their https:// targets
+        must be on the tenant origin, exactly like /navigate (the
+        transport's is_tenant_url, not a string prefix). about:blank
+        stays allowed: the transport opens scratch tabs there.
+        Fails closed when no tenant is configured."""
+        if url == "about:blank":
+            return True
+        return bool(self.base_url) and lc.is_tenant_url(url, self.base_url)
 
     def cdp_proxy_call(self, target_id, method, params, timeout):
         if method not in _CDP_PROXY_ALLOWLIST:
@@ -1481,10 +1595,10 @@ class HelperBrowser:
             return {"ok": True, "value": value}
 
     def cdp_proxy_navigate(self, target_id, url, timeout):
-        if not _cdp_proxy_nav_ok(url):
+        if not _cdp_proxy_nav_ok(url) or not self._proxy_tenant_ok(url):
             raise _HttpError(
-                400, "refusing navigation target: only https:// URLs "
-                "are allowed")
+                400, "refusing navigation target: only this tenant's "
+                "https:// URLs are allowed")
         if len(url.encode("utf-8")) > _CDP_PROXY_MAX_URL_BYTES:
             raise _HttpError(413, "url too long")
         with self._lock:
@@ -1556,6 +1670,7 @@ _ROUTES = {
     "/logo.png": ("GET",),
     "/status": ("GET",),
     "/screenshot": ("GET",),
+    "/page-code": ("POST",),
     "/input/key": ("POST",),
     "/input/mouse": ("POST",),
     "/navigate": ("POST",),
@@ -1710,7 +1825,7 @@ class Handler(BaseHTTPRequestHandler):
             return False, False
         return method in _ROUTES[path], True
 
-    def _send_file(self, name, content_type):
+    def _send_file(self, name, content_type, inject_token=False):
         try:
             with open(os.path.join(_HERE, name), "rb") as f:
                 body = f.read()
@@ -1718,15 +1833,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
             return
         if name == "index.html":
-            # W3-P0-7: the sign-in UI is the one page allowed to call the
-            # protected endpoints, so the server injects the token into
-            # the __HELPER_TOKEN__ placeholder when serving it. The token
-            # never appears in a URL, a query string, or the logs.
-            # Documented honestly in helper/README.md: this stops
-            # blind/off-origin API use and port-forward exposure, not a
-            # party that can already read the locally served page.
+            # W3-P0-7 / M4M-F2: the sign-in UI is the one page allowed to
+            # call the protected endpoints. The live token is injected
+            # into the __HELPER_TOKEN__ placeholder ONLY for a request
+            # that presented a valid single-use page code (?code=, burned
+            # on use); every other load gets an empty token plus the
+            # page's notice, so an arbitrary loopback reader learns no
+            # token. The live token never appears in a URL, a query
+            # string, or the logs (page codes are redacted from logs too).
             body = body.replace(b"__HELPER_TOKEN__",
-                                bytes(HELPER_TOKEN))
+                                bytes(HELPER_TOKEN) if inject_token else b"")
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -1783,7 +1899,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
-                self._send_file("index.html", "text/html; charset=utf-8")
+                # M4M-F2: redeem a single-use page code (?code=) for the
+                # token injection. HEAD never redeems (headers only, no
+                # body to inject into); a missing, reused, or expired
+                # code serves the tokenless shell with its notice.
+                inject = False
+                if not head_only and "?" in self.path:
+                    qs = urllib.parse.parse_qs(
+                        self.path.split("?", 1)[1])
+                    presented = (qs.get("code") or [""])[0]
+                    if presented:
+                        inject = _redeem_page_code(presented)
+                self._send_file("index.html", "text/html; charset=utf-8",
+                                inject_token=inject)
             elif path == "/logo.png":
                 self._send_file("logo.png", "image/png")
             elif path == "/status":
@@ -1828,7 +1956,10 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "not found"}, 404)
         except Exception as exc:
-            _log("GET %s failed: %s" % (self.path[:60], type(exc).__name__))
+            # M4M-F2: page URLs carry ?code= secrets; log the route only.
+            _log("GET %s failed: %s"
+                 % (_redacted_page_path(self.path)[:60],
+                    type(exc).__name__))
             self._send_json({"error": "internal"}, 500)
         finally:
             self._head_only = False
@@ -1852,6 +1983,13 @@ class Handler(BaseHTTPRequestHandler):
             if not self._require_auth():
                 return
             path = self.path.split("?", 1)[0]
+            if path == "/page-code":
+                # M4M-F2: authenticated mint of a single-use sign-in page
+                # code (the POST gate above already required the launch
+                # token). Returned to the token holder only, never
+                # logged; the code burns on its first page load.
+                self._send_json({"page_code": _mint_page_code()})
+                return
             if path == "/input/key":
                 body = self._read_json()
                 kind = body.get("kind")
@@ -2163,10 +2301,11 @@ def main():
         # HelperBrowser.start covers the same class from the other side.)
         if (isinstance(exc, RuntimeError)
                 and "no Chromium binary found" in str(exc)):
-            print("FATAL: Chromium was not found at the probed locations; "
-                  "install Chromium (see INSTALL.md: place a binary at "
-                  "transport/chromium/chrome, or ensure "
-                  "/opt/meta-chromium/chrome exists) or set CHROMIUM_BIN.",
+            print("FATAL: Chromium was not found at the probed locations. "
+                  "The Muse VM image has it at /opt/meta-chromium/chrome; "
+                  "to use another Chromium (152.0.7977.82 or newer), add "
+                  "CHROMIUM_BIN=<its path> to this tree's helper/env "
+                  "(INSTALL.md, Prerequisites).",
                   file=sys.stderr)
             _cleanup_startup(srv)
             sys.exit(1)

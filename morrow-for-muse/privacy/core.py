@@ -56,6 +56,7 @@ import base64
 import binascii
 import contextlib
 import fcntl
+import functools
 import hashlib
 import hmac
 import json
@@ -134,6 +135,18 @@ def _require_aesgcm():
             "'pip install -r requirements-optional.txt', then rerun."
             % (installed,))
     return AESGCM
+
+
+def learner_vault_problem():
+    """Why the encrypted learner vault cannot run with this Python, or
+    None when it can. All student-data work needs the vault (working by
+    name, the course roster); install.sh reports the problem at install
+    time."""
+    try:
+        _require_aesgcm()
+    except PrivacyError as exc:
+        return str(exc)
+    return None
 
 # How deep a provider answer may nest before the privacy walk refuses it.
 MAX_PRIVACY_OUTPUT_DEPTH = 32
@@ -529,15 +542,36 @@ def _decode_vault_state(content, key):
     return state
 
 
-def _add_vault_identities(state, scope, identities):
+def _label_order(order_key, scope, identity):
+    """Keyed-hash position of a new learner inside one label batch.
+
+    Round-4 audit L1: labels used to follow first-read order, so a
+    roster read in alphabetical order leaked each student's
+    alphabetical rank. New labels in one batch are issued in the order
+    of an HMAC over (scope, learner id) under the vault key: stable for
+    one vault, meaningless without the key. Learners who already have a
+    label keep it."""
+    return hmac.new(bytes(order_key or b"morrow.label-order"),
+                    ("%s\x00%s" % (scope_key(scope), identity["id"]))
+                    .encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _add_vault_identities(state, scope, identities, order_key=None):
     changed = False
-    labels = []
-    for identity in identities:
+    labels = [None] * len(identities)
+    fresh = []
+    for index, identity in enumerate(identities):
         key = identity_key(scope, identity)
         existing = state["entries"].get(key)
         if existing is not None:
-            labels.append(existing["label"])
+            labels[index] = existing["label"]
             continue
+        if any(identity_key(scope, identities[i]) == key for i, _ in fresh):
+            continue
+        fresh.append((index, identity))
+    fresh.sort(key=lambda pair: _label_order(order_key, scope, pair[1]))
+    for index, identity in fresh:
+        key = identity_key(scope, identity)
         token = "learner_%s" % uuid.uuid4()
         while token in state["by_token"]:
             token = "learner_%s" % uuid.uuid4()
@@ -548,7 +582,10 @@ def _add_vault_identities(state, scope, identities):
         state["by_label"]["%s\x00%s" % (scope_key(scope),
                                         entry["label"])] = entry
         changed = True
-        labels.append(entry["label"])
+    for index, identity in enumerate(identities):
+        if labels[index] is None:
+            labels[index] = state["entries"][identity_key(scope,
+                                                          identity)]["label"]
     return labels, changed
 
 
@@ -716,7 +753,8 @@ class LearnerVault:
         if self._path == ":memory:":
             labels_by_request = [
                 _add_vault_identities(self._state, item["scope"],
-                                      item["identities"])[0]
+                                      item["identities"],
+                                      self._key.view())[0]
                 for item in normalized
             ]
         else:
@@ -726,7 +764,8 @@ class LearnerVault:
                 labels = []
                 for item in normalized:
                     outcome = _add_vault_identities(state, item["scope"],
-                                                    item["identities"])
+                                                    item["identities"],
+                                                    self._key.view())
                     changed = changed or outcome[1]
                     labels.append(outcome[0])
                 if changed:
@@ -750,6 +789,12 @@ class LearnerVault:
         return output
 
     def resolve(self, scope_value, token_value):
+        return self.resolve_with_token(scope_value, token_value)[0]
+
+    def resolve_with_token(self, scope_value, token_value):
+        """(identity, token) for a label or token issued in this exact
+        scope. The token (learner_<uuid>) is new on every issue, so it
+        tells a re-issued label apart from the one an approval saw."""
         scope = exact_scope(scope_value)
         token = str(token_value or "").strip()
         if self._path != ":memory:":
@@ -761,7 +806,7 @@ class LearnerVault:
             entry = self._state["by_token"].get(token)
         if entry is None or scope_key(entry["scope"]) != scope_key(scope):
             raise PrivacyError("learner token is unavailable for this exact scope")
-        return dict(entry["identity"])
+        return dict(entry["identity"]), entry["token"]
 
     def identities_for_scope(self, scope_value):
         """Every identity this vault has published a label for under the
@@ -998,18 +1043,59 @@ def _confusable_fold_table():
 
 _CONFUSABLE_FOLD = _confusable_fold_table()
 
+# A roster and a course often spell one name with and without accents
+# ("Jose Alvarez", "José Álvarez"), and text pasted from a word processor
+# carries typographic apostrophes ("O\u2019Brien"). Matching compares base
+# letters: accents are dropped (NFD, then the combining marks), letters
+# NFD keeps whole fold to the base letters a plain spelling uses, and
+# every apostrophe reads as the straight one.
+LETTER_FOLD = {
+    "\u0142": "l", "\u0141": "L", "\u00f8": "o", "\u00d8": "O",
+    "\u0111": "d", "\u0110": "D", "\u0131": "i", "\u00df": "ss",
+    "\u00e6": "ae", "\u00c6": "AE", "\u0153": "oe", "\u0152": "OE",
+    "\u00fe": "th", "\u00de": "TH", "\u00f0": "d", "\u00d0": "D",
+    "\u0127": "h", "\u0126": "H", "\u0167": "t", "\u0166": "T",
+    "\u1e9e": "SS",
+}
+APOSTROPHES = frozenset({"\u2019", "\u2018", "\u02bc", "\u02bb",
+                         "\uff07"})
+
+
+@functools.lru_cache(maxsize=8192)
+def base_letters(char):
+    """char with its accents dropped and a whole-letter fold applied
+    (\u00e9 -> e, \u0141 -> L, \u00df -> ss); case is kept."""
+    return "".join(LETTER_FOLD.get(part, part)
+                   for part in unicodedata.normalize("NFD", char)
+                   if unicodedata.category(part) != "Mn")
+
+
+@functools.lru_cache(maxsize=8192)
+def _fold_char(char):
+    """What one character contributes to alias matching: base letters
+    (accents dropped), lookalike letters folded (W2-P0-12), every
+    apostrophe straight, invisible format characters dropped
+    (W2-P0-13), lowercase."""
+    out = []
+    for part in base_letters(char):
+        part = _CONFUSABLE_FOLD.get(part, part)
+        if part in APOSTROPHES:
+            part = "'"
+        # Category Cf: zero-width space/joiner/non-joiner, BOM, word
+        # joiner, soft hyphen, bidi marks. Invisible in rendering; their
+        # only effect here would be to defeat matching.
+        if unicodedata.category(part) == "Cf":
+            continue
+        out.append(part.lower())
+    return "".join(out)
+
 
 def _normalize_alias(value):
-    """Alias key normalization: NFKC, confusable fold (W2-P0-12), strip
-    invisible format characters (W2-P0-13), whitespace-collapse, lower."""
-    folded = "".join(_CONFUSABLE_FOLD.get(char, char)
+    """Alias key normalization: NFKC, then each character folded
+    (_fold_char), whitespace collapsed."""
+    folded = "".join(_fold_char(char)
                      for char in unicodedata.normalize("NFKC", value))
-    # Category Cf: zero-width space/joiner/non-joiner, BOM, word joiner,
-    # soft hyphen, bidi marks. Invisible in rendering; their only effect
-    # here would be to defeat matching.
-    stripped = "".join(char for char in folded
-                       if unicodedata.category(char) != "Cf")
-    return re.sub(r"\s+", " ", stripped.strip()).lower()
+    return re.sub(r"\s+", " ", folded.strip()).lower()
 
 
 def _fold_match_text(text):
@@ -1025,26 +1111,49 @@ def _fold_match_text(text):
     re-apply NFKC: whole-string NFKC is not position-preserving (it can
     expand ligatures or compose combining marks), so re-applying it here
     would make index_map point at the wrong source positions. The fold
-    is strictly per-character (confusable map, Cf strip, lower, which
-    can expand only via str.lower and is tracked per source char), so
-    the mapping stays exact.
+    is strictly per-character (_fold_char: accents dropped, confusable
+    map, apostrophes, Cf strip, lower; an expansion such as \u00df -> ss
+    is tracked per source char), so the mapping stays exact.
     """
     folded = []
     index_map = []
     for i, char in enumerate(text):
-        char = _CONFUSABLE_FOLD.get(char, char)
-        if unicodedata.category(char) == "Cf":
-            continue
-        for out in char.lower():
+        for out in _fold_char(char):
             folded.append(out)
             index_map.append(i)
     return "".join(folded), index_map
 
 
+# Generational suffixes: never a given name or a surname. Roman numerals
+# stop at IV so a real surname such as "Vi" is never dropped.
+_NAME_SUFFIXES = frozenset({"jr", "sr", "jnr", "snr", "ii", "iii", "iv"})
+
+
+def _without_name_suffixes(name):
+    """The name without its generational suffixes ("Martin Luther King
+    Jr." -> "Martin Luther King", "King, Jr., Martin" -> "King, Martin").
+    The first word is never a suffix, and a suffix stays when dropping it
+    would leave a single word."""
+    kept = []
+    for i, token in enumerate(name.split()):
+        if i and token.strip(".,").lower() in _NAME_SUFFIXES:
+            # "King Jr., Martin": the suffix carried the name's comma.
+            if token.endswith(",") and not kept[-1].endswith(","):
+                kept[-1] += ","
+            continue
+        kept.append(token)
+    if len([t for t in kept if t.strip(",")]) < 2:
+        return " ".join(name.split())
+    kept[-1] = kept[-1].rstrip(",")
+    return " ".join(kept)
+
+
 def _surname_of_name(normalized):
     """Last whitespace-separated token of a normalized full name, when it
     is a plausible surname (2+ letters, and the name is not a single
-    word). Comma form ("Thornton, Alice"): the token before the comma."""
+    word). Comma form ("Thornton, Alice"): the token before the comma.
+    Generational suffixes (Jr., III) are never the surname."""
+    normalized = _without_name_suffixes(normalized)
     if "," in normalized:
         head = normalized.split(",", 1)[0].strip().split()
         candidate = head[-1] if head else ""
@@ -1062,14 +1171,18 @@ def _learner_name_aliases(identity):
     name = identity.get("name")
     if not name:
         return []
-    normalized = _normalize_alias(name)
-    if not normalized or len(normalized) > 500:
+    full = _normalize_alias(name)
+    if not full or len(full) > 500:
         return []
+    aliases = {full}
+    # Given name, surname, and reordered forms come from the name without
+    # its generational suffix (Jr., III), which also names the student.
+    normalized = _without_name_suffixes(full)
+    aliases.add(normalized)
     if "," in normalized:
-        given = normalized.split(",", 1)[1].strip().split()[0]
+        given = (normalized.split(",", 1)[1].strip().split() or [""])[0]
     else:
         given = normalized.split()[0]
-    aliases = {normalized}
     letters = sum(1 for c in given if unicodedata.category(c).startswith("L"))
     if letters >= 2:
         aliases.add(given)
@@ -1125,16 +1238,41 @@ def _add_alias(aliases, alias, token, partial_surnames=(),
         existing["name_token"] = True
 
 
+def _alias_trie_expression(candidates):
+    """One expression for every alias, as a character trie: a course
+    roster has thousands of aliases, and a flat alternation tries each
+    one at every position. At each node the longer continuations come
+    before ending there, so the longest alias the text holds matches
+    (the text allows at most one branch per character). A space in an
+    alias matches any run of whitespace."""
+    trie = {}
+    for candidate in candidates:
+        node = trie
+        for char in candidate:
+            node = node.setdefault(char, {})
+        node[None] = True
+
+    def emit(node):
+        branches = [(r"\s+" if char == " " else _escape_regexp(char))
+                    + emit(child)
+                    for char, child in sorted(
+                        (k, v) for k, v in node.items() if k is not None)]
+        if not branches:
+            return ""
+        if len(branches) == 1 and None not in node:
+            return branches[0]
+        return "(?:%s)%s" % ("|".join(branches), "?" if None in node else "")
+    return emit(trie)
+
+
 def _build_alias_matcher(aliases):
-    candidates = sorted(aliases.keys(), key=len, reverse=True)
+    candidates = [key for key in aliases if key]
     if not candidates:
         return None
-    expression = "|".join(
-        _escape_regexp(candidate).replace(r"\ ", r"\s+").replace(" ", r"\s+")
-        for candidate in candidates)
-    # Divergence note: \p{L}\p{N} -> \w under re.UNICODE (equivalent for
-    # letter/number/underscore).
-    return re.compile(r"(?<!\w)(?:%s)(?!\w)" % expression,
+    # A name ends at anything but a letter or a digit: "_" separates
+    # words in a file name ("Jane_Doe_essay.pdf") as a space does.
+    return re.compile(r"(?<![^\W_])(?:%s)(?![^\W_])"
+                      % _alias_trie_expression(candidates),
                       re.IGNORECASE | re.UNICODE)
 
 
@@ -1404,6 +1542,45 @@ def _url_safe_replacement(source, replacement, url_spans):
     return replacement
 
 
+# Round-4 audit H1: Canvas puts a learner's id in URL paths under many
+# route names (/grades/<id>, /submissions/<id>, speed_grader?student_id=)
+# and a list of route names always misses one. Inside a URL, any whole
+# path segment or query value equal to a rostered learner id is that
+# learner. The one exception is the segment right after a context root
+# (/courses/<id>, /accounts/<id>): by Canvas URL grammar that number is
+# the course or account, never a person.
+_URL_ID_SEGMENT_RE = re.compile(r"/([0-9]{1,500})(?=[/?#]|$)")
+_URL_ID_QUERY_RE = re.compile(r"[?&][^=&#]*=([0-9]{1,500})(?=[&#]|$)")
+_URL_CONTEXT_ROOTS = frozenset({"courses", "accounts"})
+
+
+def _replace_url_learner_ids(value, lookup):
+    view = _normalized_identity_text_view(value)
+    text = view["text"]
+    replacements = []
+    for span_start, span_end in _url_token_spans(text):
+        url = text[span_start:span_end]
+        hits = []
+        for match in _URL_ID_SEGMENT_RE.finditer(url):
+            before = url[:match.start()].rsplit("/", 1)[-1]
+            if before.lower() in _URL_CONTEXT_ROOTS:
+                continue
+            hits.append(match.span(1))
+        hits.extend(m.span(1) for m in _URL_ID_QUERY_RE.finditer(url))
+        for start, end in hits:
+            token = lookup(url[start:end])
+            if not token:
+                continue
+            source = _source_range_for_view(view, span_start + start,
+                                            span_start + end)
+            if source is not None:
+                replacements.append({
+                    "start": source["start"], "end": source["end"],
+                    "replacement": urllib.parse.quote(token, safe="")})
+    return _apply_source_replacements(value, replacements) \
+        if replacements else value
+
+
 def _replace_known_identity_references(value, identities):
     def lookup(ident):
         entry = identities.get(str(ident).strip())
@@ -1414,10 +1591,10 @@ def _replace_known_identity_references(value, identities):
                    re.IGNORECASE),
         re.compile(r"((?:\b(?:learner|student|user|recipient|enrollment|submission|grade)\b\s*(?:id\b\s*)?[#:=]\s*))([0-9]{1,500})\b",
                    re.IGNORECASE),
-        re.compile(r"(/(?:users|learners|students)/)([0-9]{1,500})\b",
-                   re.IGNORECASE),
+        re.compile(r"(/(?:users|learners|students|grades|submissions)/)"
+                   r"([0-9]{1,500})\b", re.IGNORECASE),
     ]
-    output = value
+    output = _replace_url_learner_ids(value, lookup)
     for matcher in patterns:
         view = _normalized_identity_text_view(output)
         url_spans = _url_token_spans(output)
@@ -1454,11 +1631,31 @@ def _learner_text_preparation(context):
     # id conflicts (it is the fresher record).
     vault = context.get("learnerVault")
     if vault is not None:
-        known_ids = {identity["id"] for identity in identities}
+        by_id = {identity["id"]: index
+                 for index, identity in enumerate(identities)}
         for identity in vault.identities_for_scope(scope):
-            if identity["id"] not in known_ids:
-                known_ids.add(identity["id"])
+            index = by_id.get(identity["id"])
+            if index is None:
+                by_id[identity["id"]] = len(identities)
                 identities.append(identity)
+                continue
+            # The fresher record keeps its fields, but a name the vault
+            # already knows for this learner (a receipt such as
+            # bulk_user_tags carries only the id) still projects to her
+            # label wherever it appears in free text.
+            current = identities[index]
+            extra = [value for value in (
+                identity.get("name"), identity.get("email"),
+                identity.get("loginId"), identity.get("sisUserId"))
+                + tuple(identity.get("aliases") or ())
+                if isinstance(value, str) and value.strip()
+                and value != current.get("name")]
+            if extra:
+                merged = dict(current)
+                merged["aliases"] = list(current.get("aliases") or []) + [
+                    value for value in extra
+                    if value not in (current.get("aliases") or [])]
+                identities[index] = merged
     return {"context": context, "scope": scope,
             "identities": identities}
 
@@ -1562,6 +1759,10 @@ def redact_known_learner_text(value, context):
 _MOODLE_CAPABILITY_RE = re.compile(r"^(?:moodle|mod|block|enrol|report)/[a-z_]+:[a-z_]+$")
 _TOKEN_LABEL_RE = re.compile(
     r"\b(?:Student A[1-9][0-9]*|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b")
+# The "(as written)" course-content marker, plain or percent-encoded in a
+# URL: a label followed by it is literal text, already projected.
+_AS_WRITTEN_REF_RE = re.compile(
+    r" ?\((?:as|As) written\)|%20%28(?:as|As)%20written%29")
 _WHOLE_ID_RE = re.compile(r"^[0-9]+$")
 
 
@@ -1583,6 +1784,12 @@ def _redact_known_learner_text_prepared(value, exact_context,
         reference = match.group(0)
         label = exact_context["referenceLabels"].get(reference)
         if not label:
+            # Text course_content.py already projected: "(as written)"
+            # marks a label the educator wrote as literal text, not a
+            # person reference. Leave it for the course-content restore;
+            # an unmarked unknown label still refuses (fail closed).
+            if _AS_WRITTEN_REF_RE.match(value, match.end()):
+                return reference
             raise PrivacyError("learner_roster_identity_unavailable")
         return label
 
@@ -1828,6 +2035,11 @@ _IDENTITY_VALUE_FIELDS = frozenset([
     "loginid", "sisloginid", "firstname", "lastname", "pronouns",
     "avatarimageurl", "accommodations",
 ])
+_PERSON_ID_ARRAY_FIELDS = frozenset([
+    "userids", "studentids", "learnerids", "recipientids",
+    "participantids", "authorids", "participatinguserids",
+    "assignmentvisibility",
+])
 _IDENTITY_RECORD_VALUE_FIELDS = frozenset([
     "id", "name", "fullname", "username", "sortablename", "shortname",
 ])
@@ -1908,12 +2120,22 @@ def _normalized_identity_fields(value):
             for key, candidate in value.items()}
 
 
+# A projected reference (the stable label, its marker form, or the
+# one-time token) carries no identity information: a record field that
+# already holds one was projected by an outer pass, and treating it as
+# a fresh name made the identity merge refuse the record as a conflict.
+_PROJECTED_REFERENCE_RE = re.compile(
+    r"^(?:(?:Student A[1-9][0-9]*)(?: or Student A[1-9][0-9]*)*"
+    r"|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r"(?: \([^()]{1,60}\))?$")
+
+
 def _identity_value(fields, keys):
     for key in keys:
         candidate = fields.get(_normalize_privacy_key(key))
         if isinstance(candidate, (str, int)) and not isinstance(candidate, bool):
             normalized = str(candidate).strip()
-            if normalized:
+            if normalized and not _PROJECTED_REFERENCE_RE.match(normalized):
                 return normalized
     return None
 
@@ -1928,10 +2150,12 @@ def _learner_identity(value, kind=None, context=None):
             raise PrivacyError("learner_roster_identity_unavailable")
         return current
     normalized_keys = set(fields.keys())
+    # The SIS id is an identifier to label, never the record's primary
+    # id: the roster is keyed by the Canvas user id, so taking the SIS
+    # id as primary made a roster read refuse whenever it was set.
     direct_id = _identity_value(fields, [
         "user_id", "userId", "learner_id", "learnerId", "student_id",
-        "studentId", "canvas_user_id", "canvasUserId", "sis_user_id",
-        "sisUserId"])
+        "studentId", "canvas_user_id", "canvasUserId"])
     has_person_id = any(k in normalized_keys for k in
                         ("userid", "learnerid", "studentid", "canvasuserid",
                          "sisuserid"))
@@ -1940,15 +2164,25 @@ def _learner_identity(value, kind=None, context=None):
                                 "displayname", "fullname", "studentname",
                                 "avatarimageurl", "pronouns", "firstname",
                                 "lastname"))
+    # Round-4 audit L2: an assignment read with include[]=submission is
+    # {"id", "name", "submission": {"user_id", ...}}. The person there is
+    # the submission's user_id, not the assignment, so a nested
+    # submission that names its own user is not a person signal for the
+    # record that carries it.
+    person_signals = ("grade", "score", "enrollments", "grades",
+                      "submission", "attempts")
+    nested = fields.get("submission")
+    if isinstance(nested, dict) and any(
+            _normalize_privacy_key(k) == "userid" for k in nested):
+        person_signals = tuple(k for k in person_signals
+                               if k != "submission")
     has_generic_signal = (
         (has_person_id and (has_identity_profile or bool(
             direct_id and context is not None
             and direct_id in context["identityById"])))
         or (context is not None and "id" in normalized_keys
             and "name" in normalized_keys
-            and any(k in normalized_keys for k in
-                    ("grade", "score", "enrollments", "grades", "submission",
-                     "attempts")))
+            and any(k in normalized_keys for k in person_signals))
         or (("avatarimageurl" in normalized_keys
              or "pronouns" in normalized_keys)
             and ("name" in normalized_keys
@@ -1959,6 +2193,15 @@ def _learner_identity(value, kind=None, context=None):
     if (kind or has_generic_signal) and kind not in ("submission", "enrollment"):
         fallback_id = _identity_value(fields, ["id"])
     ident = direct_id or fallback_id
+    sis_user_id = _identity_value(fields, ["sis_user_id", "sisUserId"])
+    if not ident and sis_user_id and context is not None:
+        matches = [candidate["id"]
+                   for candidate in context["identityById"].values()
+                   if candidate.get("sisUserId") == sis_user_id]
+        if len(matches) == 1:
+            ident = matches[0]
+    if not ident and sis_user_id:
+        ident = sis_user_id
     if not ident:
         return None
     identity = {"id": ident}
@@ -1967,7 +2210,6 @@ def _learner_identity(value, kind=None, context=None):
                                     "studentName"])
     email = _identity_value(fields, ["email", "primary_email", "primaryEmail"])
     login_id = _identity_value(fields, ["login_id", "loginId"])
-    sis_user_id = _identity_value(fields, ["sis_user_id", "sisUserId"])
     if name:
         identity["name"] = name
     if email:
@@ -2144,6 +2386,24 @@ def _redact_learner_egress_prepared(value, exact_context):
                 if safe_key in output:
                     raise PrivacyError("privacy_identity_key_collision")
                 output[safe_key] = "Staff"
+                continue
+            # Round-4 audit H3: a person-id array (an override's
+            # student_ids) projects to the learners' labels in place, so
+            # a readback still says WHO a record is for. Every id must be
+            # rostered; an unknown one fails closed.
+            if normalized_key in _PERSON_ID_ARRAY_FIELDS \
+                    and isinstance(child, list) and all(
+                        isinstance(item, (int, str))
+                        and not isinstance(item, bool) for item in child):
+                labels = []
+                for item in child:
+                    entry = exact_context["tokensById"].get(
+                        str(item).strip())
+                    if entry is None or not entry.get("token"):
+                        raise PrivacyError(
+                            "learner_roster_identity_unavailable")
+                    labels.append(entry["token"])
+                output[_redact_learner_key(key, exact_context)] = labels
                 continue
             if _is_secret_field(key) \
                     or _is_identity_value_field(

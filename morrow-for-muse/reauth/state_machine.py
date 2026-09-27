@@ -43,11 +43,19 @@ Usage:
   state_machine.py check                      # dispatch executor pre-check
   state_machine.py quarantine --op-id X --action create_page [--summary ...]
   state_machine.py reauth                     # guided re-sign-in + verified resume
-  state_machine.py resume --principal-id <id>  # production recovery after
+  state_machine.py pin --first-signin         # pin the signed-in account
+                                               # at first sign-in (keepalive
+                                               # runs this; refused during a
+                                               # re-auth halt)
+  state_machine.py pin --confirm-account "..." # educator-confirmed pin for
+                                               # an install with no pin
+  state_machine.py resume [--principal-id <id>]  # production recovery after
                                                # manual re-sign-in via the
-                                               # login helper; pins the
-                                               # principal, re-arms per-op
-                                               # approval, lifts the halt
+                                               # login helper; reads the live
+                                               # account, requires it to match
+                                               # the pinned one, re-arms
+                                               # per-op approval, lifts the
+                                               # halt
   state_machine.py approve --op-id X --authorization "..."  # educator per-op
                                                # re-approval; the educator's
                                                # verbatim words are REQUIRED
@@ -383,7 +391,44 @@ def is_write_halted():
     return os.path.exists(HALT_PATH)
 
 
-def impose_halt(detection, reason="session_expiry"):
+# The causes the re-auth machinery records in the halt file. Each is
+# lifted by a verified resume once the pinned account is signed in.
+HALT_CAUSES = ("session_expired", "account_mismatch")
+
+# Halt files written before the cause field existed (0.4.0) name their
+# cause only in the reason text.
+_LEGACY_ACCOUNT_MISMATCH_REASON = (
+    "a different Canvas account is signed in to the helper")
+
+
+def halt_cause():
+    """Why writes are paused, from the cause the halt file records:
+    "session_expired" (the Canvas session died), "account_mismatch" (a
+    different Canvas account signed in to the helper), "manual" for a
+    halt file placed any other way (or unreadable), None when writes
+    are not paused."""
+    if not os.path.exists(HALT_PATH):
+        return None
+    try:
+        with open(HALT_PATH) as f:
+            info = json.load(f) or {}
+        cause = info.get("cause")
+        reason = str(info.get("reason") or "")
+    except (ValueError, OSError, AttributeError):
+        return "manual"
+    if cause is not None:
+        return cause if cause in HALT_CAUSES else "manual"
+    if reason == "session_expiry" or reason.startswith(
+            "chromium session death"):
+        return "session_expired"
+    if reason == _LEGACY_ACCOUNT_MISMATCH_REASON:
+        return "account_mismatch"
+    return "manual"
+
+
+def impose_halt(detection, reason="session_expiry", cause="session_expired"):
+    if cause not in HALT_CAUSES:
+        raise ValueError("unknown halt cause %r" % (cause,))
     # W4-P2-5: a fresh death ages out any superseded session.json.prev
     # left behind by an earlier incomplete re-auth cycle before the new
     # halt is recorded. Fresh .prev files (younger than the threshold)
@@ -392,6 +437,7 @@ def impose_halt(detection, reason="session_expiry"):
     age_out_stale_prev()
     _write_json(HALT_PATH, {"halted_at": _now(),
                             "reason": reason,
+                            "cause": cause,
                             "detection": detection})
     set_state(EXPIRED, detection)
 
@@ -564,11 +610,17 @@ def _ledger_append(entry):
         _maybe_compact_ledger_locked()
 
 
-def quarantine_op(op_id, action, summary="", detection=None):
-    """Append an in-flight op to the quarantine ledger. Never auto-retries."""
+def quarantine_op(op_id, action, summary="", detection=None,
+                  write_sent=False):
+    """Append an in-flight op to the quarantine ledger. Never auto-retries.
+
+    write_sent is True when the change was already on its way to Canvas
+    as the session ended: Canvas may hold it, and its op id is used up,
+    so it is checked in the course and prepared again, never resent."""
     entry = {"kind": "op", "op_id": op_id, "action": action,
              "summary": summary[:200], "status": "quarantined",
              "quarantined_at": _now(), "reason": "session_expiry",
+             "write_sent": bool(write_sent),
              "detection": detection or {}}
     _ledger_append(entry)
     return entry
@@ -714,6 +766,19 @@ def quarantined_ops():
     return ops
 
 
+def paused_ops():
+    """The changes still waiting on the educator: one entry per op id,
+    its newest, when that status is quarantined or awaiting_approval.
+    The session_death records of past incidents are history, not
+    paused changes."""
+    newest = {}
+    for entry in quarantined_ops():
+        if (entry.get("kind") or "op") == "op":
+            newest[str(entry.get("op_id"))] = entry
+    return [entry for entry in newest.values()
+            if entry.get("status") in ("quarantined", "awaiting_approval")]
+
+
 def mark_ops_awaiting_approval():
     """After verified resume, quarantined ops move to awaiting_approval.
 
@@ -821,8 +886,9 @@ def op_quarantine_status(op_id):
 
 # W6-P2-A5: the re-approval citation bar, matching the admission
 # ceremony's APPROVAL_AUTH_MIN_LEN (the state machine must not import
-# the dispatcher; the value is mirrored, not shared).
-_REAPPROVAL_AUTH_MIN_LEN = 20
+# the dispatcher; the value is mirrored, not shared). Any non-empty
+# verbatim reply counts: "yes" is an approval.
+_REAPPROVAL_AUTH_MIN_LEN = 1
 
 
 def approve_op(op_id, authorization=None):
@@ -834,7 +900,7 @@ def approve_op(op_id, authorization=None):
     whose newest quarantine status is not 'approved'.
 
     W6-P2-A5: `authorization` is REQUIRED: the educator's verbatim
-    words approving THIS op's re-dispatch (>= 20 chars), sealed into
+    words approving THIS op's re-dispatch (any non-empty reply), sealed into
     the ledger entry. The old signature let the agent "approve" a
     quarantined op with no educator input at all; the whole
     "explicit approval" loop was agent-self-certified. A short or
@@ -847,10 +913,9 @@ def approve_op(op_id, authorization=None):
     if (not isinstance(authorization, str)
             or len(authorization.strip()) < _REAPPROVAL_AUTH_MIN_LEN):
         raise ValueError(
-            "approve_op requires the educator's verbatim authorization "
-            "for re-dispatching this op (at least %d characters); the "
-            "agent cannot self-approve a quarantined op"
-            % _REAPPROVAL_AUTH_MIN_LEN)
+            "approve_op requires the educator's verbatim reply approving "
+            "the re-dispatch of this op (any non-empty reply); the agent "
+            "cannot self-approve a quarantined op")
     changed = False
     with _ledger_locked():
         tmp = QUAR_PATH + ".mutate"
@@ -902,37 +967,208 @@ def approve_op(op_id, authorization=None):
     return changed
 
 
+class PrincipalPinError(Exception):
+    """The pinned Canvas principal cannot be trusted or changed.
+
+    Raised when the pin store is unreadable, loosely permissioned, or
+    corrupt, when a different account tries to replace the pin, and
+    when a pin would be taken during a re-auth halt without the
+    educator's own confirmation. Always fails closed.
+    """
+
+
+PIN_AUDIT_PATH_NAME = "principal_pin.json"
+PIN_CONFIRM_MIN_LEN = 1
+
+
+def _lane_state_module():
+    from transport import state as _lane_state
+    return _lane_state
+
+
+def pinned_principal():
+    """The pinned principal {"id", "name", "base"}, or None when none.
+
+    Production pin store: the browser lane state (browser_lane.json,
+    metadata only, 0600), written on the educator's first sign-in.
+    Rig/drill fallback: session.json. A store that exists but cannot be
+    read, is loosely permissioned, or is corrupt raises
+    PrincipalPinError: it is never read as "no pin".
+    """
+    lane = _lane_state_module()
+    try:
+        rec = lane.load()
+    except (OSError, ValueError) as exc:
+        raise PrincipalPinError(
+            "the pinned-account record %s cannot be trusted (%s)"
+            % (lane.STATE_PATH, exc))
+    canvas = (rec or {}).get("canvas") if isinstance(rec, dict) else None
+    principal = (canvas or {}).get("principal") if isinstance(
+        canvas, dict) else None
+    if rec is not None and (not isinstance(principal, dict)
+                            or principal.get("id") in (None, "")):
+        raise PrincipalPinError(
+            "the pinned-account record %s has no principal id"
+            % lane.STATE_PATH)
+    if isinstance(principal, dict):
+        return {"id": principal.get("id"), "name": principal.get("name"),
+                "base": (canvas or {}).get("base")}
+    try:
+        with open(SESSION_PATH) as f:
+            sess = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise PrincipalPinError(
+            "the session record %s cannot be trusted (%s)"
+            % (SESSION_PATH, exc))
+    principal = ((sess or {}).get("canvas") or {}).get("principal") \
+        if isinstance(sess, dict) else None
+    if not isinstance(principal, dict) or principal.get("id") in (None, ""):
+        return None
+    return {"id": principal.get("id"), "name": principal.get("name"),
+            "base": (sess.get("canvas") or {}).get("base")}
+
+
+def pin_principal(base, principal_id, principal_name, first_signin=False,
+                  confirmation=None):
+    """Pin the signed-in Canvas principal. Returns the pinned record.
+
+    - Same id already pinned: refreshes the display name, nothing else.
+    - A different id already pinned: refused. Switching accounts is a
+      disconnect followed by a fresh first sign-in, never a silent swap.
+    - No pin and no write halt (first_signin=True): the first sign-in
+      is the educator's own onboarding, so it is pinned.
+    - No pin during a write halt: pinning whoever signed back in would
+      defeat the check, so it needs the educator's verbatim confirming
+      words (confirmation, any non-empty reply).
+    """
+    if principal_id in (None, ""):
+        raise PrincipalPinError("no principal id to pin")
+    current = pinned_principal()
+    lane = _lane_state_module()
+    if current is not None:
+        if str(current["id"]) != str(principal_id):
+            raise PrincipalPinError(
+                "this connector is pinned to Canvas account id %s; the "
+                "signed-in account is id %s. Refusing to replace the pin. "
+                "To connect a different account, disconnect first "
+                "(bin/morrow disconnect), then sign in again."
+                % (current["id"], principal_id))
+        name = str(principal_name or current.get("name") or "").strip()
+        lane.save(current.get("base") or base, current["id"], name)
+        return pinned_principal()
+    confirmed = (isinstance(confirmation, str)
+                 and len(confirmation.strip()) >= PIN_CONFIRM_MIN_LEN)
+    if is_write_halted() and not confirmed:
+        raise PrincipalPinError(
+            "no Canvas account is pinned and paused work is waiting on a "
+            "re-sign-in, so the signed-in account cannot be pinned "
+            "automatically. The educator must confirm it is their own "
+            "account: state_machine.py pin --confirm-account \"<their "
+            "own words>\"")
+    if not first_signin and not confirmed:
+        raise PrincipalPinError(
+            "pinning needs either the first sign-in (--first-signin) or "
+            "the educator's confirming words (--confirm-account, any "
+            "non-empty reply)")
+    if not base:
+        raise PrincipalPinError("no Canvas base URL to pin against")
+    lane.save(base, principal_id, str(principal_name or "").strip())
+    _write_json(os.path.join(STORE_DIR, PIN_AUDIT_PATH_NAME), {
+        "pinned_at": _now(),
+        "principal_id": str(principal_id),
+        "base": base.rstrip("/"),
+        "how": "educator-confirmed" if confirmed else "first-signin",
+        "educator_confirmation": confirmation.strip() if confirmed else None,
+    })
+    return pinned_principal()
+
+
+def read_live_principal(base=None):
+    """(id, name, base) of the account signed in to the login helper.
+
+    Requires the helper /status to report a live signed-in session, then
+    reads GET /api/v1/users/self through the Chromium lane (the
+    educator's own record; a read, no approval). Raises
+    PrincipalPinError when the session is not live or the read fails.
+    """
+    from transport import local_chromium as lc
+    try:
+        st = lc.helper_status(timeout=10)
+    except Exception as exc:
+        raise PrincipalPinError(
+            "the login helper is not reachable (%s); start it with "
+            "helper/keepalive.sh and sign in first" % type(exc).__name__)
+    if not (st or {}).get("logged_in"):
+        raise PrincipalPinError(
+            "the login helper reports no signed-in Canvas session; sign "
+            "in through the helper page first")
+    from config import tree_config
+    base = (base or tree_config.canvas_base()).rstrip("/")
+    if not base:
+        raise PrincipalPinError(
+            "no Canvas base URL: CANVAS_BASE is not set in this tree's "
+            "helper/env (%s) or the environment; set it there, or pass "
+            "--base" % tree_config.env_file_path())
+    from dispatch import executor as ex
+    from transport import chromium_session as cs
+    sess = cs.ChromiumSession(base)
+    entry = ex.catalog_descriptor_to_entry(
+        "users_self", "GET", "/api/v1/users/self", provider="canvas")
+    method, url, headers, body = ex.build_request(
+        entry, entry["request"], {}, sess, ex.load_pack(ex.DEFAULT_PACK),
+        {"canvas_base": base}, {})
+    try:
+        status, _rh, raw, _attempts = sess.raw_request(
+            method, url, headers, body, is_write=False)
+        me = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise PrincipalPinError(
+            "could not read the signed-in account (GET /api/v1/users/self: "
+            "%s)" % type(exc).__name__)
+    if status != 200 or not isinstance(me, dict) or me.get("id") is None:
+        raise PrincipalPinError(
+            "GET /api/v1/users/self did not return the signed-in account "
+            "(HTTP %s)" % status)
+    return me.get("id"), me.get("name") or "", base
+
+
+_NO_PIN_RECOVERY = (
+    "REFUSED: no Canvas account is pinned for this connector, so there is "
+    "no way to prove the account that signed back in is the educator's. "
+    "The write halt stays and paused work stays paused. Recovery: the "
+    "educator confirms, in their own words, that the signed-in account "
+    "is theirs; then run state_machine.py pin --confirm-account "
+    "\"<their words>\" and run resume again.")
+
+
 def verified_resume_after_manual_signin(principal_id, principal_name="",
                                         base=""):
     """Production recovery after the educator re-signs in manually.
 
     The production flow never re-runs capture.py (rig-only). Instead:
     the educator signs in again through the login helper's own browser
-    tab; the agent verifies the session is live (helper /status
-    logged_in) and that the principal id matches the stored one; only
-    then is this called, which re-arms quarantined ops as
-    awaiting_approval (each still needs the educator's explicit
-    per-op approval via approve_op before re-dispatch) and lifts the
-    halt. Returns the number of ops moved to awaiting_approval, or -1
-    on principal mismatch (halt stays, escalation written).
+    tab; the live principal is read and must match the PINNED principal
+    (pinned at first sign-in, see pin_principal). Only then are
+    quarantined ops re-armed as awaiting_approval (each still needs the
+    educator's explicit per-op approval via approve_op before
+    re-dispatch) and the halt lifted. Returns the number of ops moved
+    to awaiting_approval, or -1 on refusal (halt stays): a principal
+    mismatch (escalation written), no pinned principal, or a pin store
+    that cannot be trusted.
     """
-    stored_id = None
-    # Production pinning source: the browser lane state (metadata only,
-    # never credential material). Rig/drill fallback: session.json.
     try:
-        from transport import state as _lane_state
-        rec = _lane_state.load()
-        stored_id = ((rec or {}).get("canvas") or {}).get(
-            "principal", {}).get("id")
-    except Exception:
-        stored_id = None
-    if stored_id is None:
-        try:
-            with open(SESSION_PATH) as f:
-                stored_id = json.load(f)["canvas"]["principal"].get("id")
-        except (FileNotFoundError, ValueError, KeyError):
-            stored_id = None
-    if stored_id is not None and str(principal_id) != str(stored_id):
+        stored = pinned_principal()
+    except PrincipalPinError as exc:
+        write_notify_escalation("pinned-account record unusable: %s" % exc)
+        print("REFUSED: %s; halt stays, escalated" % exc)
+        return -1
+    if stored is None:
+        print(_NO_PIN_RECOVERY)
+        return -1
+    stored_id = stored["id"]
+    if str(principal_id) != str(stored_id):
         write_notify_escalation(
             "principal mismatch on manual re-sign-in: expected id %s, "
             "saw id %s" % (stored_id, principal_id))
@@ -942,16 +1178,21 @@ def verified_resume_after_manual_signin(principal_id, principal_name="",
     # W6-P2-A4: the id matched, so this is the same account; refresh the
     # stored display name from the fresh verification so the helper UI
     # ("signed in as ...") does not lag a Canvas display-name change.
-    # An account SWITCH never reaches here: id mismatch refuses above.
     if principal_name and str(principal_name).strip():
         try:
-            with open(SESSION_PATH) as f:
-                sess = json.load(f)
-            sess.setdefault("canvas", {}).setdefault("principal", {})["name"] \
-                = str(principal_name).strip()
-            _write_json(SESSION_PATH, sess)
-        except (OSError, ValueError):
+            pin_principal(stored.get("base") or base, stored_id,
+                          principal_name)
+        except PrincipalPinError:
             pass
+        if os.path.exists(SESSION_PATH):
+            try:
+                with open(SESSION_PATH) as f:
+                    sess = json.load(f)
+                sess.setdefault("canvas", {}).setdefault(
+                    "principal", {})["name"] = str(principal_name).strip()
+                _write_json(SESSION_PATH, sess)
+            except (OSError, ValueError):
+                pass
     moved = mark_ops_awaiting_approval()
     _write_json(APPROVAL_PATH,
                 {"re_armed_at": _now(),
@@ -964,10 +1205,10 @@ def verified_resume_after_manual_signin(principal_id, principal_name="",
     # incomplete rig/drill cycle may have left one behind; a completed
     # recovery is the right moment to sweep it.
     age_out_stale_prev()
-    write_notify_resumed(len(quarantined_ops()))
-    print("verified resume (manual sign-in): principal id=%s pinned, "
-          "halt lifted, %d op(s) awaiting fresh per-op approval"
-          % (principal_id, moved))
+    write_notify_resumed(paused_ops())
+    print("verified resume (manual sign-in): principal id=%s matches the "
+          "pinned account, halt lifted, %d op(s) awaiting fresh per-op "
+          "approval" % (principal_id, moved))
     return moved
 
 
@@ -1016,23 +1257,62 @@ def expiry_horizon_warning():
 
 def _session_summary():
     try:
-        with open(SESSION_PATH) as f:
-            c = json.load(f)["canvas"]
-        p = c.get("principal", {})
-        return c.get("base", "?"), p.get("name", "?"), p.get("id", "?")
-    except (FileNotFoundError, ValueError, KeyError):
+        pin = pinned_principal()
+    except PrincipalPinError:
+        pin = None
+    if not pin:
         return "?", "?", "?"
+    return (pin.get("base") or "?", pin.get("name") or "?",
+            pin.get("id") if pin.get("id") is not None else "?")
 
 
-def write_notify_expired(n_quarantined):
+def _split_paused(paused):
+    """(changes that may already be in Canvas, changes never sent)."""
+    sent = sum(1 for op in paused if op.get("write_sent"))
+    return sent, len(paused) - sent
+
+
+def _changes(n):
+    return "1 change" if n == 1 else "%d changes" % n
+
+
+def _may_be_in_canvas_text(n, resumed):
+    one = n == 1
+    text = "%s may already be in Canvas. " % _changes(n)
+    if resumed:
+        text += "Morrow checks the course to see if %s there" % (
+            "it is" if one else "they are")
+    else:
+        text += ("The connection ended while Morrow was sending %s, so "
+                 "Morrow cannot tell if Canvas saved %s. Morrow will not "
+                 "send %s again on its own. Morrow checks the course first"
+                 % (("it",) * 3 if one else ("them",) * 3))
+    return text + (", and asks for your OK before it prepares %s again.\n"
+                   % ("the change" if one else "any of them"))
+
+
+def write_notify_expired(paused):
+    """paused: the changes still waiting on the educator (paused_ops())."""
     base, name, pid = _session_summary()
+    sent, unsent = _split_paused(paused)
+    lines = ""
+    if sent:
+        lines += _may_be_in_canvas_text(sent, resumed=False)
+    if unsent == 1:
+        lines += ("1 change was stopped before Morrow sent it, so it did "
+                  "not change anything in Canvas. It waits for your OK "
+                  "before Morrow sends it.\n")
+    elif unsent:
+        lines += ("%d changes were stopped before Morrow sent them, so "
+                  "they did not change anything in Canvas. Each one waits "
+                  "for your OK before Morrow sends it.\n" % unsent)
+    if not paused:
+        lines = "No change was in progress, so nothing was paused.\n"
     text = (
         "Morrow: your Canvas connection expired.\n\n"
         f"The session for {name} (id {pid}) on {base} is no longer valid.\n"
-        f"{n_quarantined} in-progress operation(s) were paused and saved. "
-        "Nothing was lost and nothing was retried.\n\n"
-        "Next step: sign in to Canvas again in the browser when prompted, "
-        "then confirm each paused operation before it resumes.\n"
+        + lines
+        + "\nNext step: sign in to Canvas again on the helper page.\n"
     )
     os.makedirs(STORE_DIR, mode=0o700, exist_ok=True)
     with open(NOTIFY_PATH, "w") as f:
@@ -1040,14 +1320,32 @@ def write_notify_expired(n_quarantined):
     os.chmod(NOTIFY_PATH, 0o600)
 
 
-def write_notify_resumed(n_ops):
+def write_notify_resumed(paused):
+    """paused: the changes still waiting on the educator (paused_ops())."""
+    if not paused:
+        # Nothing waits on the educator, so the helper page has nothing
+        # left to tell them.
+        try:
+            os.remove(NOTIFY_PATH)
+        except FileNotFoundError:
+            pass
+        return
     base, name, pid = _session_summary()
+    sent, unsent = _split_paused(paused)
+    lines = ""
+    if sent:
+        lines += _may_be_in_canvas_text(sent, resumed=True)
+    if unsent == 1:
+        lines += ("1 change that was not sent is waiting for your OK. "
+                  "Nothing is sent without it.\n")
+    elif unsent:
+        lines += ("%d changes that were not sent are waiting for your OK. "
+                  "Nothing is sent without your OK on each one.\n" % unsent)
     text = (
         "Morrow: your Canvas connection is back.\n\n"
         f"The session for {name} (id {pid}) on {base} was verified as the "
         "same account.\n"
-        f"{n_ops} paused operation(s) are waiting for your approval before "
-        "they resume. Nothing will run without your OK on each one.\n"
+        + lines
     )
     with open(NOTIFY_PATH, "w") as f:
         f.write(text)
@@ -1097,10 +1395,10 @@ def write_notify_escalation(detail):
 def on_expiry_detected(detection, simulated=False):
     """Full expiry handling: halt, quarantine placeholder, notify."""
     impose_halt(detection)
-    write_notify_expired(len(quarantined_ops()))
+    write_notify_expired(paused_ops())
     tag = " (SIMULATED)" if simulated else ""
     print(f"expiry detected{tag}: state={EXPIRED}, write halt imposed, "
-          f"notify.txt written, {len(quarantined_ops())} op(s) quarantined")
+          f"notify.txt written, {len(paused_ops())} op(s) quarantined")
 
 
 def reauth():
@@ -1216,7 +1514,7 @@ def _complete_reauth(old_principal, new_principal):
     except OSError:
         pass
     lift_halt()
-    write_notify_resumed(len(quarantined_ops()))
+    write_notify_resumed(paused_ops())
     print(f"verified resume: principal id={new_principal.get('id')} pinned, "
           f"halt lifted, {moved} op(s) awaiting fresh per-action approval")
     return True
@@ -1266,10 +1564,30 @@ def cmd_quarantine():
           f"(writes_allowed={allowed}; {reason})")
 
 
+def _write_was_sent(op_id):
+    """True when op_id's newest ledger entry says its write was sent."""
+    sent = False
+    for entry in quarantined_ops():
+        if (entry.get("kind") or "op") == "op" \
+                and str(entry.get("op_id")) == str(op_id):
+            sent = bool(entry.get("write_sent"))
+    return sent
+
+
+def approval_refusal_evidence(op_id, status):
+    """The failure translator's evidence for an approve refused because
+    the op is not awaiting approval. Approving never sends a change."""
+    return {"error": "ApprovalRefused",
+            "quarantine_status": status or "none",
+            "nothing_sent": True,
+            "detail": "op_id=%s is not awaiting_approval (status=%s)"
+                      % (op_id, status)}
+
+
 def cmd_approve():
     op_id = _arg("--op-id", None)
     authorization = _arg("--authorization", None)
-    if not op_id or not authorization:
+    if not op_id or not (authorization or "").strip():
         print('usage: state_machine.py approve --op-id <op_id> '
               '--authorization "the educator\'s verbatim approval words"')
         print("W6-P2-A5: the educator must actually say the words; the "
@@ -1280,25 +1598,33 @@ def cmd_approve():
     except ValueError as exc:
         # Agent-facing error funnel: the agent sees the translated
         # four-part message, never the raw refusal text.
+        exc.nothing_sent = True
         try:
             from failures.funnel import agent_error_text
-            print(agent_error_text("approve quarantined op %s" % op_id, exc))
+            print(agent_error_text("approving a paused change", exc))
         except Exception:
             print(f"refused: {exc}")
         return False
     if ok:
-        print(f"approved op_id={op_id} for re-dispatch")
+        if _write_was_sent(op_id):
+            print(f"approved op_id={op_id}. This change may already be in "
+                  "Canvas and its op id is used up, so it is never sent "
+                  "again. Read the item back with a live-proven read and "
+                  "tell the educator what Canvas has. Prepare the change "
+                  "again (plan-write, or catalog in Edit mode) only when "
+                  "that read shows it is not there and the educator says "
+                  "so.")
+        else:
+            print(f"approved op_id={op_id} for re-dispatch")
         return True
+    status = op_quarantine_status(op_id)
     try:
         from failures.funnel import agent_error_text
-        print(agent_error_text(
-            "approve quarantined op %s" % op_id,
-            {"error": "ApprovalRefused",
-             "detail": "op_id=%s is not awaiting_approval (status=%s)"
-                       % (op_id, op_quarantine_status(op_id))}))
+        print(agent_error_text("approving a paused change",
+                               approval_refusal_evidence(op_id, status)))
     except Exception:
         print(f"refused: op_id={op_id} is not awaiting_approval "
-              f"(status={op_quarantine_status(op_id)})")
+              f"(status={status})")
     return False
 
 
@@ -1321,7 +1647,7 @@ def cmd_notify():
     except OSError as exc:
         try:
             from failures.funnel import agent_error_text
-            print(agent_error_text("read educator notification", exc))
+            print(agent_error_text("reading the notice about paused changes", exc))
         except Exception:
             print(f"could not read the educator notification: {exc}")
         return False
@@ -1343,26 +1669,55 @@ def cmd_resume():
     """W4-P2-1: the concrete production recovery caller.
 
     Run AFTER the educator re-signs in through the login helper's own
-    browser tab: the agent first verifies the helper's /status shows a
-    live logged-in session and reads the live principal id from it, then
-    invokes:
-      state_machine.py resume --principal-id <id> [--principal-name N]
-                              [--base B]
-    which pins the live principal against the stored one and, on match,
-    re-arms quarantined ops as awaiting_approval and lifts the halt.
-    On principal mismatch the halt stays and escalation is written.
+    browser tab:
+      state_machine.py resume [--principal-id <id>] [--base B]
+    It reads the live principal itself (helper /status must show a live
+    session, then GET /api/v1/users/self). A --principal-id that
+    disagrees with the live account is refused. The live account must
+    match the pinned one; on match, quarantined ops are re-armed as
+    awaiting_approval and the halt lifts. On mismatch, or with no
+    pinned account, the halt stays.
     """
-    principal_id = _arg("--principal-id", None)
-    if not principal_id:
-        print("usage: state_machine.py resume --principal-id <id> "
-              "[--principal-name <name>] [--base <base>]")
-        print("run only after verifying the login helper's /status shows "
-              "a live logged-in session for the educator")
+    claimed = _arg("--principal-id", None)
+    try:
+        live_id, live_name, live_base = read_live_principal(
+            _arg("--base", "") or None)
+    except PrincipalPinError as exc:
+        print("REFUSED: %s; halt stays" % exc)
+        return False
+    if claimed is not None and str(claimed) != str(live_id):
+        print("REFUSED: --principal-id %s is not the signed-in account "
+              "(live id %s); halt stays" % (claimed, live_id))
         return False
     moved = verified_resume_after_manual_signin(
-        principal_id, principal_name=_arg("--principal-name", "") or "",
-        base=_arg("--base", "") or "")
+        live_id, principal_name=live_name, base=live_base)
     return moved >= 0
+
+
+def cmd_pin():
+    """Pin the signed-in Canvas account (first sign-in, or recovery).
+
+      state_machine.py pin --first-signin      # keepalive / FIRST_RUN step 4
+      state_machine.py pin --confirm-account "<educator's own words>"
+
+    --first-signin is quiet and succeeds when the same account is
+    already pinned. It refuses during a re-auth halt (it would pin
+    whoever signed back in). --confirm-account records the educator's
+    verbatim confirmation that the signed-in account is theirs.
+    """
+    first = "--first-signin" in sys.argv
+    confirmation = _arg("--confirm-account", None)
+    try:
+        live_id, live_name, live_base = read_live_principal(
+            _arg("--base", "") or None)
+        rec = pin_principal(live_base, live_id, live_name,
+                            first_signin=first, confirmation=confirmation)
+    except PrincipalPinError as exc:
+        print("NOT PINNED: %s" % exc)
+        return False
+    print("pinned Canvas account: %s (id %s) on %s"
+          % (rec.get("name") or "?", rec.get("id"), rec.get("base")))
+    return True
 
 
 def cmd_status():
@@ -1375,7 +1730,8 @@ def cmd_status():
             print(f"kind={kind} op_id={op.get('op_id')} "
                   f"status={op.get('status')} action={op.get('action')}"
                   + (f" cause={op.get('cause')}" if kind == "session_death"
-                     else ""))
+                     else "")
+                  + (" write_sent=True" if op.get("write_sent") else ""))
     print(f"write_halt={is_write_halted()} state={get_state()}")
     # W4-P2-3: surface the pre-expiry horizon on every status view so
     # the educator sees the warning before the session dies.
@@ -1489,6 +1845,8 @@ def main():
         sys.exit(0 if cmd_notify() else 1)
     elif cmd == "resume":
         sys.exit(0 if cmd_resume() else 1)
+    elif cmd == "pin":
+        sys.exit(0 if cmd_pin() else 1)
     elif cmd == "status":
         sys.exit(0 if cmd_status() else 1)
     elif cmd == "selftest":
