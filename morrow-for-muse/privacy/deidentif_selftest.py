@@ -599,7 +599,7 @@ def _restore_source_vault(old):
 def _have_crypto():
     try:
         from privacy import core as _pc
-        return _pc.AESGCM is not None
+        return _pc.learner_vault_problem() is None
     except Exception:
         return False
 

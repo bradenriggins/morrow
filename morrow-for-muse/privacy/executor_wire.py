@@ -227,7 +227,7 @@ def _editor_slots(node, out):
 def _vault_labels_for(entry, tenant_base, lane_context):
     """{learner id: label} for learners the vault already labeled in this
     entry's course scope, or {} when there is no vault to ask."""
-    if _privacy_core.AESGCM is None:
+    if _privacy_core.learner_vault_problem() is not None:
         return {}
     course_id = _entry_course_id(entry)
     path = _source_vault_path()
@@ -408,7 +408,7 @@ def _project_course_content(entry, result, tenant_base, lane_context,
         course_id = synced[0][1]
     origin = _exact_origin(tenant_base, error_cls)
     try:
-        if _privacy_core.AESGCM is None:
+        if _privacy_core.learner_vault_problem() is not None:
             fresh = _fresh_roster(origin, course_id)
             if not fresh:
                 return result
@@ -438,7 +438,7 @@ def project_course_text(tenant_base, course_id, value, identities,
     (roster_identities). use_vault=False, or no encrypted vault, hides
     each form one way and never touches the vault."""
     origin = _exact_origin(tenant_base, ValueError)
-    if not use_vault or _privacy_core.AESGCM is None:
+    if not use_vault or _privacy_core.learner_vault_problem() is not None:
         return _content.project_value(value,
                                       _content.prepare_hidden(identities))
     token = _COURSE_ROSTERS.set({})
@@ -723,24 +723,11 @@ def project_learner_result(entry, result, tenant_base, lane_context=None,
                                                    error_cls)
                        if key not in harvested]
     vault_path = _source_vault_path()
-    if _privacy_core.AESGCM is None:
-        # Fail closed AND actionable, before the boundary's invoke()
-        # swallows the cause into its generic refusal: without the
-        # 'cryptography' package the file-backed vault cannot seal or
-        # open, so projection is impossible. Name the missing package
-        # and the exact fix; the educator must never get a mystery
-        # "boundary could not be verified" here. (2026-09-22 first-run
-        # audit: the wire previously failed the install's selftest on
-        # machines without the optional dependency, and the live lane
-        # surfaced the same mystery on learner-data reads.)
+    vault_problem = _privacy_core.learner_vault_problem()
+    if vault_problem is not None:
         raise error_cls(
-            "learner-data projection for entry %r needs the encrypted "
-            "learner vault, which needs the 'cryptography' package "
-            "(pinned cryptography==50.0.1 in requirements-optional.txt), "
-            "and it is not installed. Install it with "
-            "'pip install -r requirements-optional.txt', then retry. "
-            "Nothing was read and nothing was surfaced."
-            % entry.get("name"))
+            "Learner-data projection is unavailable: %s "
+            "No learner data was surfaced." % vault_problem)
     # Give every string in the raw receipt the same reversible
     # course-content projection the plain path gives first: form
     # markers, and "(as written)" for text that already reads like a
@@ -830,7 +817,7 @@ def issue_labels(tenant_base, course_id, identities, provider=None):
     when the vault cannot be used (no 'cryptography'): no label, no
     answer. Unlike a projected read this never renders text, so two
     students who share a display name still get their own labels."""
-    if _privacy_core.AESGCM is None:
+    if _privacy_core.learner_vault_problem() is not None:
         raise RuntimeError(
             "course labels need the encrypted learner vault, which needs "
             "the 'cryptography' package (requirements-optional.txt)")
@@ -999,7 +986,7 @@ def _free_text_refs(value, tenant_base, course_id, conversation_id,
             "the text of this change names %s, but the change targets no "
             "course; student labels belong to one course. Nothing was "
             "sent." % ", ".join(sorted(labels)))
-    if _privacy_core.AESGCM is None:
+    if _privacy_core.learner_vault_problem() is not None:
         raise error_cls(
             "the text of this change names a student by label, and putting "
             "the student's name back needs the encrypted learner vault "
@@ -1060,7 +1047,7 @@ def _lookup_learner_refs(value, tenant_base, course_id, conversation_id,
     _map_learner_positions(value, collect, extra_keys)
     if not refs:
         return {}
-    if _privacy_core.AESGCM is None:
+    if _privacy_core.learner_vault_problem() is not None:
         raise error_cls(
             "this write names a student by label, and turning a label "
             "into the student's LMS id needs the encrypted learner vault "

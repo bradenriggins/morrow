@@ -62,12 +62,12 @@ The steps below cover Canvas sign-in and readback.
 Download the versioned package and its checksums from the GitHub release. Run these commands in an empty download folder. Verify the package before you unzip it.
 
 ```
-curl -fL -o morrow-muse-connector-0.4.7.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.7/morrow-muse-connector-0.4.7.zip
-curl -fL -o SHA256SUMS https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.7/SHA256SUMS
+curl -fL -o morrow-muse-connector-0.4.8.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.8/morrow-muse-connector-0.4.8.zip
+curl -fL -o SHA256SUMS https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.8/SHA256SUMS
 sha256sum --check SHA256SUMS
 ```
 
-The checksum check must print `morrow-muse-connector-0.4.7.zip: OK`. Stop if a download or checksum check fails.
+The checksum check must print `morrow-muse-connector-0.4.8.zip: OK`. Stop if a download or checksum check fails.
 
 Unzip the release into the skills directory. Run these commands from
 the folder that holds the zip. Running them again is safe: they update
@@ -77,7 +77,7 @@ sign-in in `helper/profile/`.
 ```
 mkdir -p ~/workspace/skills
 rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
-unzip -q morrow-muse-connector-0.4.7.zip -d ~/workspace/skills/
+unzip -q morrow-muse-connector-0.4.8.zip -d ~/workspace/skills/
 cd ~/workspace/skills
 if [ -d morrow-canvas ]; then
   cp -R morrow-muse-connector/. morrow-canvas/
