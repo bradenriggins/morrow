@@ -2623,7 +2623,7 @@ def _probe_binary_version(path):
     # Distro builds append build notes after the version ("built on
     # Debian GNU/Linux 13 (trixie)", "snap"); the version itself must
     # still be exactly four numeric parts.
-    m = re.match(r"^(Chromium|Google Chrome)\s+(\d+)\.(\d+)\.(\d+)\.(\d+)"
+    m = re.match(r"^(Chromium|Google Chrome(?: for Testing)?)\s+(\d+)\.(\d+)\.(\d+)\.(\d+)"
                  r"(?:\s+\S.*)?\s*$", text)
     if not m or proc.returncode != 0:
         raise RuntimeError(

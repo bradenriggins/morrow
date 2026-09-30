@@ -1406,6 +1406,7 @@ class HelperBrowser:
         # the query. W3-P2-6: the profile path abbreviates $HOME as ~.
         horizon_days = self._cookie_expiry_horizon_days()
         return {"url": _loggable_url(href) if href else "",
+                "canvas_origin": self.base_url.rstrip("/"),
                 "logged_in": logged_in,
                 "chromium_alive": chromium_alive,
                 "starting": starting,

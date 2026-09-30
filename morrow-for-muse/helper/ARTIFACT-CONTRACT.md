@@ -30,6 +30,17 @@ When a display path starts with `~/`, expand it against the established helper
 home before checking the real path. An unknown home or a different directory
 must fail closed. Preserve the bound tree and version check on every action.
 
+Verify `/status.canvas_origin` against the configured normalized Canvas origin,
+including scheme and port. That field comes from the helper's configuration;
+the current page URL is a separate value. A school can redirect Canvas sign-in
+to an external HTTPS identity provider. Show that current host clearly and
+retain private sign-in controls in the same verified browser. Such a page does
+not count as signed-in Canvas. Missing or different `canvas_origin` requires a
+helper update or repair; never infer the configured tenant from the page URL.
+Keep programmatic navigation and course API egress tenant-only. The Open Canvas
+action returns to the configured origin root so the school can run its normal
+SSO flow; do not force `/login/canvas` or accept a caller-supplied URL.
+
 ## Client behavior
 
 Use the [ordered input contract](README.md#ordered-private-input). One native
