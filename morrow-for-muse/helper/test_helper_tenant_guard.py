@@ -215,3 +215,18 @@ def test_the_page_has_no_address_box_and_no_navigate_call():
     assert 'id="tenant"' not in page
     assert 'id="go"' not in page
     assert "goTenant" not in page
+
+
+def test_status_url_never_discloses_url_credentials():
+    server = _server_module()
+    cases = [
+        ("https://user:password@school.example/login?code=secret#token", "https://school.example/login"),
+        ("https://user%40school:password%3Asecret@school.example:8443/login", "https://school.example:8443/login"),
+        ("https://user:password@[2001:db8::1]:8443/login", "https://[2001:db8::1]:8443/login"),
+        ("https://school.example/login?code=secret#token", "https://school.example/login"),
+        ("https://user:password@", "<unparseable-url>"),
+        ("https://user:password@school.example:invalid/login", "<unparseable-url>"),
+        ("about:blank", "<unparseable-url>"),
+    ]
+    for raw, expected in cases:
+        assert server._loggable_url(raw) == expected
