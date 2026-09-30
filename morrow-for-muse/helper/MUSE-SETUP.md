@@ -26,6 +26,10 @@ skill. Read `artifact.status`, require `share.shared=false`, and present
 its `card.widget_id` through `widget.present`. An unpublished artifact
 has no public URL; never assemble one.
 
+Read the [reusable card contract](ARTIFACT-CONTRACT.md) before creating or
+updating the card. It specifies the actual configuration sources and readable
+initial zoom; shared package code must not embed one account's values.
+
 ## Connect the exact helper
 
 1. Activate the runtime environment from `INSTALL.md` Step 2.
