@@ -26,7 +26,7 @@ function readChild(index: number) {
   };
 }
 
-function readBatch(store: DurableBatchStore, count: number) {
+function readBatch(store: DurableBatchStore, count: number, courseCount = count) {
   return store.create({
     name: `Read ${count} courses`,
     mode: "read_only",
@@ -37,7 +37,7 @@ function readBatch(store: DurableBatchStore, count: number) {
     expiresAt: "2030-01-01T00:00:00.000Z",
     courseSet: {
       source: "explicit",
-      courseIds: Array.from({ length: count }, (_, index) => String(index + 1)),
+      courseIds: Array.from({ length: courseCount }, (_, index) => String(index + 1)),
       complete: true,
       paginationComplete: true,
     },
@@ -46,6 +46,9 @@ function readBatch(store: DurableBatchStore, count: number) {
 }
 
 describe("BAT durable batch requirements", () => {
+  it("retains a scope above 10000 courses while bounding operations separately", () => {
+    expect(resolveBatchCourseSet({ source: "explicit", courseIds: Array.from({ length: 12_001 }, (_, index) => String(index + 1)), complete: true, paginationComplete: true }).courseIds).toHaveLength(12_001);
+  });
   it("BAT-01 freezes the 25-course course set and complete manifest facts", () => {
     const store = new DurableBatchStore({ path: ":memory:", encryptionKey: randomBytes(32) });
     const created = readBatch(store, 25);

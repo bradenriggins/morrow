@@ -1416,15 +1416,12 @@ function renderCourseList(focus = courseFocusToRestore()) {
   discoveryMoreButton.disabled = state.busy;
 
   const ready = connectedBindings.filter((binding) => isEligible(binding) && binding.runtimeVerified === true);
-  const max = Number.isInteger(state.status?.bindingLimit) ? state.status.bindingLimit : 500;
   if (state.statusReadFailed) {
     connectionStatus.textContent = "Connected courses were not checked.";
   } else if (!state.status) {
     connectionStatus.textContent = "Checking your connected learning platforms…";
   } else if (!connectedBindings.length) {
     connectionStatus.textContent = "No course is connected yet.";
-  } else if (connectedBindings.length >= max) {
-    connectionStatus.textContent = `The connector returned ${plural(connectedBindings.length, "connected course")}, which is the ${max}-course settings limit. Disconnect a course before adding another.`;
   } else {
     const needsSite = connectedBindings.length - ready.length;
     connectionStatus.textContent = needsSite

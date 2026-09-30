@@ -993,7 +993,7 @@ class InstallerController {
         throw new TypeError("Blackboard did not return a valid integration account");
       }
       const memberships = await client.collect(`/learn/api/public/v1/users/${encodeURIComponent(principal.id)}/courses`, {
-        label: "course membership", expand: ["course"], maxRecords: 500
+        label: "course membership", expand: ["course"], maxRecords: Number.POSITIVE_INFINITY, maxPages: Number.POSITIVE_INFINITY
       });
       const courses = memberships.map((membership) => {
         if (!membership || typeof membership !== "object" || Array.isArray(membership) || membership.userId !== principal.id) {

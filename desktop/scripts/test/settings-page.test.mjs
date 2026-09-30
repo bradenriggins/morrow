@@ -78,7 +78,7 @@ const MOODLE_ROUTINE_OPTIONS = CURATED_CATEGORY_SPECS.filter((spec) => spec.prov
   .map((spec) => ({ id: spec.id, group: spec.group, label: spec.label, description: spec.description, availability: "edit", destructive: false, verification: "checked", routine: true, rememberable: true }));
 
 function statusFixture(bindings, fields = {}) {
-  return { bindings, catalogDigest: CATALOG_DIGEST, siteAnchors: [], bindingLimit: 500, ...fields };
+  return { bindings, catalogDigest: CATALOG_DIGEST, siteAnchors: [], ...fields };
 }
 
 function optionsFixture(sourceBindingId, options, fields = {}) {
@@ -1498,15 +1498,15 @@ test("an action's failure stays on the page after the reads that follow it", asy
     status: () => statusFixture([], { siteAnchors: [site] }),
     handlers: {
       morrow_course_discovery_start: () => discoveryResult(site, "discovery-1", [{ id: "7", name: "Anatomy" }]),
-      morrow_course_selection_save: () => ({ ok: false, code: "binding_limit_reached", error: "binding_limit_reached" }),
+      morrow_course_selection_save: () => ({ ok: false, code: "course_selection_target_refused", error: "course_selection_target_refused" }),
     },
   });
   await connector.waitFor(() => connector.queryAll("[data-connect-row]").length === 1, "the available course never showed");
   await connector.click('[data-connect-row="https://canvas.example.edu|7"]');
   await settle(connector);
-  assert.equal(connector.text("#error"), problemText("binding_limit_reached"), "Connect");
+  assert.equal(connector.text("#error"), problemText("course_selection_target_refused"), "Connect");
   await backgroundReads(connector);
-  assert.equal(connector.text("#error"), problemText("binding_limit_reached"), "Connect, after a background read");
+  assert.equal(connector.text("#error"), problemText("course_selection_target_refused"), "Connect, after a background read");
 });
 
 // A failed read is still answered by the next read that succeeds.

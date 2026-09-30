@@ -275,7 +275,7 @@ test("a paired Bridge without a connected course asks for the course", () => {
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Pair your learning account.");
   // Every control the steps name exists in Morrow Bridge, and the panel ends with an action.
-  for (const label of ["Pair Canvas account", "Open Plan and Edit settings", "Your courses", "Connect", "Check Bridge"]) {
+  for (const label of ["Pair Canvas account", "Open Plan and Edit settings", "Your courses", "Check Bridge"]) {
     assert.ok(view.body.includes(`<strong>${label}</strong>`), `the steps name ${label}`);
   }
   for (const missing of ["Connect selected courses in Plan", "Connect Canvas", "Connect Moodle", "Plan and Edit settings</strong>, choose"]) {
@@ -698,7 +698,7 @@ test("the completed course connection shows the three status lines, then three e
 // title that names only a thing tells a person nothing about it. These are the
 // verbs the setup views use. A view whose title names no function, action,
 // result or constraint fails here until it names one.
-const TITLE_VERB = /\b(?:add|open|approve|are|ask|asks|can|cannot|change|check|choose|complete|completed|configures|confirm|connect|connected|continue|could|did|does|finish|found|get|has|install|is|keeps|leaves|opens|read|reads|ready|reload|remove|removes|repair|restart|returned|set|show|stays|use|uses|was|will|writes)\b/i;
+const TITLE_VERB = /\b(?:add|open|approve|are|ask|asks|can|cannot|change|check|choose|complete|completed|configures|confirm|connect|connected|continue|could|did|does|finish|found|get|has|install|is|keeps|leaves|opens|pair|paired|read|reads|ready|reload|remove|removes|repair|restart|returned|set|show|stays|use|uses|was|will|writes)\b/i;
 
 // Names of things, with nothing said about them. None of them is a title.
 const BARE_LABELS = new Set([

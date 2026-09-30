@@ -205,6 +205,7 @@ interface ActiveClient {
   readonly generation: number;
   readonly connectedAt: number;
   bindings: readonly BridgeBinding[];
+  bindingSync?: { readonly id: string; nextPart: number; lastSeenAt: number; readonly bindings: Map<string, BridgeBinding> };
   lastSeenAt: number;
 }
 
@@ -852,7 +853,30 @@ export class LoopbackBridgeServer {
     if (message.schema === BRIDGE_SCHEMAS.bindings) {
       if (message.generation !== active.generation) return;
       active.lastSeenAt = Date.now();
-      active.bindings = normalizeBridgeBindings(message.bindings);
+      if (message.syncId === undefined) {
+        active.bindingSync = undefined;
+        active.bindings = message.bindings;
+        return;
+      }
+      if (message.part === 0) active.bindingSync = { id: message.syncId, nextPart: 0, lastSeenAt: Date.now(), bindings: new Map() };
+      const transfer = active.bindingSync;
+      if (!transfer || transfer.id !== message.syncId || transfer.nextPart !== message.part || Date.now() - transfer.lastSeenAt > 30_000) {
+        socket.close(4400, "invalid_bindings_transfer");
+        return;
+      }
+      for (const binding of message.bindings) {
+        if (transfer.bindings.has(binding.sourceBindingId)) {
+          socket.close(4400, "duplicate_binding");
+          return;
+        }
+        transfer.bindings.set(binding.sourceBindingId, binding);
+      }
+      transfer.nextPart += 1;
+      transfer.lastSeenAt = Date.now();
+      if (message.complete === true) {
+        active.bindings = [...transfer.bindings.values()].sort((left, right) => left.sourceBindingId < right.sourceBindingId ? -1 : left.sourceBindingId > right.sourceBindingId ? 1 : 0);
+        active.bindingSync = undefined;
+      }
       return;
     }
     if (message.schema === BRIDGE_SCHEMAS.pong) {

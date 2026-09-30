@@ -472,8 +472,8 @@ function exactRatePolicy(value: BatchRatePolicyInput | undefined): BatchRatePoli
 
 export function resolveBatchCourseSet(input: BatchCourseSetInput): ResolvedBatchCourseSet {
   if (!COURSE_SET_SOURCES.includes(input.source)) throw new TypeError("course set source is invalid");
-  if (!Array.isArray(input.courseIds) || input.courseIds.length < 1 || input.courseIds.length > MAX_BATCH_CHILDREN) {
-    throw new TypeError(`course set must contain 1 through ${MAX_BATCH_CHILDREN} course ids`);
+  if (!Array.isArray(input.courseIds) || input.courseIds.length < 1) {
+    throw new TypeError("course set must contain at least one course id");
   }
   const courseIds = input.courseIds.map((courseId) => resolvedCourseId(courseId, "course id"));
   if (new Set(courseIds).size !== courseIds.length) throw new TypeError("course set ids must be unique");

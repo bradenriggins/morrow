@@ -333,13 +333,13 @@ function blackboardSnapshot(value) {
     let baseUrl;
     try { baseUrl = new URL(tenant.baseUrl); } catch { return []; }
     if (baseUrl.protocol !== "https:" || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash || baseUrl.pathname !== "/") return [];
-    const courseBindings = tenant.courseBindings.slice(0, 500).flatMap((binding) => {
+    const courseBindings = tenant.courseBindings.flatMap((binding) => {
       if (!binding || typeof binding !== "object" || Array.isArray(binding)
         || typeof binding.sourceBindingId !== "string" || !sourceBinding.test(binding.sourceBindingId)
         || typeof binding.courseId !== "string" || !blackboardId.test(binding.courseId)) return [];
       return [{ sourceBindingId: binding.sourceBindingId, courseId: binding.courseId }];
     });
-    const availableCourses = Array.isArray(tenant.availableCourses) ? tenant.availableCourses.slice(0, 500).flatMap((course) => {
+    const availableCourses = Array.isArray(tenant.availableCourses) ? tenant.availableCourses.flatMap((course) => {
       if (!course || typeof course !== "object" || Array.isArray(course)
         || typeof course.courseId !== "string" || !blackboardId.test(course.courseId)
         || typeof course.title !== "string" || !course.title.trim() || course.title.trim().length > 500) return [];

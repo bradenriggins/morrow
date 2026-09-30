@@ -55,7 +55,9 @@ function render(status) {
   courseAccessMode.value = status?.courseAccessMode === "account" ? "account" : "selected";
   courseAccessMode.disabled = accessInFlight || !status;
   courseAccessHelp.textContent = courseAccessMode.value === "account"
-    ? "Ask your assistant to work in any course this account can access. Give it a course name, course ID, or course link. Plan and Edit still control changes."
+    ? status?.accountCoursesLoading
+      ? `Finding available courses… ${status.discoveredCourseCount || 0} found. Morrow keeps your previous course scope until the scan is complete. You can close this page; discovery continues automatically.`
+      : "Ask your assistant to work in one or many available courses. Give it a course name, course ID, or course link. Plan and Edit still control changes."
     : "Morrow can use only the courses you allow. Choose them once in Plan and Edit settings.";
   const state = setupGuideState(status);
   statusDot.classList.toggle("ready", state.tone === "ready");

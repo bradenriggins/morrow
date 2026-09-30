@@ -106,7 +106,7 @@ function render(status) {
   current = status;
   courseAccessMode.value = status?.courseAccessMode === "account" ? "account" : "selected";
   courseAccessHelp.textContent = courseAccessMode.value === "account"
-    ? "Ask your assistant to work in any course this account can access. Give it a course name, course ID, or course link. Plan and Edit still control changes."
+    ? "Ask your assistant to work in one or many available courses. Give it a course name, course ID, or course link. Plan and Edit still control changes."
     : "Morrow can use only the courses you allow. Choose them once in Plan and Edit settings.";
   const nextAnnouncement = statusAnnouncement(status);
   if (announcement.textContent !== nextAnnouncement) announcement.textContent = nextAnnouncement;
@@ -141,13 +141,13 @@ function render(status) {
     const accountAccess = status?.courseAccessMode === "account";
     accountLabel.textContent = accountAccess ? "Paired account" : binding ? "Course" : anchor?.runtimeVerified === true ? "Connected platform" : "Saved platform";
     accountOrigin.textContent = accountAccess
-      ? `${anchor?.origin || binding?.origin || "Learning platform"} · ${status.bindingCount || status.bindings?.length || 0} courses available`
+      ? status.accountCoursesLoading ? `Finding available courses… ${status.discoveredCourseCount || 0} found` : `${anchor?.origin || binding?.origin || "Learning platform"} · ${status.bindingCount || status.bindings?.length || 0} courses available`
       : binding
       ? `${binding.courseName || "Selected course"}${status.bindingCount > 1 ? ` · ${status.bindingCount} courses selected` : ""}`
       : `${anchor?.provider === "moodle" ? "Moodle" : anchor?.provider === "canvas" ? "Canvas" : "Learning platform"}`;
     setConnectedAt(binding?.lastSeenAt ?? anchor?.lastSeenAt);
   }
-  courseLabel.textContent = binding ? "Connection" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Learning platform" : "Course";
+  courseLabel.textContent = status?.courseAccessMode === "account" ? "Course access" : binding ? "Connection" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Learning platform" : "Course";
   canvasValue.textContent = courseValue(status);
   disconnect.hidden = status?.paired !== true;
   renderCourses();

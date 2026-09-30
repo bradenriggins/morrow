@@ -13,7 +13,6 @@ export const BRIDGE_PATH = "/morrow-bridge/v1" as const;
 export const MAX_BRIDGE_MESSAGE_BYTES = 2 * 1024 * 1024;
 export const MIN_BRIDGE_TOKEN_LENGTH = 32;
 export const MAX_BRIDGE_TOKEN_LENGTH = 512;
-export const MAX_BRIDGE_BINDINGS = 500;
 export const MAX_BRIDGE_EDIT_CATEGORIES = 500;
 export const MAX_BRIDGE_EDIT_OPTIONS = 600;
 export const MAX_BRIDGE_EDIT_RULES = 500;
@@ -376,6 +375,9 @@ export interface BridgeBindingsMessage {
   readonly generation: number;
   readonly bindings: readonly BridgeBinding[];
   readonly sentAt: number;
+  readonly syncId?: string;
+  readonly part?: number;
+  readonly complete?: boolean;
 }
 
 export interface BridgePing {
@@ -1160,7 +1162,7 @@ export function normalizeBridgeEditPolicySet(value: unknown): BridgeEditPolicySe
     if (mode !== "edit") throw new TypeError("editPolicySet.merge is invalid for Plan");
     if (value.merge !== true) throw new TypeError("editPolicySet.merge is invalid");
   }
-  if (!Array.isArray(value.selections) || value.selections.length === 0 || value.selections.length > MAX_BRIDGE_BINDINGS) {
+  if (!Array.isArray(value.selections) || value.selections.length === 0) {
     throw new TypeError("editPolicySet.selections exceeds the bridge limit");
   }
   const selections = value.selections.map((entry, index) => {
@@ -1372,7 +1374,6 @@ function parseBinding(value: unknown): BridgeBinding {
 
 export function normalizeBridgeBindings(value: unknown): readonly BridgeBinding[] {
   if (!Array.isArray(value)) throw new TypeError("bindings must be an array");
-  if (value.length > MAX_BRIDGE_BINDINGS) throw new TypeError("bindings exceed the bridge limit");
   const byId = new Map<string, BridgeBinding>();
   for (const entry of value) {
     const binding = parseBinding(entry);
@@ -1662,16 +1663,20 @@ export function parseBridgeClientMessage(value: unknown): BridgeClientMessage {
   if (value.schema === BRIDGE_SCHEMAS.hello) return parseBridgeHello(value);
   if (value.schema === BRIDGE_SCHEMAS.result) return parseBridgeResult(value);
   if (value.schema === BRIDGE_SCHEMAS.bindings) {
-    if (Object.keys(value).some((key) => !["schema", "protocolVersion", "generation", "bindings", "sentAt"].includes(key))) {
+    if (Object.keys(value).some((key) => !["schema", "protocolVersion", "generation", "bindings", "sentAt", "syncId", "part", "complete"].includes(key))) {
       throw new TypeError("bridge bindings message has unsupported fields");
     }
     if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) throw new TypeError("bridge protocol version is unsupported");
+    const chunked = value.syncId !== undefined || value.part !== undefined || value.complete !== undefined;
+    const syncId = chunked ? requiredString(value.syncId, "syncId", 64) : undefined;
+    if (chunked && (!/^[A-Za-z0-9_-]{16,64}$/.test(syncId!) || typeof value.complete !== "boolean")) throw new TypeError("bridge bindings transfer is invalid");
     return {
       schema: BRIDGE_SCHEMAS.bindings,
       protocolVersion: BRIDGE_PROTOCOL_VERSION,
       generation: requiredInteger(value.generation, "generation", 1),
       bindings: normalizeBridgeBindings(value.bindings),
       sentAt: requiredInteger(value.sentAt, "sentAt"),
+      ...(chunked ? { syncId: syncId!, part: requiredInteger(value.part, "part"), complete: value.complete as boolean } : {}),
     };
   }
   if (value.schema === BRIDGE_SCHEMAS.pong) {

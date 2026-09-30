@@ -267,7 +267,7 @@ function startCanvas(directory) {
     ["701", { id: "701", context_codes: ["course_42"], sub_context_codes: [], title: "Office hours", location_name: "Room 2", workflow_state: "active" }],
     ["702", { id: "702", context_codes: ["course_42", "course_43"], sub_context_codes: [], title: "Shared office hours", location_name: "Room 3", workflow_state: "active" }],
   ]);
-  const courses = Array.from({ length: 501 }, (_, index) => ({ id: String(index + 1), name: `Synthetic Course ${index + 1}` }));
+  const courses = Array.from({ length: process.argv.includes("--unlimited-account-access") ? 12_001 : 501 }, (_, index) => ({ id: String(index + 1), name: index > 500 ? `Synthetic Course ${index + 1}`.padEnd(500, "x") : `Synthetic Course ${index + 1}` }));
   courses[41] = { id: "42", name: "Introduction to Human Biology" };
   courses[42] = { id: "43", name: "Synthetic Human Anatomy" };
   courses[500] = { id: "501", name: LONG_COURSE_NAME };
@@ -1580,7 +1580,9 @@ try {
   await popup.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
 
   if (process.argv.includes("--account-access-only")) {
-    const ids = ["42", ...Array.from({ length: 29 }, (_, i) => String(i + 1))];
+    const large = process.argv.includes("--unlimited-account-access");
+    const count = large ? 12_001 : 30;
+    const ids = large ? Array.from({ length: count }, (_, i) => String(i + 1)) : ["42", ...Array.from({ length: 29 }, (_, i) => String(i + 1))];
     canvas.setDiscoveryCourseIds(ids);
     const before = await replacementWorker.evaluate(async () => (await chrome.storage.local.get("token")).token);
     await popup.close();
@@ -1590,35 +1592,48 @@ try {
     accountInspector = await chromium.connectOverCDP(`http://127.0.0.1:${debuggingPort}`);
     popup = await waitFor(() => accountInspector.contexts().flatMap(c => c.pages()).find(p => p.url() === `chrome-extension://${EXTENSION_ID}/popup/popup.html`), "real toolbar popup did not open");
     await popup.locator("#course-access-mode").selectOption("account");
-    await waitFor(async () => (await replacementWorker.evaluate(async () => (await chrome.storage.local.get("courseAccessMode")).courseAccessMode)) === "account", "account mode was not saved");
+    await waitFor(async () => await replacementWorker.evaluate(async () => { const saved = await chrome.storage.local.get(["courseAccessMode", "accountCourseDiscovery"]); return saved.courseAccessMode === "account" || Boolean(saved.accountCourseDiscovery); }), "account mode was not saved or scheduled");
     const pagesBeforeAccountPair = context.pages().length;
     await popup.getByRole("button", { name: "Pair Canvas account", exact: true }).click();
-    await waitFor(() => runtime.bridge.listBindings().length === 30, "one paired account did not expose thirty courses");
+    if (large) {
+      await popup.locator("#detail").filter({ hasText: "Finding available courses…" }).waitFor();
+      assert.equal(await popup.locator("#canvas-value").innerText(), "Finding courses");
+      await popup.screenshot({ path: join(OUTPUT, "popup-account-discovery-progress.png") });
+      for (let step = 0; step < 10; step += 1) {
+        const resumed = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "morrow_course_access_set", mode: "account" }));
+        assert.equal(resumed.ok, true, JSON.stringify(resumed));
+        if (!resumed.result.pending) break;
+      }
+    }
+    await waitFor(() => runtime.bridge.listBindings().length === count, "one paired account did not expose every course");
     const accountBindings = runtime.bridge.listBindings();
     assert.equal(new Set(accountBindings.map(b => b.origin)).size, 1);
-    const values = await Promise.all(accountBindings.map(b => runtime.call("canvas_get_single_course_courses", { id: b.courseId, _morrow: { source_binding_id: b.sourceBindingId } })));
+    const sampled = large ? [...accountBindings.slice(0, 30), accountBindings.find(b => b.courseId === "12001")] : accountBindings;
+    const values = await Promise.all(sampled.map(b => runtime.call("canvas_get_single_course_courses", { id: b.courseId, _morrow: { source_binding_id: b.sourceBindingId } })));
     for (let i = 0; i < values.length; i += 1) {
       assert.equal(values[i].ok, true, JSON.stringify(values[i]));
-      assert.equal(values[i].result.data.id, accountBindings[i].courseId);
+      assert.equal(values[i].result.data.id, sampled[i].courseId);
     }
     await popup.reload();
-    await popup.getByText("Your assistant can work across 30 courses together.", { exact: false }).waitFor();
+    await popup.getByText(`Your assistant can work across ${count} courses together.`, { exact: false }).waitFor();
     assert.equal(context.pages().length, pagesBeforeAccountPair, "Account access must not open a course selector");
     assert.equal(await popup.locator("#courses").isHidden(), true);
     const after = await replacementWorker.evaluate(async () => await chrome.storage.local.get(["token", "editPolicies"]));
     assert.equal(after.token, before);
     assert.equal(Object.keys(after.editPolicies || {}).length, 0);
+    const storageBytes = await replacementWorker.evaluate(() => chrome.storage.local.getBytesInUse(null));
+    if (large) assert.ok(storageBytes > 10 * 1024 * 1024, `large inventory used only ${storageBytes} bytes`);
     assert.equal(await popup.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await popup.screenshot({ path: join(OUTPUT, "popup-account-access-native.png") });
     const accountPreview = await context.newPage();
     await accountPreview.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
-    await accountPreview.getByText("Your assistant can work across 30 courses together.", { exact: false }).waitFor();
+    await accountPreview.getByText(`Your assistant can work across ${count} courses together.`, { exact: false }).waitFor();
     await captureThemes(accountPreview, "popup-account-access-320", 320);
     await accountPreview.locator("#course-access-mode").selectOption("selected");
     await waitFor(() => runtime.bridge.listBindings().length === 0, "Selected courses did not restore the original empty scope");
     await accountPreview.getByRole("button", { name: "Choose courses", exact: true }).waitFor();
     assert.equal((await replacementWorker.evaluate(async () => (await chrome.storage.local.get("token")).token)), before);
-    const receipt = { ok: true, mode: "account", coursesRead: values.length, selectedScopeRestored: true, pairingUnchanged: true, editGrants: 0, courseSelectorOpened: false,
+    const receipt = { ok: true, mode: "account", coursesAvailable: count, coursesRead: values.length, storageBytes, selectedScopeRestored: true, pairingUnchanged: true, editGrants: 0, courseSelectorOpened: false,
       browserVersion: accountInspector.version(),
       workerSha256: createHash("sha256").update(readFileSync(join(EXTENSION, "src/service-worker.js"))).digest("hex"),
       screenshots: ["popup-account-access-native.png", "popup-account-access-320-light.png", "popup-account-access-320-dark.png"].map(name => ({ name, sha256: createHash("sha256").update(readFileSync(join(OUTPUT, name))).digest("hex") })) };
@@ -1830,20 +1845,20 @@ try {
     await chrome.storage.session.set({
       courseDiscoveries: { [discoveryReceiptId]: {
         ...structuredClone(receipt), pageNumber: 100, visited,
-        next: { kind: "canvas_url", value: `${receipt.origin}/api/v1/courses?cursor=bounded-101` },
+        next: { kind: "canvas_url", value: `${receipt.origin}/api/v1/courses?enrollment_state=active&include[]=term&include[]=favorites&per_page=100&page=101` },
       } },
     });
-    const pageLimit = (await requestMore()).code;
+    const afterHundredPages = (await requestMore()).ok;
     await restore();
-    return { codes, repeated, pageLimit };
+    return { codes, repeated, afterHundredPages };
   });
   assert.deepEqual(cursorBoundary, {
     codes: Array(6).fill("course_discovery_failed"),
     repeated: "course_discovery_failed",
-    pageLimit: "course_discovery_failed",
+    afterHundredPages: true,
   });
-  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks, "invalid stored cursors must be refused before another provider request");
-  process.stderr.write("[browser-test] Canvas discovery refuses foreign, malformed, credentialed, fragmented, oversized, repeated, and over-limit cursors before provider access\n");
+  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks + 1, "only the valid continuation after page 100 can reach the provider");
+  process.stderr.write("[browser-test] Canvas discovery refuses foreign, malformed, credentialed, fragmented, oversized and repeated cursors, and continues beyond page 100\n");
   const courseSelectionName = (name, courseId) => `Select Canvas course ${name} (course ID ${courseId})`;
   const connectAvailableCourse = async (name, filter) => {
     await settings.locator("#course-filter").fill(filter);

@@ -238,6 +238,36 @@ function commandHandler(socket: WebSocket, handler: (command: BridgeCommand) => 
 }
 
 describe("LoopbackBridgeServer", () => {
+  it("commits a large binding inventory only after the last ordered part", async () => {
+    const server = new LoopbackBridgeServer({ token, expectedRuntimeRevision: revision, expectedCatalogDigest: digest, allowedExtensionIds: [extensionId], port: 0 });
+    servers.push(server);
+    const socket = await connect(server);
+    const generation = server.health().generation;
+    const bindings = Array.from({ length: 12_001 }, (_, index) => ({ sourceBindingId: `canvas-course-${index}`, provider: "canvas", courseId: String(index + 1), courseName: "Course ".padEnd(500, "x"), runtimeVerified: true }));
+    expect(Buffer.byteLength(JSON.stringify(bindings))).toBeGreaterThan(MAX_BRIDGE_MESSAGE_BYTES);
+    for (let index = 0; index < bindings.length; index += 500) {
+      const complete = index + 500 >= bindings.length;
+      const message = JSON.stringify({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation, bindings: bindings.slice(index, index + 500), syncId: "large-inventory-0001", part: index / 500, complete, sentAt: Date.now() });
+      expect(Buffer.byteLength(message)).toBeLessThan(MAX_BRIDGE_MESSAGE_BYTES);
+      socket.send(message);
+      await new Promise(done => setTimeout(done, 10));
+      if (!complete) expect(server.listBindings()).toHaveLength(1);
+    }
+    await vi.waitFor(() => expect(server.listBindings()).toHaveLength(12_001));
+    socket.send(JSON.stringify({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation, bindings: [], syncId: "replacement-0001", part: 0, complete: false, sentAt: Date.now() }));
+    await new Promise(done => setTimeout(done, 10));
+    expect(server.listBindings()).toHaveLength(12_001);
+  });
+
+  it("refuses a missing or duplicate inventory part before it can replace the scope", async () => {
+    const server = new LoopbackBridgeServer({ token, expectedRuntimeRevision: revision, expectedCatalogDigest: digest, allowedExtensionIds: [extensionId], port: 0 });
+    servers.push(server);
+    const socket = await connect(server);
+    const generation = server.health().generation;
+    socket.send(JSON.stringify({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation, bindings: [], syncId: "broken-inventory-01", part: 1, complete: true, sentAt: Date.now() }));
+    const [code] = await once(socket, "close");
+    expect(code).toBe(4400);
+  });
   it("closes mixed authenticated and unauthenticated peers within the shutdown bound", async () => {
     const server = new LoopbackBridgeServer({
       token,

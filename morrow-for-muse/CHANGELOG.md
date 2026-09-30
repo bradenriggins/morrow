@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.4.7 (2026-09-29)
+## 0.4.7 (unreleased)
 
-This candidate is not published. Local Linux checks are separate from Muse Secure VM owner and sign-in proof.
+The `morrow-muse-connector-0.4.7.zip` package is not published yet. Local Linux checks are separate from Muse Secure VM owner and sign-in proof.
 
 - Keep a custom Canvas address supplied to the installer.
 - Improve the sign-in helper's keyboard, pointer, touch, and scrolling controls. Retain input acknowledgements through retry and give clear feedback when the helper is busy.

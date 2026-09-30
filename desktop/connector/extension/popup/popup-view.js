@@ -113,6 +113,7 @@ export function courseValue(status) {
   if (!status) return NOT_CHECKED;
   if (runtimeNeedsReload(status)) return "Not available";
   if (status.authenticationFailed === true || status.otherProfileOwnsConnection === true) return currentBinding(status) || currentSiteAnchor(status) ? "Saved" : "Not connected";
+  if (status.accountCoursesLoading === true) return "Finding courses";
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   const platform = currentPlatform(status);
@@ -219,6 +220,8 @@ export function detailText(status, detectedProvider = null) {
         ? "Connecting to Morrow. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Keep this popup open or return in a moment."
         : !status.connected
         ? "Open the Morrow app, then select Check connection to retry now. Morrow Bridge also retries within 30 seconds while active and checks about once a minute after Chrome idles."
+        : status.accountCoursesLoading
+          ? `Finding available courses… ${status.discoveredCourseCount || 0} found. Your previous course scope stays active until the scan is complete. You can close this popup; discovery continues automatically.`
         : binding?.runtimeVerified === true
           ? status.courseAccessMode === "account"
             ? `Your assistant can work across ${status.bindingCount || status.bindings?.length || 1} courses together. Give it a course name, course ID, or course link. Keep one signed-in ${platform || "learning platform"} tab open for this account.`

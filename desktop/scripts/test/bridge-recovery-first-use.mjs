@@ -735,20 +735,38 @@ scenario("Q5", "a provider failure keeps the selected scope and permits a retry 
     return { coursesAfterRetry: 30, pairingUnchanged: true };
   } finally { await profile.stop(); }
 }));
-scenario("Q6", "Account access follows multiple pages and refuses overflow without publishing a partial scope", async () => {
-  const profile = movedTabProfile("q6", { accountCourses: accountCourses(130), local: { bindings: [BINDING] } });
+scenario("Q6", "Account access discovers more than 100 pages and transfers every course without a count limit", async () => withConnectorRuntime(async (runtime, port) => {
+  let profile = movedTabProfile("q6", { port, accountCourses: accountCourses(12_001), local: { token: TOKEN, bindings: [BINDING] } });
   try {
     await profile.loaded;
-    assert.equal((await within(accountMode(profile), 5_000, "paged account")).ok, true);
-    assert.equal((await profile.state()).local.bindings.length, 130);
-    await profile.set("accountCourses", accountCourses(501));
-    const result = await within(accountMode(profile), 5_000, "account overflow");
-    assert.equal(result.ok, false);
-    assert.equal(result.code, "account_course_limit_reached");
-    assert.equal((await profile.state()).local.bindings.length, 130);
-    return { pagesFollowed: 2, courses: 130, overflowRefused: true, partialScopePublished: false };
+    await waitFor(() => ready(profile) === 1, 5_000, "paired worker ready");
+    const result = await within(accountMode(profile), 30_000, "large paged account");
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.result.pending, true);
+    assert.equal((await profile.state()).local.bindings.length, 1, "an unfinished discovery keeps the previous scope");
+    const checkpoint = (await profile.state()).local;
+    assert.equal(checkpoint.accountCourseDiscovery.pagesRead, 50);
+    await profile.stop();
+    profile = movedTabProfile("q6-resumed", { port, accountCourses: accountCourses(12_001), local: checkpoint });
+    await profile.loaded;
+    for (let step = 0; step < 3; step += 1) {
+      assert.equal((await within(accountMode(profile), 30_000, "resume discovery")).ok, true);
+      if (!(await profile.state()).local.accountCourseDiscovery) break;
+    }
+    assert.equal((await profile.state()).local.bindings.length, 12_001);
+    await waitFor(() => runtime.bindings().length === 12_001, 10_000, "complete large scope at assistant");
+    assert.equal(runtime.bindings().some(b => b.courseId === "12001"), true);
+    const saved = (await profile.state()).local;
+    await profile.stop();
+    const restarted = movedTabProfile("q6-restarted", { port, local: saved });
+    try {
+      await restarted.loaded;
+      await waitFor(() => ready(restarted) === 1 && runtime.bindings().length === 12_001, 15_000, "large scope after restart");
+      assert.equal((await restarted.state()).local.token, TOKEN);
+    } finally { await restarted.stop(); }
+    return { pagesFollowed: 121, courses: 12_001, coursesAfterRestart: 12_001, pairingUnchanged: true };
   } finally { await profile.stop(); }
-});
+}));
 scenario("Q7", "the access mode and discovered courses survive a Chrome worker restart without pairing", async () => withConnectorRuntime(async (runtime, port) => {
   let profile = movedTabProfile("q7", { port, accountCourses: accountCourses(30), local: { token: TOKEN, bindings: [BINDING] } });
   try {
@@ -789,16 +807,30 @@ scenario("Q8", "automatic account refresh adds and removes courses without pairi
 scenario("Q9", "Moodle account discovery follows offsets and restores the selected scope", async () => {
   const anchor = { ...ANCHOR, provider: "moodle", siteUrl: ORIGIN, siteAnchorId: "moodle:anchor:g1" };
   const binding = { ...anchor, sourceBindingId: "moodle:anchor:g1:c42", courseId: "42", courseName: "Course 42", runtimeVerified: true };
-  const profile = startProfile("q9", { local: { siteAnchors: [anchor], bindings: [binding] }, tabs: [{ id: 1, url: `${ORIGIN}/course/view.php?id=42`, principalId: "7" }], accountCourses: [...accountCourses(130), { id: "142", name: "Course 142" }] });
+  const profile = startProfile("q9", { local: { siteAnchors: [anchor], bindings: [binding] }, tabs: [{ id: 1, url: `${ORIGIN}/course/view.php?id=42`, principalId: "7" }], accountCourses: accountCourses(12_001) });
   try {
     await profile.loaded;
-    assert.equal((await accountMode(profile)).ok, true);
-    assert.equal((await profile.state()).local.bindings.length, 131);
+    for (let step = 0; step < 3; step += 1) assert.equal((await within(accountMode(profile), 30_000, "Moodle discovery")).ok, true);
+    assert.equal((await profile.state()).local.bindings.length, 12_001);
     assert.equal((await accountMode(profile, "selected")).ok, true);
     assert.deepEqual((await profile.state()).local.bindings.map(b => b.courseId), ["42"]);
-    return { provider: "moodle", courses: 131, pages: 2, restoredCourses: ["42"] };
+    return { provider: "moodle", courses: 12_001, pages: 121, restoredCourses: ["42"] };
   } finally { await profile.stop(); }
 });
+
+scenario("Q11", "one Plan access request can cover more than 500 courses", async () => withConnectorRuntime(async (runtime, port) => {
+  const profile = movedTabProfile("q11", { port, accountCourses: accountCourses(501), local: { token: TOKEN, bindings: [BINDING] } });
+  try {
+    await profile.loaded;
+    await waitFor(() => ready(profile) === 1, 5_000, "paired worker ready");
+    assert.equal((await accountMode(profile)).ok, true);
+    await waitFor(() => runtime.bindings().length === 501, 5_000, "all course bindings");
+    const response = await runtime.editPolicySet({ mode: "plan", selections: runtime.bindings().map(binding => ({ sourceBindingId: binding.sourceBindingId, expectedPolicyRevision: binding.editPolicyRevision || 0 })) });
+    assert.equal(response.ok, true, JSON.stringify(response));
+    assert.equal(Object.keys((await profile.state()).local.editPolicies).length, 0);
+    return { selectedCourses: 501, mode: "plan", editGrants: 0 };
+  } finally { await profile.stop(); }
+}));
 
 scenario("Q10", "Selected courses refuses site-wide requests before provider access", async () => withConnectorRuntime(async (runtime, port) => {
   const profile = movedTabProfile("q10", { port, accountCourses: [{ id: "42", name: "Course 42" }], local: { token: TOKEN, bindings: [BINDING] } });

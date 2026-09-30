@@ -72,7 +72,7 @@ function credentialRevision(value: unknown): string {
 }
 
 function parseBindings(value: unknown, baseUrl: string, principalId: string): readonly BlackboardCourseBinding[] {
-  if (!Array.isArray(value) || value.length > 500) throw new TypeError("Blackboard course bindings are invalid");
+  if (!Array.isArray(value)) throw new TypeError("Blackboard course bindings are invalid");
   const seen = new Set<string>();
   return value.map((entry) => {
     if (!isJsonObject(entry)) throw new TypeError("Blackboard course binding is invalid");

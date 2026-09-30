@@ -214,7 +214,7 @@ const BatchCourseSetSchema = z.object({
     "blueprint_associations",
     "prior_cross_course_search",
   ]),
-  course_ids: z.array(z.string().min(1).max(160)).min(1).max(10_000),
+  course_ids: z.array(z.string().min(1).max(160)).min(1),
   complete: z.boolean(),
   all_courses_requested: z.boolean().default(false),
   pagination_complete: z.boolean().default(false),

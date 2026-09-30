@@ -43,11 +43,6 @@ const COPY = {
     detail: "This request did not come from Morrow Bridge's own setup controls.",
     action: "Open the Morrow Bridge popup and choose Course access there.",
   },
-  account_course_limit_reached: {
-    title: "Account access could not include every course",
-    detail: "Morrow supports up to 500 courses in this connection. Your earlier access scope was kept.",
-    action: "Use Selected courses and choose the courses for your work.",
-  },
   // --- Connecting Morrow, Chrome and a learning platform ---------------------------------------------
   bridge_not_connected: {
     title: "Morrow is not running on this computer",
@@ -305,11 +300,6 @@ const COPY = {
     title: "Morrow could not confirm every selected course",
     detail: "Morrow connects a course only after Canvas or Moodle returns that exact course, and one did not match.",
     action: "Select Refresh connected courses, then select Connect on the course the site returns.",
-  },
-  binding_limit_reached: {
-    title: "Morrow has reached its 500-course limit",
-    detail: "This Chrome session already holds the largest number of connected courses Morrow keeps, so it did not connect another.",
-    action: "Open a course you no longer need in Plan and Edit settings and select Disconnect, then connect this course again.",
   },
   course_file_access_change_failed: {
     title: "Morrow could not turn on course file access",

@@ -50,8 +50,7 @@ The steps below cover Canvas sign-in and readback.
   background loop instead (step 7).
 - Network egress from the VM, direct or via the VM's
   `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
-  needs `github.com` and `release-assets.githubusercontent.com` to
-  download the connector, your Canvas or Moodle site, and `pypi.org` and
+  needs your Canvas or Moodle site, and `pypi.org` and
   `files.pythonhosted.org` to install the optional runtime packages. It
   probes the Canvas tenant when Canvas is configured.
 - The URL for your Canvas or Moodle site and the ability to sign in to it
@@ -59,14 +58,13 @@ The steps below cover Canvas sign-in and readback.
 
 ## Step 1: get the package and unzip it
 
-Download the Morrow for Muse 0.4.6 package:
+Morrow for Muse 0.4.7 is not published yet. For local validation, use the source repository and create the candidate package from its `morrow-for-muse` directory:
 
 ```
-curl -fL -o morrow-muse-connector-0.4.6.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.6/morrow-muse-connector-0.4.6.zip
+python3 scripts/carve.py --zip
 ```
 
-The `muse/v0.4.6` release page lists the same package. Do not install
-Morrow from another source.
+The carve command reports the path to `morrow-muse-connector-0.4.7.zip`. Use that candidate for local validation. Do not use it as evidence of a published release.
 
 Unzip the release into the skills directory. Run these commands from
 the folder that holds the zip. Running them again is safe: they update
@@ -76,7 +74,7 @@ sign-in in `helper/profile/`.
 ```
 mkdir -p ~/workspace/skills
 rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
-unzip -q morrow-muse-connector-0.4.6.zip -d ~/workspace/skills/
+unzip -q morrow-muse-connector-0.4.7.zip -d ~/workspace/skills/
 cd ~/workspace/skills
 if [ -d morrow-canvas ]; then
   cp -R morrow-muse-connector/. morrow-canvas/

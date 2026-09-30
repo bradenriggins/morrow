@@ -213,7 +213,7 @@ export function captureBridgeRelease(extensionRoot = resolve(ROOT, "connector", 
     || !parseChromeVersion(extensionManifest.version)) {
     throw new Error("Morrow Bridge extension version is invalid.");
   }
-  exactList(extensionManifest.permissions, ["activeTab", "alarms", "offscreen", "scripting", "storage", "tabs", "webNavigation", "webRequest"], "Morrow Bridge permissions");
+  exactList(extensionManifest.permissions, ["activeTab", "alarms", "offscreen", "scripting", "storage", "unlimitedStorage", "tabs", "webNavigation", "webRequest"], "Morrow Bridge permissions");
   exactList(extensionManifest.host_permissions, ["http://127.0.0.1/*"], "Morrow Bridge host permissions");
   exactList(extensionManifest.optional_host_permissions, ["https://*/*"], "Morrow Bridge optional host permissions");
   // The one sandboxed page, with a policy that allows the inline declarations

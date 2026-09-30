@@ -6,8 +6,8 @@ Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/
 
 This candidate includes Morrow Bridge 1.0.127. It is not published. Native platform evidence is recorded separately from source checks.
 
-- Pair Canvas or Moodle accounts once. Choose Selected courses to keep a course limit, or Account access to work across available courses. Switching modes keeps the pairing. Site-wide actions require Account access. New courses start in Plan; Edit permission stays separate.
-- Give your assistant course names, course IDs, or course links. Account access refreshes courses automatically and supports up to 500 courses.
+- Pair Canvas or Moodle accounts once. Choose Selected courses to restrict access to courses you allow, or Account access to work across available courses. Switching modes keeps the pairing. Site-wide actions require Account access. New courses start in Plan; Edit permission stays separate.
+- Give your assistant course names, course IDs, or course links. Neither mode has a course-count limit. Account access refreshes courses automatically, saves progress for large scans, and sends large inventories in bounded parts.
 - Restore closed course tabs, keep two Chrome profiles from replacing each other without a user action, and handle cancelled or interrupted requests without repeating a change.
 - Confirm each assistant through its own current setup route. Preserve assistant settings through retries and protect configuration backups from file races.
 - Bound Bridge messages and privacy roster continuations. Keep learner protection failures distinct from processing failures, and keep active result pages available.

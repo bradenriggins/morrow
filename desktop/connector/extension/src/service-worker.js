@@ -74,10 +74,8 @@ const PROTOCOL_VERSION = 1;
 const RUNTIME_REVISION = "1.0.0-rc.2";
 const ITEM_BANK_CREDENTIAL_WAIT_MS = 45_000;
 const DISCOVERY_PAGE_LIMIT = 100;
-const BRIDGE_BINDING_LIMIT = 500;
 const USED_EFFECT_RECEIPT_LIMIT = 2_000;
 const DISCOVERY_TTL_MS = 5 * 60 * 1_000;
-const DISCOVERY_MAX_PAGES = 100;
 const DISCOVERY_NEXT_MAX_BYTES = 4 * 1024;
 const MAX_PRIVATE_FILE_BYTES = 1024 * 1024;
 const MAX_PRIVATE_FILE_BASE64_BYTES = 4 * Math.ceil(MAX_PRIVATE_FILE_BYTES / 3);
@@ -822,7 +820,7 @@ function httpUrl(path = "") {
 }
 
 async function storage() {
-  return await chrome.storage.local.get(["token", "bindings", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", "openPlatformWhenNeeded", "courseMeta", "courseAccessMode", "selectedCourseKeys"]);
+  return await chrome.storage.local.get(["token", "bindings", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", "openPlatformWhenNeeded", "courseMeta", "courseAccessMode", "selectedCourseKeys", "accountCourseDiscovery"]);
 }
 
 function courseAccessKey(binding) {
@@ -844,17 +842,29 @@ async function setCourseAccessMode(mode, authorityGeneration = state.courseDataA
     let bindings = stored.bindings || [];
     let courseMeta = storedCourseMeta(stored.courseMeta);
     if (mode === "account") {
-      const discovered = new Map();
-      const deadline = Date.now() + 30_000;
-      for (const anchor of storedAnchors(stored.siteAnchors)) {
-        let next = null;
-        const visited = new Set();
-        for (let page = 0; ; page += 1) {
+      const anchors = storedAnchors(stored.siteAnchors);
+      const anchorKey = JSON.stringify(anchors.map(({ siteAnchorId, provider, origin, principalFingerprint, principalId, sessionGeneration }) => ({ siteAnchorId, provider, origin, principalFingerprint, principalId, sessionGeneration })));
+      const saved = stored.accountCourseDiscovery;
+      const job = saved?.schema === "morrow.account-course-discovery.v1" && saved.anchorKey === anchorKey
+        ? saved
+        : { schema: "morrow.account-course-discovery.v1", anchorKey, anchorIndex: 0, next: null, visited: [], bindings: [], courseMeta, pagesRead: 0 };
+      const discovered = new Map(job.bindings.map(binding => [binding.sourceBindingId, binding]));
+      courseMeta = job.courseMeta;
+      const deadline = Date.now() + 20_000;
+      let pages = 0;
+      while (job.anchorIndex < anchors.length) {
+        const anchor = anchors[job.anchorIndex];
+        let next = job.next;
+        const visited = new Set(job.visited);
+        for (;;) {
           await requireCourseDataAuthority(authorityGeneration);
-          if (page >= DISCOVERY_MAX_PAGES || Date.now() >= deadline) throw new Error("course_discovery_failed");
+          if (pages >= 50 || Date.now() >= deadline) {
+            await setCourseDataBoundFields(chrome.storage.local, { accountCourseDiscovery: { ...job, next, visited: [...visited], bindings: [...discovered.values()], courseMeta }, selectedCourseKeys: [...selected] }, stored, authorityGeneration);
+            return { courseAccessMode: mode, courseCount: bindings.length, discoveredCourseCount: discovered.size, pending: true };
+          }
           if (!await siteAnchorMatches(anchor, { fresh: true, lease })) throw new Error("course_discovery_anchor_stale");
           const listed = await listAnchorCourses(anchor, next);
-          if (Date.now() >= deadline || !await siteAnchorMatches(anchor, { fresh: true, lease })) throw new Error("course_discovery_anchor_stale");
+          if (!await siteAnchorMatches(anchor, { fresh: true, lease })) throw new Error("course_discovery_anchor_stale");
           courseMeta = nextCourseMeta(courseMeta, anchor.origin, listed.courses);
           for (const course of listed.courses) {
             const sourceBindingId = `${anchor.siteAnchorId}:c${course.id}`;
@@ -866,13 +876,24 @@ async function setCourseAccessMode(mode, authorityGeneration = state.courseDataA
               runtimeVerified: true, lastSeenAt: Date.now(),
             });
           }
-          if (discovered.size > BRIDGE_BINDING_LIMIT) throw new Error("account_course_limit_reached");
-          if (listed.complete) break;
+          pages += 1;
+          job.pagesRead += 1;
+          if (listed.complete) {
+            job.anchorIndex += 1;
+            job.next = null;
+            job.visited = [];
+            break;
+          }
           next = continuation(listed.next, anchor);
           const cursor = next && `${next.kind}:${next.value}`;
           if (!cursor || visited.has(cursor)) throw new Error("course_discovery_failed");
           visited.add(cursor);
+          job.next = next;
+          job.visited = [...visited];
         }
+      }
+      for (const anchor of anchors) {
+        if (!await siteAnchorMatches(anchor, { fresh: true, lease })) throw new Error("course_discovery_anchor_stale");
       }
       bindings = [...discovered.values()];
     } else if (stored.courseAccessMode === "account") {
@@ -888,13 +909,13 @@ async function setCourseAccessMode(mode, authorityGeneration = state.courseDataA
       editPolicyRevisions[binding.sourceBindingId] = revision + 1;
     }
     await setCourseDataBoundFields(chrome.storage.local, {
-      courseAccessMode: mode, selectedCourseKeys: [...selected], bindings, courseMeta,
+      courseAccessMode: mode, selectedCourseKeys: [...selected], bindings, courseMeta, accountCourseDiscovery: null,
       editPolicies, editPolicyRevisions,
       ...(stored.firstCourseRead && !retained.has(stored.firstCourseRead.sourceBindingId) ? { firstCourseRead: null } : {}),
     }, stored, authorityGeneration);
     return { courseAccessMode: mode, courseCount: bindings.length };
   });
-  if (mode === "account") await chrome.alarms.create(ACCOUNT_COURSE_REFRESH_ALARM, { periodInMinutes: 5 });
+  if (mode === "account") await chrome.alarms.create(ACCOUNT_COURSE_REFRESH_ALARM, { periodInMinutes: result.pending ? 1 : 5 });
   else await chrome.alarms.clear(ACCOUNT_COURSE_REFRESH_ALARM);
   await requireCourseDataAuthority(authorityGeneration);
   await publishBindings();
@@ -903,7 +924,7 @@ async function setCourseAccessMode(mode, authorityGeneration = state.courseDataA
 
 async function refreshAccountCourses() {
   const stored = await storage();
-  if (stored.courseAccessMode === "account") await setCourseAccessMode("account");
+  if (stored.courseAccessMode === "account" || stored.accountCourseDiscovery) await setCourseAccessMode("account");
 }
 
 async function courseDataConsentAccepted() {
@@ -1560,10 +1581,13 @@ function materializeBinding(binding, anchor) {
 }
 
 async function editPermissionFor(binding, stored, api) {
-  return await validEditPermission({ permission: storedPolicies(stored.editPolicies)[binding.sourceBindingId], binding, catalogDigest: api.catalogDigest, operations: [...state.operations.values()] });
+  const permission = storedPolicies(stored.editPolicies)[binding.sourceBindingId];
+  if (!permission) return null;
+  return await validEditPermission({ permission, binding, catalogDigest: api.catalogDigest, operations: [...state.operations.values()] });
 }
 
 function stalePermissionSummary(permission, binding, catalogDigest, operations) {
+  if (!permission || typeof permission !== "object") return null;
   const available = new Set(categoriesForBinding(binding, operations).filter((category) => category.availability === "edit").map((category) => category.id));
   const expiresAt = Number.isSafeInteger(permission?.expiresAt) ? permission.expiresAt : undefined;
   const expired = expiresAt !== undefined && expiresAt <= Date.now();
@@ -1788,7 +1812,30 @@ async function refreshBadge() {
   else await chrome.alarms.create(BADGE_ALARM_NAME, { when: earliestExpiresAt });
 }
 
+let bindingPublication = 0;
+
+function* bindingMessages(bindings, generation) {
+  const syncId = crypto.randomUUID();
+  let part = 0;
+  let records = [];
+  let bytes = 0;
+  const message = (complete) => JSON.stringify({ schema: "morrow.bridge.bindings.v1", protocolVersion: PROTOCOL_VERSION, generation, syncId, part, complete, bindings: records, sentAt: Date.now() });
+  for (const binding of bindings) {
+    const size = new TextEncoder().encode(JSON.stringify(binding)).byteLength;
+    if (records.length && bytes + size > MAX_BRIDGE_MESSAGE_BYTES / 4) {
+      yield message(false);
+      part += 1;
+      records = [];
+      bytes = 0;
+    }
+    records.push(binding);
+    bytes += size + 1;
+  }
+  yield message(true);
+}
+
 async function publishBindings({ lease = null } = {}) {
+  const publication = ++bindingPublication;
   const authorityGeneration = state.courseDataAuthorityGeneration;
   if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
   const socket = state.socket;
@@ -1796,7 +1843,19 @@ async function publishBindings({ lease = null } = {}) {
   const bindings = await publicBindings({ lease });
   if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
   if (state.socket === socket && socket?.readyState === WebSocket.OPEN && bridgeGeneration > 0 && state.generation === bridgeGeneration) {
-    socket.send(JSON.stringify({ schema: "morrow.bridge.bindings.v1", protocolVersion: PROTOCOL_VERSION, generation: bridgeGeneration, bindings, sentAt: Date.now() }));
+    for (const message of bindingMessages(bindings, bridgeGeneration)) {
+      const deadline = Date.now() + 30_000;
+      while (socket.bufferedAmount > MAX_BRIDGE_MESSAGE_BYTES && Date.now() < deadline && socket.readyState === WebSocket.OPEN && publication === bindingPublication) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (!await courseDataAuthorityCurrent(authorityGeneration)
+        || publication !== bindingPublication || state.socket !== socket || socket.readyState !== WebSocket.OPEN || state.generation !== bridgeGeneration) return;
+      if (socket.bufferedAmount > MAX_BRIDGE_MESSAGE_BYTES || new TextEncoder().encode(message).byteLength > MAX_BRIDGE_MESSAGE_BYTES) {
+        socket.close(1011, "bindings_transfer_failed");
+        return;
+      }
+      socket.send(message);
+    }
   }
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
   await refreshBadge();
@@ -1937,7 +1996,6 @@ async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityG
   return {
     catalogDigest: api.catalogDigest,
     courseAccessMode: stored.courseAccessMode === "account" ? "account" : "selected",
-    bindingLimit: BRIDGE_BINDING_LIMIT,
     siteAnchors,
     bindings,
     ...(includePrivateChat ? { privateChat: privateChatStatus() } : {}),
@@ -2383,7 +2441,7 @@ function bridgePolicySet(command) {
   }
   const value = command.editPolicySet;
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["mode", "selections", "merge"].includes(key))
-    || !["edit", "plan"].includes(value.mode) || !Array.isArray(value.selections) || !value.selections.length || value.selections.length > EDIT_POLICY_SELECTION_LIMIT) {
+    || !["edit", "plan"].includes(value.mode) || !Array.isArray(value.selections) || !value.selections.length) {
     throw new Error("edit_policy_set_invalid");
   }
   // WI-4.1/WI-4.2: checked again here, the same as normalizeBridgeEditPolicySet in
@@ -2685,7 +2743,7 @@ function sameAnchorReceipt(receipt, anchor) {
     && (receipt.siteUrl || "") === (anchor.siteUrl || "")
     && receipt.principalFingerprint === anchor.principalFingerprint
     && receipt.sessionGeneration === anchor.sessionGeneration
-    && Number.isSafeInteger(receipt.pageNumber) && receipt.pageNumber >= 1 && receipt.pageNumber <= DISCOVERY_MAX_PAGES
+    && Number.isSafeInteger(receipt.pageNumber) && receipt.pageNumber >= 1
     && (receipt.provider !== "canvas" || (Array.isArray(receipt.visited)
       && receipt.visited.length === receipt.pageNumber
       && receipt.visited.every((value) => canvasDiscoveryUrl(value, anchor) === value)
@@ -2707,7 +2765,7 @@ function continuation(value, anchor) {
     const exact = canvasDiscoveryUrl(value.value, anchor);
     return exact ? { kind: "canvas_url", value: exact } : null;
   }
-  if (value?.kind === "moodle_offset" && Number.isSafeInteger(value.value) && value.value > 0 && value.value <= 10_000) return value;
+  if (value?.kind === "moodle_offset" && Number.isSafeInteger(value.value) && value.value > 0) return value;
   return null;
 }
 
@@ -2838,7 +2896,7 @@ async function continueCourseDiscovery(siteAnchorId, discoveryReceiptId, authori
     if (receipt.complete === true) throw new Error("course_discovery_complete");
     const next = continuation(receipt.next, anchor);
     if (!next) throw new Error("course_discovery_failed");
-    if (receipt.pageNumber >= DISCOVERY_MAX_PAGES || (next.kind === "canvas_url" && receipt.visited.includes(next.value))) {
+    if (next.kind === "canvas_url" && receipt.visited.includes(next.value)) {
       throw new Error("course_discovery_failed");
     }
     if (!await siteAnchorMatches(anchor, { fresh: true, lease })) throw new Error("course_discovery_anchor_stale");
@@ -2894,7 +2952,6 @@ async function saveCourseSelection(siteAnchorId, discoveryReceiptId, courseIds, 
         added.push(existing);
         continue;
       }
-      if (bindings.length >= BRIDGE_BINDING_LIMIT) throw new Error("binding_limit_reached");
       const binding = {
         sourceBindingId: `${anchor.siteAnchorId}:c${course.id}`,
         siteAnchorId: anchor.siteAnchorId,
@@ -3083,7 +3140,7 @@ async function connectBridge() {
         const bindings = await publicBindings();
         const clientProof = await bridgeAuthenticationProof(stored.token, "client", authentication, message.serverNonce);
         if (!await bridgeConnectionAuthorityCurrent(socket, authorityGeneration)) return;
-        socket.send(JSON.stringify({
+        const hello = {
           schema: "morrow.bridge.hello.v1",
           protocolVersion: PROTOCOL_VERSION,
           clientNonce: authentication.clientNonce,
@@ -3096,7 +3153,12 @@ async function connectBridge() {
           instanceId,
           ...(takeover ? { takeover: true } : {}),
           sentAt: Date.now(),
-        }));
+        };
+        let serialized = JSON.stringify(hello);
+        if (new TextEncoder().encode(serialized).byteLength > MAX_BRIDGE_MESSAGE_BYTES) {
+          serialized = JSON.stringify({ ...hello, bindings: [] });
+        }
+        socket.send(serialized);
         return;
       }
       if (phase === "awaiting_ready") {
@@ -3120,6 +3182,7 @@ async function connectBridge() {
         phase = "active";
         clearBridgeHandshakeDeadline(socket);
         resetBridgeReconnect();
+        await publishBindings();
         if (state.socket === socket) void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
         return;
       }
@@ -6565,7 +6628,9 @@ async function status() {
     : null;
   return {
     consentRequired: false,
-    courseAccessMode: stored.courseAccessMode === "account" ? "account" : "selected",
+    courseAccessMode: stored.courseAccessMode === "account" || stored.accountCourseDiscovery ? "account" : "selected",
+    accountCoursesLoading: Boolean(stored.accountCourseDiscovery),
+    discoveredCourseCount: stored.accountCourseDiscovery?.bindings?.length || 0,
     paired: Boolean(stored.token),
     connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
     authenticationFailed: Boolean(state.authenticationProblem),
@@ -6698,6 +6763,7 @@ async function disconnectConnector() {
       editPolicyRevisions: {},
       firstCourseRead: null,
       selectedCourseKeys: [],
+      accountCourseDiscovery: null,
       [COURSE_FILE_STORAGE_ACCESS_KEY]: false,
       [PAIRING_AUTHORITY_KEY]: pairingAuthority(crypto.randomUUID(), "disconnected"),
       [COURSE_CONNECTION_AUTHORITY_KEY]: courseConnectionAuthority("disconnected", revokedOrigins, Date.now() + COURSE_CONNECTION_INTENT_TTL_MS),

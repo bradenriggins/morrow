@@ -3968,8 +3968,8 @@ export class GatewayRuntime {
     mode: BrowserEditAccessPrepared["mode"],
     inputs: readonly BrowserEditAccessSelectionInput[],
   ): Promise<BrowserEditAccessPrepared> {
-    if ((mode !== "edit" && mode !== "plan") || inputs.length === 0 || inputs.length > 500) {
-      throw new Error("Select one to 500 exact browser course connections.");
+    if ((mode !== "edit" && mode !== "plan") || inputs.length === 0) {
+      throw new Error("Select at least one exact browser course connection.");
     }
     const ids = inputs.map((input) => input.sourceBindingId);
     if (ids.some((id) => !/^[A-Za-z0-9_.:@-]{1,160}$/.test(id)) || new Set(ids).size !== ids.length) {
