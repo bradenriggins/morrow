@@ -58,7 +58,7 @@ The steps below cover Canvas sign-in and readback.
 
 ## Step 1: get the package and unzip it
 
-Morrow for Muse 0.4.7 is not published yet. For local validation, use the source repository and create the candidate package from its `morrow-for-muse` directory:
+Morrow for Muse 0.4.7 is not published yet. Build the candidate from the source repository. Open its `morrow-for-muse` directory. The carve script is not shipped in the release.
 
 ```
 python3 scripts/carve.py --zip
