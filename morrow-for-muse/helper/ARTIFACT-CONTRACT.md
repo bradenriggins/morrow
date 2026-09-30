@@ -44,7 +44,10 @@ SSO flow; do not force `/login/canvas` or accept a caller-supplied URL.
 ## Client behavior
 
 Use the [ordered input contract](README.md#ordered-private-input). One native
-request sends a text batch. Control keys are paired on the server. One queue
+request sends a text batch. While a call is in flight, coalesce unsent ordinary
+text for the next acknowledgement; a short debounce alone must not create one
+native round trip per typed character. Keep dispatched payloads immutable for
+identical retries. Control keys are paired on the server. One queue
 orders text, keys, pointer, wheel, and navigation. Pause screenshot polling
 while input is pending, then fetch a current frame. Handle composition/IME,
 paste, mobile delete, Tab/Enter, selection, focus changes, and explicit recovery.
@@ -89,7 +92,12 @@ The native action must verify the same helper identity as screenshots and input.
 Keep queued values, frames, and acknowledgement state transient. Clear pending
 values after acknowledgement, error, navigation, or unmount. On a restart or
 partial unknown outcome, stop the queue and show a new frame before the user
-chooses to resume. Do not automatically replay text into a changed focus.
+chooses to resume. Any failed or throwing ordered operation must also stop all
+queued input and pointer actions. Keep Resume input visible while blocked,
+including after a healthy periodic frame. Resume must fetch fresh verified
+status and a frame/layout from the same current epoch before starting a new
+stream. A stale status, mismatched epoch, or refresh failure stays blocked.
+Do not automatically replay text into a changed focus.
 
 ## Evidence required from the build
 
