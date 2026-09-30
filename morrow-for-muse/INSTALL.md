@@ -299,7 +299,7 @@ The installer started the helper in step 2 (when `CANVAS_BASE` was
 set). Confirm it:
 
 ```
-curl -sf http://127.0.0.1:8901/status
+bin/morrow doctor --json
 ```
 
 You should see JSON with your Canvas URL and `"logged_in": true` once
@@ -326,8 +326,9 @@ guard treats a bare launch on the production ports with the live
 profile as a config error; keepalive.sh always exports
 `LOGIN_HELPER_PROFILE_DIR` first.)
 
-What runs: the helper UI on `http://127.0.0.1:8901/` and a headless
-Chromium on CDP port `127.0.0.1:19223` with its profile at
+What runs: the helper UI on its configured loopback endpoint and headless
+Chromium through a private CDP pipe, with no TCP debugging listener. Resolve
+per-tree settings with `config.tree_config`. Chromium keeps its profile at
 `helper/profile/` inside this tree. The profile was created by the
 installer and holds your authenticated session; it is never part of the
 download, and reinstalls never wipe it.
@@ -340,8 +341,9 @@ tab is still `about:blank`). Healthy means `"logged_in": true`,
 `"starting": false`. Diagnostic: `logged_in: false` with
 `profile_has_cookies: false` and `chromium_alive: true` on a fresh box
 is normal first onboarding (sign in once); the same on a
-previously-working box is a config error (wrong profile path), never a
-dead session. See `SKILL.md` and `knowledge/troubleshooting-playbook.md`
+previously-working box can mean a wrong profile, cleared cookies, or session
+eviction. Inspect exact profile/helper identity first; status alone does not
+prove expiry. A Chrome error or blank page needs transport diagnosis first. See `SKILL.md` and `knowledge/troubleshooting-playbook.md`
 for the full field guide.
 
 ## Step 5: sign in to Canvas (you, not the agent)
@@ -369,7 +371,7 @@ event counts only.
 Check the helper is healthy:
 
 ```
-curl -sf http://127.0.0.1:8901/status
+bin/morrow doctor --json
 ```
 
 You should see JSON with your Canvas URL and `"logged_in": true`.

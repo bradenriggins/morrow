@@ -30,6 +30,10 @@ Read-only: no provider, no browser, no dispatch.
 
 import os
 import sys
+import ast
+import json
+import re
+from pathlib import Path
 
 TREE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -104,5 +108,87 @@ def test_the_lists_partial_passage_names_the_lanes_pagination():
     text = " ".join(_read(API).split())
     assert "Treat any list receipt as partial unless you paged through it" \
         not in text
-    assert "20 pages" in text
+    source = ast.parse(_read("transport/chromium_session.py"))
+    limit = next(ast.literal_eval(node.value) for node in ast.walk(source)
+                 if isinstance(node, ast.Assign)
+                 and any(isinstance(target, ast.Name)
+                         and target.id == "CHROMIUM_MAX_PAGES"
+                         for target in node.targets))
+    assert f"{limit} pages" in text
     assert "x-morrow-pagination-partial" in text
+    assert "x-morrow-next-page" in text
+
+
+def test_packaged_knowledge_has_a_complete_local_index_and_doctrine():
+    root = Path(TREE)
+    index = root / "knowledge/README.md"
+    doctrine = root / "knowledge/DOCTRINE.md"
+    assert index.is_file() and doctrine.is_file()
+    text = index.read_text()
+    topics = set(p.name for p in (root / "knowledge").glob("*.md"))
+    topics.discard("README.md")
+    targets = set(re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", text))
+    assert topics <= targets
+    for target in targets:
+        resolved = (index.parent / target).resolve()
+        assert resolved.is_relative_to(root) and resolved.is_file(), target
+    skill = _read("SKILL.md")
+    assert "knowledge/DOCTRINE.md" in skill
+    assert "knowledge/README.md" in skill
+
+
+def test_current_transport_docs_do_not_instruct_managed_browser_execution():
+    text = _read("transport/README.md")
+    assert "private CDP pipe" in text
+    assert "protected loopback forwarder" in text
+    assert "The Morrow agent spawns one browser task per batch" not in text
+    assert "The Muse product executes Canvas REST calls inside the managed browser" not in text
+
+
+def test_troubleshooting_distinguishes_network_failure_from_sign_out():
+    text = _read("knowledge/troubleshooting-playbook.md")
+    assert "ERR_EMPTY_RESPONSE" in text
+    assert "config.tree_config" in text
+    assert "logged_in=false alone does not prove session expiry" in text
+    assert "private CDP pipe" in text
+    assert "a launcher that finds 19223" not in text
+
+
+def test_product_metadata_never_requests_agent_visible_credentials():
+    pack = json.loads(_read("pack/pack.json"))
+    assert pack["credential_slots"] == {}
+    rules = " ".join(pack["governance"]["rules"]).lower()
+    assert "plan mode" in rules and "edit mode" in rules
+    assert "every write dispatches under a frozen plan digest" not in rules
+
+
+def test_learner_knowledge_names_the_supported_encryption_floor():
+    text = _read("knowledge/privacy-ferpa.md")
+    source = ast.parse(_read("privacy/core.py"))
+    minimum = next(ast.literal_eval(node.value) for node in ast.walk(source)
+                   if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name)
+                           and target.id == "_CRYPTOGRAPHY_MIN_VERSION"
+                           for target in node.targets))
+    assert ".".join(map(str, minimum)) in text
+    assert "The raw provider payload stays in a 0600 pending envelope" not in text
+
+
+def test_educator_knowledge_covers_design_workflows_and_provider_limits():
+    required = {
+        "instructional-design.md": ["alignment", "retrieval", "rubric", "UDL"],
+        "course-visual-design.md": ["saved", "mobile", "heading", "contrast"],
+        "teacher-workflows.md": ["time zone", "rollover", "feedback", "accommodations"],
+        "lms-administration.md": ["least privilege", "Blueprint", "Moodle", "completion"],
+        "accessibility-and-compliance.md": ["FERPA", "WCAG", "jurisdiction", "institution"],
+        "canvas-and-moodle.md": ["Classic", "New Quizzes", "sesskey", "capability"],
+        "first-use-and-conversation.md": ["course ID", "many courses", "Plan", "Edit"],
+    }
+    for name, concepts in required.items():
+        text = _read("knowledge/" + name)
+        for concept in concepts:
+            assert concept.lower() in text.lower(), (name, concept)
+    doctrine = _read("knowledge/DOCTRINE.md")
+    assert "no course-count limit" in doctrine
+    assert "knowledge is not dispatch permission" in doctrine.lower()
+    assert "Moodle" in doctrine and "production" in doctrine

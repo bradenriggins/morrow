@@ -29,7 +29,7 @@ the row says so explicitly.
 
 **NOT IMPLEMENTED in for-muse:** the desktop harvest's frozen-plan
 planners (`morrow_plan_new_quiz_create`, `morrow_plan_new_quiz_item_create`,
-etc.), snapshot digests, the quiz_settings merge tool, the Hot Spot
+etc.), snapshot digests, the Hot Spot
 media-upload chain, and the bank-draw recovery descriptors. Do not
 promise them.
 
@@ -48,7 +48,7 @@ promise them.
   not automatic):** a partial PATCH can replace the whole settings block
   instead of merging, so the safe sequence is read the current block,
   merge locally, send the complete block. `plan_new_quiz_settings`
-  performs the read-then-merge (refusing on a missing or unreadable saved
+  merges the fresh saved block supplied by the caller (refusing on a missing or unreadable saved
   block, and translating `None` into the saved form Canvas uses for a
   cleared setting), `new_quiz_settings_request` builds the complete-block
   PATCH, and the write readback verifies the echoed `quiz_settings`
@@ -70,7 +70,7 @@ promise them.
 
 ## New Quiz items: the ghost-stub hazard
 
-**NOT IMPLEMENTED in for-muse.** New Quizzes merges `interaction_data`
+**Provider hazard; explicit ID-check helpers are implemented.** New Quizzes merges `interaction_data`
 sub-elements **by id**. An in-place PATCH that regenerates choice,
 question, or blank ids does not replace the old elements: it orphans
 them into blank "ghost stub" choices, observed in production (one item
@@ -226,8 +226,9 @@ Some New Quizzes delivery toggles are not represented in the
 Multiple Sessions, Allow clearing selection on multiple choice).
 A REST readback that matches your intent does not cover those
 toggles. If the educator's request names them, do not stop at the
-REST response: disclose that they are UI-only and verify them the
-way the educator would, through the helper's browser. Never claim
+REST response: disclose the unsupported write and ask the educator to
+inspect or change the toggle in Canvas. The sign-in helper is not a UI
+write fallback. Never claim
 "all settings verified" on REST evidence alone when the request
 named a UI-only toggle.
 

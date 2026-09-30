@@ -2,6 +2,12 @@
 
 ## 0.4.8 (2026-09-30)
 
+- Add a task-based educator KB and canonical doctrine covering first use,
+  Canvas/Moodle concepts, instructional design, visual quality, teacher
+  workflows, administration, accessibility, and compliance. Correct stale
+  transport, pagination, approval, encryption, and privacy guidance; remove
+  agent-visible credential slots from product metadata.
+
 The release package is `morrow-muse-connector-0.4.8.zip` from the `muse/v0.4.8` GitHub release.
 
 - Complete course-only installs when an older optional encryption library is already present. The install checks now use the same library readiness check as the learner vault.
