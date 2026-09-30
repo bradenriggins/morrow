@@ -9,7 +9,7 @@ Each Morrow product versions independently. There is no single repo version.
 
 Tags are created from `main` after the product's local checks pass and release evidence is complete. A change that touches only one product tags only that product.
 
-GitHub Actions are disabled for Morrow. Do not dispatch a workflow or treat a workflow status as a release gate. The workflow-specific Desktop steps below document the already-published `desktop/v1.0.5` release only. Future releases need local product checks and provider-specific release evidence. Desktop releases also need native smoke receipts for the exact assets before publication.
+GitHub Actions are enabled. The `ci` workflow runs the repository gates and affected product checks on pull requests and `main`. The `desktop installer QA` workflow builds Mac and Windows packages and checks installation, startup, repair, retention, and upgrade behavior on native runners. A passing workflow does not prove live LMS access or Muse Secure VM setup. Those checks need separate provider evidence. Every published Desktop asset needs a passing native smoke receipt for its exact bytes. Do not use a local Linux container without explicit authorization.
 
 ## Release assets are fixed
 
@@ -20,9 +20,9 @@ A tag names one commit, and the assets on its GitHub release are built from that
 1. **Prepare the release in its pull request.** Set the new version and write its changelog section before the tag, so the tagged commit carries its own release notes. Date the section with the day you will tag it, and if the tag moves to a later day, correct the date before you tag. The newest Morrow Desktop section becomes the GitHub release notes that educators open from the download page, so it says in plain words what an educator will notice and keeps developer detail under a last `### Technical notes` subsection.
    - Morrow Desktop: `desktop/package.json`, `desktop/installer/package.json`, the current-version sentences in `desktop/README.md` and `desktop/LIMITATIONS.md`, and a new section in `desktop/CHANGELOG.md`.
    - Morrow for Muse: `morrow-for-muse/VERSION`, `morrow-for-muse/pack/version.txt`, `morrow-for-muse/pack/pack.json`, and a new section in `morrow-for-muse/CHANGELOG.md`. `git grep -n <old version> -- morrow-for-muse` finds the other files that name the version.
-2. **Merge after local checks pass.** Run the affected product's local check suite and confirm its release evidence matches the commit you will tag. The unsigned public-release installers for Morrow Desktop 1.0.5 were smoke-tested on native Windows and Apple silicon runners before GitHub Actions were disabled. Do not dispatch a workflow for a future release.
+2. **Merge after local checks pass.** Run the affected product's checks and require the aggregate `ci` check to pass. Confirm that provider evidence matches the released behavior. Native smoke-test the unsigned public-release installers or signed installers before publication. Source checks and native package checks are separate gates.
 3. **Tag the merge commit and push the tag:** `git tag desktop/vX.Y.Z <commit>` and `git push origin desktop/vX.Y.Z`, or the same with `muse/vX.Y.Z`.
-4. **Publish the Morrow Desktop assets smoke-tested for 1.0.5. (Historical workflow record; do not repeat.)** The 1.0.5 release used native-runner artifacts downloaded into empty folders:
+4. **Publish the exact smoke-tested Morrow Desktop assets.** Dispatch `desktop-release.yml` against the exact commit to tag. Download passing native-runner artifacts into empty folders:
    - `gh run download <run id> --name morrow-macos-desktop-<run id> --dir <mac artifact folder>`
    - `gh run download <run id> --name morrow-windows-desktop-<run id> --dir <windows artifact folder>`
    Copy `Morrow-X.Y.Z-mac-arm64.dmg`, `Morrow-X.Y.Z-mac-arm64.zip`, and `Morrow-X.Y.Z-win-x64.exe` from those folders into one new release folder. The run uploaded them only after the installers passed the native smoke tests; their package receipts bind them to the workflow's merge commit, which the Desktop tag must name. Do not rebuild or substitute files after the smoke tests.
@@ -72,6 +72,6 @@ Download the published release into an empty folder and check its `SHA256SUMS`. 
 
 Morrow Desktop 1.0.5 is unsigned. An unsigned build has no update feed (`publish` is empty in `desktop/installer/electron-builder.config.cjs`), it never updates itself, and the app tells the educator to get newer versions from meetmorrow.app/download. A future signed Desktop release that turns updates on must also be published to `bradenriggins/morrow-downloads`, the feed `desktop/installer/shared/update-feed.cjs` names (see the [update contract](../desktop/installer/UPDATES.md)). This repository cannot be that feed: the updater reads the repository's Latest release and then fetches `latest-mac.yml` from it, which fails whenever the Latest release is a Muse release.
 
-## Inactive workflow files
+## Repository branches
 
-The files in `.github/workflows/` remain in the repository as historical automation and test fixtures. GitHub Actions are disabled. These files do not run and must not be used for current checks or releases.
+`main` is the default and permanent branch. Temporary pull-request branches are removed after their changes are merged. Product release tags preserve each published version. Preserve unique work in a verified archive before removing an unmerged branch. Keep the branch archive and its checksum with the release evidence.
