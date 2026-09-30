@@ -15,7 +15,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -88,8 +88,7 @@ const COURSE_CONNECTED = installerState({
   firstPreviewCourseName: "BIO 101",
   firstPreview: { available: true, completed: true }
 });
-// Two assistants set up and neither confirmed: the runtime cannot say which
-// one connected, so the Assistant status line says Not confirmed.
+// Neither configured assistant has confirmed its current route yet.
 const TWO_UNCONFIRMED = installerState({
   ...BASE,
   lifecycle: "ready",
@@ -375,7 +374,20 @@ try {
   // apart and inside the row, down to the 320px window minimum. This reads
   // the rendered text itself, not the boxes around it: a grid cell can shrink
   // to nothing while its text paints over the next cell.
-  for (const [name, snapshot, word] of [["all confirmed", COURSE_CONNECTED, "Ready"], ["two unconfirmed", TWO_UNCONFIRMED, "Not confirmed"]]) {
+  const unconfirmed = await openSetup(browser, "darwin", TWO_UNCONFIRMED);
+  const evidence = path.resolve(ROOT, "../output/installer-layout");
+  await mkdir(evidence, { recursive: true });
+  for (const width of WIDTHS) {
+    await unconfirmed.setViewportSize({ width, height: 900 });
+    assert.equal(await unconfirmed.getByRole("heading", { name: "Quit and reopen your assistant.", exact: true }).isVisible(), true);
+    assert.equal(await unconfirmed.getByRole("button", { name: "Check ChatGPT", exact: true }).isVisible(), true);
+    assert.equal(await unconfirmed.locator(".home-status-row").count(), 0, "an unconfirmed assistant cannot show the ready status panel");
+    assert.equal(await unconfirmed.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `unconfirmed setup fits at ${width}px`);
+    if (width === 320) await unconfirmed.screenshot({ path: path.join(evidence, "unconfirmed-assistants-320.png"), fullPage: true });
+  }
+  console.log("restart two unconfirmed assistants require the current assistant's connection check");
+
+  for (const [name, snapshot, word] of [["all confirmed", COURSE_CONNECTED, "Ready"]]) {
     const statusPage = await openSetup(browser, "darwin", snapshot);
     for (const width of [...WIDTHS, 390]) {
       await statusPage.setViewportSize({ width, height: 900 });
