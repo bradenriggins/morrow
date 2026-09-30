@@ -1193,8 +1193,8 @@ test("changing the materials folder writes the new folder into every configured 
   // Each assistant is written the folder that was chosen, and the settings
   // that were already in its file are still there.
   const codexContent = await fs.readFile(codex, "utf8");
-  assert.equal(codexContent.includes(`cwd = "${canonical}"`), true);
-  assert.equal(codexContent.includes(`cwd = "${first}"`), false, "the old folder is gone from the file");
+  assert.equal(codexContent.includes(`cwd = ${JSON.stringify(canonical)}`), true);
+  assert.equal(codexContent.includes(`cwd = ${JSON.stringify(first)}`), false, "the old folder is gone from the file");
   assert.match(codexContent, /^\[mcp_servers\.other\]\ncommand = "other"\n/);
   assert.equal(codexContent.match(/\[mcp_servers\.morrow\]/g).length, 1, "the entry is written once, not twice");
   assert.equal(JSON.parse(await fs.readFile(claudeCode, "utf8")).mcpServers.morrow.cwd, canonical);
@@ -1268,7 +1268,7 @@ test("changing the materials folder leaves out a project assistant whose project
   assert.deepEqual(calls.map((entry) => entry[2]), ["codex"]);
   const record = await installer.record();
   assert.equal(record.materialsFolder, canonical);
-  assert.equal((await fs.readFile(codex, "utf8")).includes(`cwd = "${canonical}"`), true);
+  assert.equal((await fs.readFile(codex, "utf8")).includes(`cwd = ${JSON.stringify(canonical)}`), true);
   assert.deepEqual(record.configured["claude-code"], configured["claude-code"]);
 });
 
