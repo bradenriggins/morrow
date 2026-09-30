@@ -51,18 +51,14 @@ from privacy.boundary import (  # noqa: E402
     source_privacy_input_schema,
     source_privacy_roster,
 )
-from privacy.core import PrivacyError  # noqa: E402
+from privacy.core import PrivacyError, learner_vault_problem  # noqa: E402
 
 # Optional dependency (P1-24): the encrypted file-backed vault needs the
 # ``cryptography`` package (pinned in requirements-optional.txt). The
 # in-memory vault used by almost every test below never touches AES, so
 # only the file-backed vault tests are skipped when it is missing; the
 # suite reports the skip loudly instead of failing.
-try:
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
-    HAVE_CRYPTO = True
-except ImportError:
-    HAVE_CRYPTO = False
+HAVE_CRYPTO = learner_vault_problem() is None
 
 VAULT_FILE_TESTS = frozenset({"test_vault_persists_across_restarts",
                                "test_w3_cross_op_vault_seeding",
@@ -1794,7 +1790,7 @@ def main():
              if key.startswith("test_") and callable(value)]
     skipped = []
     if not HAVE_CRYPTO:
-        print("WARNING: 'cryptography' is not installed; skipping %d "
+        print("WARNING: supported 'cryptography' is unavailable; skipping %d "
               "file-backed vault test(s) (pip install -r "
               "requirements-optional.txt to run them)" % len(VAULT_FILE_TESTS))
         skipped = [t for t in tests if t.__name__ in VAULT_FILE_TESTS]
@@ -1809,7 +1805,7 @@ def main():
         else:
             print("ok %s" % test.__name__)
     for test in skipped:
-        print("SKIP %s: needs the 'cryptography' package" % test.__name__)
+        print("SKIP %s: needs supported 'cryptography'" % test.__name__)
     print("%d/%d PASS%s" % (len(tests) - failed, len(tests),
                             " (%d skipped: no cryptography)" % len(skipped)
                             if skipped else ""))

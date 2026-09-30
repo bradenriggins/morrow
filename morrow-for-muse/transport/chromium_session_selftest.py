@@ -88,15 +88,12 @@ def _skip_crypto_section(names):
     """
     for _n in names:
         SKIP.append(_n)
-        print("SKIP %s (cryptography not installed: the learner-vault "
+        print("SKIP %s (supported cryptography unavailable: the learner-vault "
               "projection this check exercises cannot run)" % _n)
 
 
-try:
-    import cryptography  # noqa: F401
-    _CRYPTO_AVAILABLE = True
-except ImportError:
-    _CRYPTO_AVAILABLE = False
+from privacy.core import learner_vault_problem  # noqa: E402
+_CRYPTO_AVAILABLE = learner_vault_problem() is None
 
 
 def _reset_journal(journal_path):

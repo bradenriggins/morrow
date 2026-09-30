@@ -1,6 +1,6 @@
 # Morrow for Muse: Canvas connector and Moodle module (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.4.7. Canvas uses the Canvas Login Helper
+You are operating the Morrow for Muse connector, v0.4.8. Canvas uses the Canvas Login Helper
 and the educator's browser-owned session. The separate Moodle HTTPS module
 lives in `moodle/`; this package does not connect a signed-in Muse browser
 session to it. For an existing VM Moodle connection, use its established
@@ -30,11 +30,27 @@ instead.
 
 ## Install
 
-One script, idempotent (safe to run twice):
+Before the first install, create a virtual environment outside this tree
+and install the hash-pinned runtime packages. Muse's system Python may
+refuse a direct pip install with `externally-managed-environment`:
 
 ```
+MORROW_RUNTIME="${MORROW_HOME:-$HOME/.morrow}/python-runtime"
+python3 -m venv "$MORROW_RUNTIME"
+. "$MORROW_RUNTIME/bin/activate"
+python3 -m pip install --require-hashes -r requirements-optional.txt
 bash install.sh
 ```
+
+In every later shell command, set `MORROW_RUNTIME` as above and activate
+`$MORROW_RUNTIME/bin/activate` before running Morrow. Reuse this environment
+through upgrades. Keep it outside the connector tree. If venv support is
+missing, report that prerequisite and install the platform's venv support;
+do not bypass system Python protection with `--break-system-packages`.
+Allow Muse's package download requests for `pypi.org` and
+`files.pythonhosted.org`; keep certificate validation on.
+
+The installer is idempotent (safe to run twice).
 
 It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026) and
 warns when the `cryptography` package is missing (without it, every
@@ -42,8 +58,9 @@ student-data request is refused: working by name and the course
 roster; student names in course content are hidden
 without labels, and a change whose text still carries a hidden name is
 refused; if the educator asks for one of those, tell them the operator
-must run `python3 -m pip install --require-hashes -r
-requirements-optional.txt` in this tree), locates Chromium, probes egress
+must activate the runtime environment above and run
+`python3 -m pip install --require-hashes -r requirements-optional.txt`
+in this tree), locates Chromium, probes egress
 (`transport/egress.py`: authenticated proxy, bare proxy, or direct),
 creates the effective `MORROW_HOME` state layout, creates
 `helper/profile/` on first install (an existing profile is never wiped,

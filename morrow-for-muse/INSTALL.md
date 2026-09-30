@@ -62,12 +62,12 @@ The steps below cover Canvas sign-in and readback.
 Download the versioned package and its checksums from the GitHub release. Run these commands in an empty download folder. Verify the package before you unzip it.
 
 ```
-curl -fL -o morrow-muse-connector-0.4.7.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.7/morrow-muse-connector-0.4.7.zip
-curl -fL -o SHA256SUMS https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.7/SHA256SUMS
+curl -fL -o morrow-muse-connector-0.4.8.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.8/morrow-muse-connector-0.4.8.zip
+curl -fL -o SHA256SUMS https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.8/SHA256SUMS
 sha256sum --check SHA256SUMS
 ```
 
-The checksum check must print `morrow-muse-connector-0.4.7.zip: OK`. Stop if a download or checksum check fails.
+The checksum check must print `morrow-muse-connector-0.4.8.zip: OK`. Stop if a download or checksum check fails.
 
 Unzip the release into the skills directory. Run these commands from
 the folder that holds the zip. Running them again is safe: they update
@@ -77,7 +77,7 @@ sign-in in `helper/profile/`.
 ```
 mkdir -p ~/workspace/skills
 rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
-unzip -q morrow-muse-connector-0.4.7.zip -d ~/workspace/skills/
+unzip -q morrow-muse-connector-0.4.8.zip -d ~/workspace/skills/
 cd ~/workspace/skills
 if [ -d morrow-canvas ]; then
   cp -R morrow-muse-connector/. morrow-canvas/
@@ -100,12 +100,33 @@ Everything below assumes you are in the tree root
 
 ## Step 2: install the optional runtime packages, then run install.sh
 
-Install the hash-pinned packages before using the Moodle lane or Canvas
-student-data features:
+Use a virtual environment outside the connector tree. This also works when
+Muse's system Python reports `externally-managed-environment`. Install the
+hash-pinned packages before using the Moodle lane or Canvas student-data
+features:
 
 ```
+MORROW_RUNTIME="${MORROW_HOME:-$HOME/.morrow}/python-runtime"
+python3 -m venv "$MORROW_RUNTIME"
+. "$MORROW_RUNTIME/bin/activate"
 python3 -m pip install --require-hashes -r requirements-optional.txt
 ```
+
+Allow Muse's download requests for `pypi.org` and
+`files.pythonhosted.org`. Keep certificate validation on. If Python cannot
+create the environment, install your platform's Python venv support and
+repeat these commands. Do not use `--break-system-packages`.
+
+Activate this same environment before every Morrow command in a new shell:
+
+```
+MORROW_RUNTIME="${MORROW_HOME:-$HOME/.morrow}/python-runtime"
+. "$MORROW_RUNTIME/bin/activate"
+```
+
+The environment stays outside the connector tree through upgrades. The
+helper started from this shell inherits it. Do not put a virtual environment
+inside the connector folder; the integrity check rejects extra files.
 
 Then run the installer:
 
@@ -225,7 +246,8 @@ user is equivalent to use of the proxy credential. Do not run
 untrusted code as the same user on the install VM.
 
 The `cryptography` package (see Prerequisites): the encrypted learner
-vault needs it, installed hash-pinned:
+vault needs it. Activate the virtual environment from Step 2, then install
+it hash-pinned:
 
     python3 -m pip install --require-hashes -r requirements-optional.txt
 
