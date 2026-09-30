@@ -872,7 +872,7 @@ def _log(msg):
 
 
 def _loggable_url(url):
-    """scheme://host/path with the query string and fragment stripped.
+    """scheme://host/path with credentials, query, and fragment stripped.
 
     W2-P2-3: tokens (OAuth codes, LTI params, magic links) travel in the
     query; they must never reach the helper's stdout log. Unparseable
@@ -880,10 +880,12 @@ def _loggable_url(url):
     """
     try:
         parts = urllib.parse.urlsplit(str(url))
-        if not parts.scheme or not parts.netloc:
+        if not parts.scheme or not parts.netloc or not parts.hostname:
             return "<unparseable-url>"
+        _ = parts.port
+        authority = parts.netloc.rsplit("@", 1)[-1]
         return urllib.parse.urlunsplit(
-            (parts.scheme, parts.netloc, parts.path or "/", "", ""))
+            (parts.scheme, authority, parts.path or "/", "", ""))
     except Exception:
         return "<unparseable-url>"
 
