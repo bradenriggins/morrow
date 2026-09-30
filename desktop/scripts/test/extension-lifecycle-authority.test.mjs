@@ -1195,9 +1195,10 @@ async function permissionRemovalPublicationScenario() {
   const value = fixture({ initialLocal: initial });
   await importWorker("permission-removal-publication");
   const socket = await authenticate(value);
+  const beforeRemoval = socket.sent.length;
   value.granted.delete(coursePermission);
   value.permissionRemoved.listeners[0]({ origins: [coursePermission] });
-  const update = await eventually(() => socket.sent.find((message) => message.schema === "morrow.bridge.bindings.v1"));
+  const update = await eventually(() => socket.sent.slice(beforeRemoval).find((message) => message.schema === "morrow.bridge.bindings.v1" && message.bindings[0]?.runtimeVerified === false));
   assert.equal(update.bindings[0].runtimeVerified, false);
   assert.equal(value.local.values.courseFileStorageAccessEnabled, false);
 }

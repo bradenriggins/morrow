@@ -188,6 +188,7 @@ const POPUP_STATES = new Map([
   ["other-profile", { status: { ...connection, paired: true, otherProfileOwnsConnection: true } }],
   ["account-ready", { status: { ...connection, ...healthyPopup, courseAccessMode: "account", siteAnchors: [anchor()], bindings: [binding()], bindingCount: 1 }, sourceNeedle: "Your assistant can work across" }],
   ["account-no-courses", { status: { ...connection, ...healthyPopup, courseAccessMode: "account", siteAnchors: [anchor()] } }],
+  ["account-discovery", { status: { ...connection, ...healthyPopup, courseAccessMode: "account", accountCoursesLoading: true, discoveredCourseCount: 5000, siteAnchors: [anchor()] }, sourceNeedle: "Finding available courses…" }],
   ["connected-no-site", { status: { ...connection, ...healthyPopup } }],
   ["detected-platform", { status: { ...connection, ...healthyPopup }, detectedProvider: "moodle", sourceNeedle: "Pair your signed-in ${platform}" }],
   ["site-ready-no-course", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor()] } }],
