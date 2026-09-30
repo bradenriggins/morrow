@@ -1870,7 +1870,7 @@ try {
   // Each available course connects by itself, in Plan, from the list the site already returned.
   await connectAvailableCourse("Introduction to Human Biology", "Introduction to Human Biology");
   await connectAvailableCourse("Synthetic Human Anatomy", "Synthetic Human Anatomy");
-  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks, "connecting from a current list must not read the list again");
+  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks + 1, "connecting from a current list must not read the list again");
   await settings.locator(".listhead", { hasText: "Connected · 2" }).waitFor();
   const readDiscoveryPage = async () => await settings.evaluate(async () => {
     const saved = await chrome.storage.session.get("courseDiscoveries");

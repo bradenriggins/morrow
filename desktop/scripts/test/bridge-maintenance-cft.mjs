@@ -72,7 +72,7 @@ try {
       id: EXTENSION_ID,
       version: manifest.version,
       installType: "development",
-      permissions: ["activeTab", "alarms", "offscreen", "scripting", "storage", "tabs", "webNavigation", "webRequest"],
+      permissions: ["activeTab", "alarms", "offscreen", "scripting", "storage", "tabs", "unlimitedStorage", "webNavigation", "webRequest"],
     },
     marker: JSON.parse(marker),
     markerSha256: markerDigest,
