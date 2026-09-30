@@ -121,6 +121,34 @@ try:
     check('partial-key-fault-releases-modifier', browser.cdp.evaluate(browser.tab, 'window.shiftHeld') is False)
     browser.cdp.call = original_call
     check('partial-stream-blocked-on-retry', request(partial)[0] == 409)
+    def layout(auth=True, query=''):
+        headers = {'X-Helper-Token':'a'*64} if auth else {}
+        req = urllib.request.Request(f'http://127.0.0.1:{port}/page/layout{query}', headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            return error.code, json.loads(error.read())
+    check('layout-auth-required', layout(False)[0] == 403)
+    check('layout-query-refused', layout(query='?target=other')[0] == 400)
+    for name, x, y in [('left',80,200), ('right',1080,200), ('top',500,40), ('bottom',500,650)]:
+        fixture = f"""<style>input,button{{position:absolute;width:300px;height:36px;box-sizing:border-box}}</style><input style="left:{x}px;top:{y}px" value="dummy-private-not-returned"><input type="password" style="left:{x}px;top:{y+70}px"><button style="left:{x}px;top:{y+140}px">dummy-label-not-returned</button><input style="display:none"><input disabled>"""
+        browser.cdp.call(browser.tab, 'Page.setDocumentContent', {'frameId':frame,'html':fixture})
+        code, data = layout()
+        check('layout-'+name+'-fields', code == 200 and len(data.get('fields',[])) == 2 and len(data.get('actions',[])) == 1)
+        check('layout-'+name+'-geometry', abs(data['fields'][0]['x']-x)<1 and abs(data['fields'][0]['y']-y)<1)
+        check('layout-'+name+'-no-content', 'dummy-private' not in json.dumps(data) and 'dummy-label' not in json.dumps(data) and all(set(r)=={'x','y','width','height'} for r in data['fields']))
+    for opaque in (False, True):
+        fixture = '<iframe '+('sandbox ' if opaque else '')+'style="position:absolute;left:180px;top:160px;width:400px;height:300px" srcdoc=\'<input style="position:absolute;left:20px;top:30px">\'></iframe>'
+        browser.cdp.call(browser.tab, 'Page.setDocumentContent', {'frameId':frame,'html':fixture})
+        time.sleep(0.2)
+        code, data = layout()
+        check('layout-opaque-frame' if opaque else 'layout-same-origin-frame', code == 200 and len(data['frames'])==1 and len(data['fields'])==(0 if opaque else 1))
+        if not opaque:
+            check('layout-frame-offset', abs(data['fields'][0]['x']-202)<2 and abs(data['fields'][0]['y']-192)<2)
+    browser.cdp.call(browser.tab, 'Page.setDocumentContent', {'frameId':frame,'html':'<style>input{width:5px;height:5px}</style>'+'<input>'*100})
+    code, data = layout()
+    check('layout-bounded-results', code == 200 and len(data['fields']) == 32 and len(data['actions']) <= 32 and len(data['frames']) <= 16 and data['input_epoch'] == epoch)
     check('primary-profile-is-disposable', str(root / 'profile') == str(server.PROFILE_DIR) and str(TREE / 'helper/profile') != str(server.PROFILE_DIR))
     png = browser.screenshot()
     check('real-current-frame-png', png.startswith(b'\x89PNG\r\n\x1a\n'))

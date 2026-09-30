@@ -29,7 +29,7 @@ call the protected endpoints. Logs carry only event counts and types.
 Auth: keepalive.sh mints a 64-hex token at launch, writes it to
 ${TREE_STATE_DIR}/helper_token (0600), and exports HELPER_AUTH_TOKEN
 into this process. Every POST/PUT/DELETE/PATCH endpoint and
-GET /screenshot require the X-Helper-Token header (else 403
+GET /screenshot and GET /page/layout require the X-Helper-Token header (else 403
 {"error":"forbidden"}). Open without a token: GET /status, GET / (the
 sign-in UI shell, served WITHOUT the token), GET /logo.png. The live
 token reaches a browser only through the single-use bootstrap exchange
@@ -1455,6 +1455,80 @@ class HelperBrowser:
         data = (res or {}).get("data", "")
         return base64.b64decode(data)
 
+    def page_layout(self):
+        """Read geometry only from the primary tab; never return field content."""
+        script = r"""(() => {
+          const width = Math.min(8192, window.innerWidth);
+          const height = Math.min(8192, window.innerHeight);
+          const result = {viewport:{width,height},fields:[],actions:[],frames:[]};
+          let scanned = 0;
+          function walk(doc, ox, oy, sx, sy, clip, depth) {
+            const view = doc.defaultView;
+            for (const el of doc.querySelectorAll('input,textarea,select,button,[role="button"],iframe')) {
+              if (++scanned > 512) return;
+              if (el.disabled || el.closest('[inert]')) continue;
+              let visible = true;
+              for (let p = el; p; p = p.parentElement) {
+                const s = view.getComputedStyle(p);
+                if (s.display === 'none' || s.visibility !== 'visible' || Number(s.opacity) === 0) { visible = false; break; }
+              }
+              if (!visible) continue;
+              const r = el.getBoundingClientRect();
+              const left = Math.max(clip.x, ox+r.left*sx), top = Math.max(clip.y, oy+r.top*sy);
+              const right = Math.min(clip.right, ox+r.right*sx), bottom = Math.min(clip.bottom, oy+r.bottom*sy);
+              if (right <= left || bottom <= top) continue;
+              const rect = {x:left,y:top,width:right-left,height:bottom-top};
+              const tag = el.tagName.toLowerCase();
+              if (tag === 'iframe') {
+                if (result.frames.length < 16) result.frames.push(rect);
+                if (depth >= 3) continue;
+                try {
+                  const child = el.contentDocument;
+                  if (child && el.offsetWidth && el.offsetHeight) {
+                    const fx = sx*r.width/el.offsetWidth, fy = sy*r.height/el.offsetHeight;
+                    walk(child, ox+r.left*sx+el.clientLeft*fx, oy+r.top*sy+el.clientTop*fy,
+                         fx, fy, {x:left,y:top,right,bottom}, depth+1);
+                  }
+                } catch (_) {}
+              } else if (tag === 'button' || el.getAttribute('role') === 'button' ||
+                         (tag === 'input' && ['submit','button','reset','image'].includes(el.type))) {
+                if (result.actions.length < 32) result.actions.push(rect);
+              } else if (tag !== 'input' || ['text','password','email','tel','url','search','number'].includes(el.type)) {
+                if (result.fields.length < 32) result.fields.push(rect);
+              }
+            }
+          }
+          walk(document,0,0,1,1,{x:0,y:0,right:width,bottom:height},0);
+          return JSON.stringify(result);
+        })()"""
+        try:
+            with self._lock:
+                raw = self.cdp.evaluate(self.tab, script, timeout=5)
+            data = json.loads(raw)
+            viewport = data["viewport"]
+            width, height = viewport["width"], viewport["height"]
+            if not all(type(n) in (int, float) and 1 <= n <= 8192 for n in (width, height)):
+                raise ValueError()
+            result = {"ok": True, "input_epoch": INPUT_BATCHES.epoch,
+                      "viewport": {"width": width, "height": height}}
+            for name, limit in (("fields", 32), ("actions", 32), ("frames", 16)):
+                items = data[name]
+                if not isinstance(items, list) or len(items) > limit:
+                    raise ValueError()
+                result[name] = []
+                for item in items:
+                    rect = {key: item[key] for key in ("x", "y", "width", "height")}
+                    if not all(type(n) in (int, float) and 0 <= n <= 8192 for n in rect.values()):
+                        raise ValueError()
+                    if (rect["width"] <= 0 or rect["height"] <= 0 or
+                            rect["x"] + rect["width"] > width or
+                            rect["y"] + rect["height"] > height):
+                        raise ValueError()
+                    result[name].append(rect)
+            return result
+        except Exception:
+            raise _HttpError(503, "page layout unavailable") from None
+
     def key(self, kind, key, code, key_code, modifiers=0, timeout=10):
         """Forward one key event. Values are forwarded to CDP only and are
         never logged, stored, or returned."""
@@ -1825,6 +1899,7 @@ _ROUTES = {
     "/logo.png": ("GET",),
     "/status": ("GET",),
     "/screenshot": ("GET",),
+    "/page/layout": ("GET",),
     "/page-code": ("POST",),
     "/input/key": ("POST",),
     "/input/batch": ("POST",),
@@ -1843,7 +1918,7 @@ _ROUTES = {
 # W3-P0-7/W3-P0-8: protected routes. Every POST/PUT/DELETE/PATCH is
 # protected by construction; GET /screenshot is additionally protected
 # because a screenshot can capture password entry.
-_PROTECTED_GET = ("/screenshot", "/cdp/events")
+_PROTECTED_GET = ("/screenshot", "/page/layout", "/cdp/events")
 
 # W4-P0-3: the /cdp/* proxy is the only cross-process CDP path (the
 # browser's --remote-debugging-pipe is private to this process). A
@@ -2081,6 +2156,16 @@ class Handler(BaseHTTPRequestHandler):
                     n, _loggable_url(st.get("url", ""))[:80],
                     st.get("logged_in")))
                 self._send_json(st)
+            elif path == "/page/layout":
+                if not self._require_auth():
+                    return
+                if "?" in self.path:
+                    self._send_json({"error": "query parameters not allowed"}, 400)
+                    return
+                try:
+                    self._send_json(BROWSER.page_layout())
+                except _HttpError as exc:
+                    self._send_json({"error": exc.message}, exc.code)
             elif path == "/screenshot":
                 # W3-P0-8: screenshots can capture password entry, so
                 # /screenshot is protected like the write endpoints.

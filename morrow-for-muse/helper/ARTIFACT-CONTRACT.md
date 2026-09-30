@@ -41,13 +41,39 @@ A missing batch endpoint requires a backend update; do not fall back to
 unordered per-key requests. Never persist input or show plaintext password
 echo. A failed or unconfirmed operation is not a successful input.
 
-Choose the initial zoom from the actual image-to-pane scale. A fixed 150% of
-a very small fitted image still makes text unreadable. Aim for one screenshot
-pixel per CSS pixel at first load, with visible zoom in/out, Fit, and Expand.
+Use protected `GET /page/layout` to find the visible control group. Fit that
+group with space above fields for labels and around nearby action buttons.
+Do not use tenant-specific coordinates or a fixed vertical bias. Convert the
+returned viewport coordinates to screenshot pixels using the actual image
+dimensions. Choose the initial scale from both the group and the available
+pane, and keep text readable. Keep visible zoom in/out, Fit, and Expand.
+When fields cannot be detected, retain a usable page view and manual controls.
 Keep the sign-in form in view, allow pan/scroll, and support narrow panes,
 pinch, and double-tap. Derive pointer coordinates from current image bounds
 and the zoom/pan transform. A pan or zoom gesture must not also click a field.
 Respect a zoom the user has chosen instead of resetting it on each frame.
+
+### Protected layout contract
+
+`GET /page/layout` requires `X-Helper-Token`, the existing Host/origin guards,
+and the existing rate limit. It accepts no query parameters, body, target,
+expression, or navigation request. The helper runs one fixed read-only script
+in its primary tab with a five-second timeout. The response is:
+
+```json
+{"ok":true,"input_epoch":"<current epoch>","viewport":{"width":1600,"height":1000},"fields":[{"x":100,"y":200,"width":300,"height":36}],"actions":[],"frames":[]}
+```
+
+Coordinates use viewport CSS pixels. Rectangles are clipped to the viewport.
+At most 32 field rectangles, 32 action rectangles, and 16 frame rectangles
+are returned. The scan examines at most 512 controls, with three nested frame
+levels. Hidden, disabled, inert, and offscreen controls are excluded. Text-like
+inputs, textareas, and selects provide field anchors. Buttons provide action
+anchors. Same-origin frame controls include their frame offset and scale.
+Opaque frame controls remain unavailable; their outer frame bounds remain.
+No values, text, labels, names, IDs, field types, or URLs are returned or logged.
+Unavailable layout returns a static 503 error. Never persist this metadata.
+The native action must verify the same helper identity as screenshots and input.
 
 Keep queued values, frames, and acknowledgement state transient. Clear pending
 values after acknowledgement, error, navigation, or unmount. On a restart or
@@ -63,6 +89,8 @@ chooses to resume. Do not automatically replay text into a changed focus.
   delete, Tab/Enter, selection, pointer mapping, retry, and restart behavior.
 - Desktop and narrow after-screenshots show a readable initial view. Pointer
   checks pass at Fit, initial zoom, manual zoom, and after panning.
+- Forms at different positions, embedded forms, and Expand/resize preserve the
+  full control group. Manual view choices remain stable on later frames.
 - Measured input acknowledgement and frame latency distinguish browser input,
   platform action transport, and visual refresh. Never log credential values.
 - The owner can use the real private card, then complete an admitted course

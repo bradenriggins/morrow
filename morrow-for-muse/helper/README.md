@@ -82,7 +82,7 @@ sign-in is repeated only when needed (expiry, cleared session, or account change
   `/input/*`, `/navigate` on `127.0.0.1:8901` (override with
   `LOGIN_HELPER_PORT` / `LOGIN_HELPER_BIND`). Needs `CANVAS_BASE` (env or
   first argument); refuses to start without a tenant. Every
-  POST/PUT/DELETE/PATCH endpoint and `GET /screenshot` require the
+  POST/PUT/DELETE/PATCH endpoint and `GET /screenshot` and `GET /page/layout` require the
   `X-Helper-Token` header (see "Token auth" below); `GET /status`,
   `GET /`, and `GET /logo.png` are open.
 - `index.html` - the sign-in UI served by the server.
@@ -171,7 +171,7 @@ password entry) through `/screenshot`.
   an ephemeral token at startup and prints it to the live console only
   (never to `server.log`); it dies with the process.
 - **Protected:** every POST/PUT/DELETE/PATCH endpoint on any path, plus
-  `GET /screenshot`. They require the `X-Helper-Token` header to equal
+  `GET /screenshot` and `GET /page/layout`. They require the `X-Helper-Token` header to equal
   the token; anything else gets `403` JSON `{"error":"forbidden"}`.
 - **Open:** `GET /status` (health only), `GET /` (the sign-in UI),
   `GET /logo.png`. The server injects the token into a
@@ -327,3 +327,11 @@ echo. Replay guards retain only hashes and last acknowledgements, with at most
 32 streams per helper lifetime. At capacity, new streams refuse with 429;
 no guard is evicted. Existing streams still work. A helper restart creates a
 new epoch. This endpoint does not widen the generic CDP allowlist.
+
+## Private sign-in layout
+
+The native card can use protected `GET /page/layout` to fit visible fields and
+nearby buttons on different sign-in pages. This fixed primary-tab endpoint
+returns geometry only. It rejects query parameters and reads no field values.
+See [the artifact contract](ARTIFACT-CONTRACT.md#protected-layout-contract) for
+the exact response, limits, embedded-frame behavior, and required UI checks.
