@@ -530,7 +530,8 @@ else:
 
 genuine_signout() {
   # $1 = /status body. Prints "true" ONLY for the exact genuine-sign-out
-  # state: logged_in=false, chromium_alive=true, starting=false.
+  # state: logged_in=false, chromium_alive=true, starting=false, plus a
+  # login URL at the configured Canvas origin.
   # P0-8: exit 2 is emitted only for this state. A legacy server that
   # omits chromium_alive (unknown), a malformed body, a dead Chromium, or
   # a still-starting helper must never read as signed-out.
@@ -549,7 +550,22 @@ genuine_signout() {
   done
   if [ "${logged_in}" = "false" ] && [ "${chromium_alive}" = "true" ] \
      && [ "${starting}" = "false" ]; then
-    echo true
+    # Liveness alone cannot distinguish a login redirect from a Chrome
+    # network error. Require the configured Canvas origin and login path.
+    printf '%s' "$1" | python3 -c '
+import json,sys
+from urllib.parse import urlsplit
+try:
+    d=json.load(sys.stdin)
+    url=urlsplit(d.get("url", ""))
+    base=urlsplit(sys.argv[1])
+    same=(url.scheme == base.scheme == "https" and bool(base.hostname)
+          and url.hostname == base.hostname and url.port == base.port
+          and url.username is None and url.password is None)
+    login=url.path == "/login" or url.path.startswith("/login/")
+    print("true" if same and login else "false")
+except (ValueError, TypeError, AttributeError):
+    print("false")' "${CANVAS_BASE:-}" 2>/dev/null || echo false
   else
     echo false
   fi
@@ -809,7 +825,8 @@ evaluate_status() {
     exit $?
   fi
   # P0-8: exit 2 ONLY for the exact genuine-sign-out state
-  # (logged_in=false, chromium_alive=true, starting=false). A legacy
+  # (logged_in=false, chromium_alive=true, starting=false and a Canvas
+  # login URL). A legacy
   # server that omits chromium_alive (unknown), a still-starting helper,
   # or any other indeterminate state is NOT a sign-out: exit 1, and never
   # recover on a guess.

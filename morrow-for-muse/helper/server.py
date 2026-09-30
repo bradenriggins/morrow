@@ -29,7 +29,7 @@ call the protected endpoints. Logs carry only event counts and types.
 Auth: keepalive.sh mints a 64-hex token at launch, writes it to
 ${TREE_STATE_DIR}/helper_token (0600), and exports HELPER_AUTH_TOKEN
 into this process. Every POST/PUT/DELETE/PATCH endpoint and
-GET /screenshot require the X-Helper-Token header (else 403
+GET /screenshot and GET /page/layout require the X-Helper-Token header (else 403
 {"error":"forbidden"}). Open without a token: GET /status, GET / (the
 sign-in UI shell, served WITHOUT the token), GET /logo.png. The live
 token reaches a browser only through the single-use bootstrap exchange
@@ -73,6 +73,8 @@ Endpoints (all on 127.0.0.1):
     dies. Cookie values and names never leave this endpoint.
   GET  /screenshot       -> PROTECTED: PNG bytes of the current page
                            (can capture password entry; requires the token)
+  POST /input/batch      -> PROTECTED: ordered text/control-key operations,
+                           helper epoch, stream_id and sequence retry guards
   POST /input/key        -> PROTECTED: {"kind":"down"|"up","key","code","keyCode"}
   POST /input/mouse      -> PROTECTED: {"kind":"pressed"|"released"|"moved",
                              "x","y","button"}  x/y: finite page CSS px
@@ -1408,6 +1410,7 @@ class HelperBrowser:
                 "chromium_alive": chromium_alive,
                 "starting": starting,
                 "profile_dir": _display_profile_dir(PROFILE_DIR),
+                "input_epoch": INPUT_BATCHES.epoch,
                 "profile_has_cookies": _profile_has_cookies(),
                 # W4-P2-3: session-cookie expiry horizon, metadata only
                 # (whole days, never cookie names/values). keepalive.sh
@@ -1452,7 +1455,81 @@ class HelperBrowser:
         data = (res or {}).get("data", "")
         return base64.b64decode(data)
 
-    def key(self, kind, key, code, key_code, modifiers=0):
+    def page_layout(self):
+        """Read geometry only from the primary tab; never return field content."""
+        script = r"""(() => {
+          const width = Math.min(8192, window.innerWidth);
+          const height = Math.min(8192, window.innerHeight);
+          const result = {viewport:{width,height},fields:[],actions:[],frames:[]};
+          let scanned = 0;
+          function walk(doc, ox, oy, sx, sy, clip, depth) {
+            const view = doc.defaultView;
+            for (const el of doc.querySelectorAll('input,textarea,select,button,[role="button"],iframe')) {
+              if (++scanned > 512) return;
+              if (el.disabled || el.closest('[inert]')) continue;
+              let visible = true;
+              for (let p = el; p; p = p.parentElement) {
+                const s = view.getComputedStyle(p);
+                if (s.display === 'none' || s.visibility !== 'visible' || Number(s.opacity) === 0) { visible = false; break; }
+              }
+              if (!visible) continue;
+              const r = el.getBoundingClientRect();
+              const left = Math.max(clip.x, ox+r.left*sx), top = Math.max(clip.y, oy+r.top*sy);
+              const right = Math.min(clip.right, ox+r.right*sx), bottom = Math.min(clip.bottom, oy+r.bottom*sy);
+              if (right <= left || bottom <= top) continue;
+              const rect = {x:left,y:top,width:right-left,height:bottom-top};
+              const tag = el.tagName.toLowerCase();
+              if (tag === 'iframe') {
+                if (result.frames.length < 16) result.frames.push(rect);
+                if (depth >= 3) continue;
+                try {
+                  const child = el.contentDocument;
+                  if (child && el.offsetWidth && el.offsetHeight) {
+                    const fx = sx*r.width/el.offsetWidth, fy = sy*r.height/el.offsetHeight;
+                    walk(child, ox+r.left*sx+el.clientLeft*fx, oy+r.top*sy+el.clientTop*fy,
+                         fx, fy, {x:left,y:top,right,bottom}, depth+1);
+                  }
+                } catch (_) {}
+              } else if (tag === 'button' || el.getAttribute('role') === 'button' ||
+                         (tag === 'input' && ['submit','button','reset','image'].includes(el.type))) {
+                if (result.actions.length < 32) result.actions.push(rect);
+              } else if (tag !== 'input' || ['text','password','email','tel','url','search','number'].includes(el.type)) {
+                if (result.fields.length < 32) result.fields.push(rect);
+              }
+            }
+          }
+          walk(document,0,0,1,1,{x:0,y:0,right:width,bottom:height},0);
+          return JSON.stringify(result);
+        })()"""
+        try:
+            with self._lock:
+                raw = self.cdp.evaluate(self.tab, script, timeout=5)
+            data = json.loads(raw)
+            viewport = data["viewport"]
+            width, height = viewport["width"], viewport["height"]
+            if not all(type(n) in (int, float) and 1 <= n <= 8192 for n in (width, height)):
+                raise ValueError()
+            result = {"ok": True, "input_epoch": INPUT_BATCHES.epoch,
+                      "viewport": {"width": width, "height": height}}
+            for name, limit in (("fields", 32), ("actions", 32), ("frames", 16)):
+                items = data[name]
+                if not isinstance(items, list) or len(items) > limit:
+                    raise ValueError()
+                result[name] = []
+                for item in items:
+                    rect = {key: item[key] for key in ("x", "y", "width", "height")}
+                    if not all(type(n) in (int, float) and 0 <= n <= 8192 for n in rect.values()):
+                        raise ValueError()
+                    if (rect["width"] <= 0 or rect["height"] <= 0 or
+                            rect["x"] + rect["width"] > width or
+                            rect["y"] + rect["height"] > height):
+                        raise ValueError()
+                    result[name].append(rect)
+            return result
+        except Exception:
+            raise _HttpError(503, "page layout unavailable") from None
+
+    def key(self, kind, key, code, key_code, modifiers=0, timeout=10):
         """Forward one key event. Values are forwarded to CDP only and are
         never logged, stored, or returned."""
         cdp_type = "keyDown" if kind == "down" else "keyUp"
@@ -1472,7 +1549,37 @@ class HelperBrowser:
             pass
         # Keep the key lane independent from screenshots. CDP.call owns its
         # connection, so this can be dispatched immediately and concurrently.
-        self.cdp.call(self.tab, "Input.dispatchKeyEvent", params, timeout=10)
+        self.cdp.call(self.tab, "Input.dispatchKeyEvent", params, timeout=timeout)
+
+    def input_batch(self, operations):
+        """Apply already validated input in order, without a round trip per char."""
+        deadline = time.monotonic() + 10
+        def remaining():
+            budget = deadline - time.monotonic()
+            if budget <= 0:
+                raise TimeoutError("input deadline exceeded")
+            return budget
+        with self._lock:
+            for operation in operations:
+                if operation["type"] == "text":
+                    self.cdp.call(self.tab, "Input.insertText",
+                                  {"text": operation["text"]}, timeout=remaining())
+                else:
+                    try:
+                        for kind in ("down", "up"):
+                            self.key(kind, operation["key"], operation["code"],
+                                     operation["keyCode"], operation["modifiers"],
+                                     timeout=remaining())
+                    except Exception:
+                        # Key-up is safe to repeat after an uncertain key-down.
+                        # Keep the batch failed even when cleanup succeeds.
+                        try:
+                            self.key("up", operation["key"], operation["code"],
+                                     operation["keyCode"], operation["modifiers"],
+                                     timeout=1)
+                        except Exception:
+                            pass
+                        raise
 
     def wheel(self, x, y, delta_x, delta_y):
         """Forward one scroll step at page point (x, y)."""
@@ -1674,6 +1781,87 @@ class _HttpError(Exception):
         self.message = message
 
 
+class InputBatches:
+    """Bounded sequence guards retain hashes and acknowledgements, never text.
+
+    Old acknowledgements and partial failures are refused instead of replayed.
+    Streams are not evicted: eviction could type a delayed retry twice.
+    """
+    def __init__(self):
+        self.epoch = os.urandom(16).hex()
+        self.streams = {}
+        self.lock = threading.Lock()
+
+    def run(self, body, apply):
+        if not isinstance(body, dict) or set(body) != {
+                "epoch", "stream_id", "sequence", "operations"}:
+            raise _HttpError(400, "invalid input batch")
+        stream, sequence = body["stream_id"], body["sequence"]
+        if (not isinstance(stream, str) or len(stream) != 32
+                or any(c not in "0123456789abcdef" for c in stream)
+                or type(sequence) is not int or not 1 <= sequence <= 2**53 - 1):
+            raise _HttpError(400, "invalid input sequence")
+        operations = body["operations"]
+        if not isinstance(operations, list) or not 1 <= len(operations) <= 32:
+            raise _HttpError(400, "invalid input operations")
+        text_bytes = 0
+        for operation in operations:
+            if not isinstance(operation, dict):
+                raise _HttpError(400, "invalid input operation")
+            if operation.get("type") == "text":
+                text = operation.get("text")
+                if (set(operation) != {"type", "text"}
+                        or not isinstance(text, str) or not 1 <= len(text) <= 4096):
+                    raise _HttpError(400, "invalid input text")
+                try:
+                    text_bytes += len(text.encode("utf-8"))
+                except UnicodeError:
+                    raise _HttpError(400, "invalid input text") from None
+            elif operation.get("type") == "key":
+                if (set(operation) != {"type", "key", "code", "keyCode", "modifiers"}
+                        or not isinstance(operation["key"], str)
+                        or not 1 <= len(operation["key"]) <= 32
+                        or not isinstance(operation["code"], str)
+                        or len(operation["code"]) > 32
+                        or type(operation["keyCode"]) is not int
+                        or not 0 <= operation["keyCode"] <= 65535
+                        or type(operation["modifiers"]) is not int
+                        or not 0 <= operation["modifiers"] <= 15):
+                    raise _HttpError(400, "invalid input key")
+            else:
+                raise _HttpError(400, "invalid input operation")
+        if text_bytes > 8192:
+            raise _HttpError(413, "input text too large")
+        digest = hashlib.sha256(json.dumps(operations, sort_keys=True,
+                                separators=(",", ":")).encode("utf-8")).digest()
+        with self.lock:
+            if body["epoch"] != self.epoch:
+                raise _HttpError(409, "helper restarted; refresh before typing again")
+            previous = self.streams.get(stream)
+            if previous is not None:
+                last, previous_digest, failed = previous
+                if failed:
+                    raise _HttpError(409, "input outcome unknown; refresh before typing again")
+                if sequence == last and digest == previous_digest:
+                    return {"ok": True, "sequence": sequence, "replayed": True}
+                if sequence != last + 1:
+                    raise _HttpError(409, "input sequence conflict; refresh before typing again")
+            elif sequence != 1:
+                raise _HttpError(409, "input sequence must start at 1")
+            elif len(self.streams) >= 32:
+                raise _HttpError(429, "input session capacity reached; restart helper")
+            self.streams[stream] = (sequence, digest, True)
+            try:
+                apply(operations)
+            except Exception:
+                raise _HttpError(409, "input outcome unknown; refresh before typing again") from None
+            self.streams[stream] = (sequence, digest, False)
+            return {"ok": True, "sequence": sequence, "replayed": False}
+
+
+INPUT_BATCHES = InputBatches()
+
+
 # Pointer input is in page CSS pixels inside the browser window, and one
 # scroll step moves at most this far. The UI clamps to the screenshot and
 # coalesces wheel and swipe motion; anything outside these bounds did not
@@ -1711,8 +1899,10 @@ _ROUTES = {
     "/logo.png": ("GET",),
     "/status": ("GET",),
     "/screenshot": ("GET",),
+    "/page/layout": ("GET",),
     "/page-code": ("POST",),
     "/input/key": ("POST",),
+    "/input/batch": ("POST",),
     "/input/mouse": ("POST",),
     "/input/wheel": ("POST",),
     "/navigate": ("POST",),
@@ -1728,7 +1918,7 @@ _ROUTES = {
 # W3-P0-7/W3-P0-8: protected routes. Every POST/PUT/DELETE/PATCH is
 # protected by construction; GET /screenshot is additionally protected
 # because a screenshot can capture password entry.
-_PROTECTED_GET = ("/screenshot", "/cdp/events")
+_PROTECTED_GET = ("/screenshot", "/page/layout", "/cdp/events")
 
 # W4-P0-3: the /cdp/* proxy is the only cross-process CDP path (the
 # browser's --remote-debugging-pipe is private to this process). A
@@ -1966,6 +2156,20 @@ class Handler(BaseHTTPRequestHandler):
                     n, _loggable_url(st.get("url", ""))[:80],
                     st.get("logged_in")))
                 self._send_json(st)
+            elif path == "/page/layout":
+                if not self._require_auth():
+                    return
+                if "?" in self.path:
+                    self._send_json({"error": "query parameters not allowed"}, 400)
+                    return
+                if (self.headers.get("Transfer-Encoding") or
+                        self.headers.get("Content-Length", "0") != "0"):
+                    self._send_json({"error": "request body not allowed"}, 400)
+                    return
+                try:
+                    self._send_json(BROWSER.page_layout())
+                except _HttpError as exc:
+                    self._send_json({"error": exc.message}, exc.code)
             elif path == "/screenshot":
                 # W3-P0-8: screenshots can capture password entry, so
                 # /screenshot is protected like the write endpoints.
@@ -2032,7 +2236,9 @@ class Handler(BaseHTTPRequestHandler):
                 # logged; the code burns on its first page load.
                 self._send_json({"page_code": _mint_page_code()})
                 return
-            if path == "/input/key":
+            if path == "/input/batch":
+                self._send_json(INPUT_BATCHES.run(self._read_json(), BROWSER.input_batch))
+            elif path == "/input/key":
                 body = self._read_json()
                 kind = body.get("kind")
                 if kind not in ("down", "up"):

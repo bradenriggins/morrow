@@ -26,6 +26,10 @@ skill. Read `artifact.status`, require `share.shared=false`, and present
 its `card.widget_id` through `widget.present`. An unpublished artifact
 has no public URL; never assemble one.
 
+Read the [reusable card contract](ARTIFACT-CONTRACT.md) before creating or
+updating the card. It specifies the actual configuration sources and readable
+initial zoom; shared package code must not embed one account's values.
+
 ## Connect the exact helper
 
 1. Activate the runtime environment from `INSTALL.md` Step 2.
@@ -33,25 +37,41 @@ has no public URL; never assemble one.
    Use its helper port, Canvas address, and profile. The default port is
    8901; an existing install can use another port. Never use a different
    helper merely because it answers.
-3. Check `/status`. Require `helper_version` to match `VERSION`, the
+3. Check `/status`. Normalize its `~/` profile spelling against the installed
+   home, then compare real paths with the configured profile. A spelling change
+   is not a different profile; a different directory must still fail closed.
+   Verify the tree ID and state-directory binding. Require `helper_version` to match `VERSION`, the
    configured profile to match, `chromium_alive=true`, and
    `starting=false`. A missing helper or mismatch needs a clear retry or
-   repair message. Do not show a stale frame as connected.
+   repair message. A Chrome error page or blank page is not a usable
+   sign-in page, even when Chromium is alive. Show the connection error
+   and a retry control. Do not show a stale frame as connected.
 4. Proxy only the sign-in controls through private native artifact
-   actions: status, screenshot, key, mouse, wheel, and navigation to the
+   actions: status, screenshot, ordered input batches, mouse, wheel, and navigation to the
    configured Canvas address. Use the installed
    `transport.local_chromium._helper_request` on the server side. It
    supplies the helper authentication from the protected tree state.
    Never send a launch token to the artifact client, arguments, chat,
    logs, or an external service. Never expose arbitrary CDP evaluation
    or arbitrary HTTP forwarding as an artifact action.
-5. Follow the request shapes in `helper/server.py` and input handling in
-   `helper/index.html`. Preserve key down/up, pointer coordinates,
-   touch, wheel scrolling, request IDs, acknowledgements, and busy
-   feedback. Retry with the same request ID; never duplicate an input
-   after an acknowledgement is lost. Keep frames and input transient;
-   do not save screenshots or typed values.
-6. Let the educator enter their own credentials and complete SSO/MFA.
+5. Use the [input batch contract](README.md#ordered-private-input). Coalesce
+   ordinary text briefly and send it once with `Input.insertText`; paired
+   control keys are ordered on the server. Use one queue for text, control
+   keys, pointer, and navigation. Flush text before a focus change. Support
+   paste, composition/IME, mobile backspace, Tab, Enter, selection, and blur.
+   An ambiguous response may retry only the identical sequence and payload.
+   A restart or uncertain partial outcome stops input and requires a fresh
+   frame and deliberate resumption. Never silently replay it into a new field.
+   Keep frames and input transient; do not save or log typed values. Never
+   show plaintext password echo in an intermediate relay field. Pause frame
+   polling while input is pending and refresh after acknowledgement.
+6. Show a readable initial sign-in view, visible zoom in/out and Fit controls,
+   and an expanded view. Support zoom/pan and narrow panes. Map pointer
+   positions through the actual image bounds and zoom transform. A touch
+   gesture that zooms or pans must not also click the remote form. Show input
+   errors and pending acknowledgement clearly; never mark unconfirmed input
+   as sent. Clear stale frames after a disconnect or identity mismatch.
+7. Let the educator enter their own credentials and complete SSO/MFA.
    The assistant does not enter, inspect, echo, or retain them. Check
    `/status` afterward, pin the account, and confirm its name with the
    educator before course work. Keep Plan as the default; sign-in does
@@ -65,7 +85,12 @@ one when spent. It does not make VM localhost reachable on another device.
 ## Check before declaring setup complete
 
 - The signed-in owner opens the private card and sees a current frame.
-- Keyboard, pointer, and scrolling work, and input acknowledgements arrive.
+- On an isolated dummy page, typing, paste, IME, mobile delete, Tab/Enter,
+  selection, pointer, and scrolling work in order. Record round-trip and
+  visual latency without credential values. Test identical retry, delayed
+  acknowledgement, helper restart, and focus changes.
+- At normal and narrow widths, the form is readable and zoom/pan work.
+  Inspect an after-screenshot. Test pointer mapping at each zoom level.
 - Helper-down and wrong-profile states show a clear recovery step.
 - Unpublished/private state remains in the authoritative artifact status.
 - Anonymous access cannot obtain the private artifact or control its browser.

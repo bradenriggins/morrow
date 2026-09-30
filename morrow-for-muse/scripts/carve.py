@@ -59,7 +59,7 @@ DEV_ONLY = (
     "lanes/", "qr-proof/", "platform-asks/", "learners/evidence/",
     "requirements-dev.txt", "requirements-test.txt",
     "scripts/install-robustness-selftest.sh", "scripts/carve.py",
-    "scripts/install-e2e.sh",
+    "scripts/install-e2e.sh", "scripts/helper-input-e2e.py",
     # rig-only session capture; production never runs it (SKILL.md)
     "session/capture.py",
     # the 2026-09-20 VM deployment record and its userspace scheduler

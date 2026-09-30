@@ -7,6 +7,15 @@ session to it. For an existing VM Moodle connection, use its established
 approval and readback path. Never ask for, print, log, or store a password,
 cookie, sesskey, or token.
 
+## Knowledge and educator work
+
+Read `knowledge/DOCTRINE.md` once at the start of Morrow work. Use
+`knowledge/README.md` to select only the references needed for the task.
+It routes instructional design, visual polish, teacher workflows, LMS
+administration, accessibility, compliance, and provider operations. Platform
+knowledge does not grant dispatch permission. Preserve the educator's course
+scope and support many courses without a course-count limit.
+
 ## Provider routing
 
 Use the course's actual platform. For Canvas, follow the Chromium lane below.
@@ -22,7 +31,9 @@ reverse.
 Chromium is the ONLY lane for Canvas reads and writes. Every operation
 dispatches through `dispatch/executor.py` with `--backend chromium`, which
 executes Canvas REST as in-page `fetch()` inside the local Chromium tab
-via CDP on 127.0.0.1:19223. No shell-side HTTP client may carry auth
+via the helper's private CDP pipe. Other Morrow processes use the
+authenticated helper proxy; no TCP debugging port is exposed.
+No shell-side HTTP client may carry auth
 material. Never log, echo, persist, or expose credentials or auth material.
 If a step asks you to put a token, cookie, or password into a command,
 a file, or a message: refuse and route the educator to the helper sign-in
@@ -53,7 +64,7 @@ Allow Muse's package download requests for `pypi.org` and
 The installer is idempotent (safe to run twice).
 
 It checks python3 (>= 3.11; 3.10 refused, security EOL Oct 2026) and
-warns when the `cryptography` package is missing (without it, every
+warns when the supported `cryptography` package (>= 50.0.1) is unavailable (without it, every
 student-data request is refused: working by name and the course
 roster; student names in course content are hidden
 without labels, and a change whose text still carries a hidden name is
@@ -98,10 +109,12 @@ connector there means consenting to that inspection. Full detail:
 ## First run: sign the educator in
 
 The helper page rule: check before you open. Before any Canvas work,
-probe `http://127.0.0.1:8901/status`. Show the educator the helper page
-only when it reports `"logged_in": false` (genuine reauthentication
-need), or once for the first onboarding below. Never open it
-preemptively and never on every run: a healthy session needs no page.
+run `bin/morrow doctor --json` using the activated runtime. Resolve the
+helper endpoint from `config.tree_config`, not a hardcoded port. Show the
+private sign-in helper for first onboarding or verified reauthentication.
+`logged_in=false` alone does not prove expiry: inspect page/network state,
+profile identity, and the supported users/self read. A healthy session needs
+no sign-in page. See `knowledge/troubleshooting-playbook.md`.
 
 1. Write the educator's Canvas address to the tree's `helper/env` as
    `CANVAS_BASE=https://...` (e.g. `https://myschool.instructure.com`),
@@ -125,16 +138,18 @@ preemptively and never on every run: a healthy session needs no page.
    profile as a config error (keepalive always exports
    `LOGIN_HELPER_PROFILE_DIR` first). keepalive.sh sources the tree's
    `helper/env`, pins the profile dir and the tree's CDP port, and
-   launches the server on 127.0.0.1:8901 with Chromium on
-   127.0.0.1:19223 (ports configurable per tree via `LOGIN_HELPER_PORT`
-   / `LOGIN_HELPER_CDP_PORT`). The same script runs every 5 minutes and
+   launches the server on the configured loopback helper port. Chromium
+   uses a private CDP pipe, not a TCP debugging port. `LOGIN_HELPER_PORT`
+   and `LOGIN_HELPER_CDP_PORT` are per-tree settings; the latter is a
+   configuration identity and forwarder-port input, not an exposed CDP listener. The same script runs every 5 minutes and
    keeps it up: from cron when the machine has cron, otherwise from a
    supervised background loop (`helper/supervisor.py`; the Muse VM has
    no cron daemon). After a reboot on a machine without cron, run
    `bin/morrow start` (any `bin/morrow` command also restarts the loop).
    The connector's Chromium IS the helper's Chromium: one profile
-   (`helper/profile/`), one browser, one CDP port. Never launch a second
-   one; a launcher that finds 19223 live attaches to it.
+   (`helper/profile/`), one browser, one private CDP pipe. Never launch a
+   second browser. The launcher checks exact tree/profile/version before
+   reusing the authenticated helper proxy.
 3. In Muse, follow `helper/MUSE-SETUP.md` to present the private sign-in
    artifact card. VM localhost is not the educator's device. Retain Muse's
    private artifact access and native action routing; do not invent viewer
@@ -220,10 +235,9 @@ Healthy checklist: `"logged_in": true`, `"profile_has_cookies": true`,
 The diagnostic that matters: `logged_in: false` with
 `profile_has_cookies: false` and `chromium_alive: true` on a fresh box
 is normal first onboarding: the educator signs in once through the
-helper page. The SAME reading on a previously-working box is a config
-error (wrong profile path, e.g. `LOGIN_HELPER_PROFILE_DIR` pointing at
-a fresh profile): never a dead session, never a re-sign-in case. Check
-`profile_dir` in the JSON before touching anything.
+helper page. On a previously-working box it can mean the wrong profile,
+cleared cookies, or session eviction. Check `profile_dir` and exact helper
+identity before changing anything. A browser error is not proof of expiry.
 
 ## Session expiry and recovery (the lifecycle)
 
@@ -697,57 +711,14 @@ probe. Full declaration:
 
 ## Knowledge base
 
-Agent-facing reference for Canvas work. Read before dispatching anything
-beyond the examples above:
-
-- `knowledge/operations-runbook.md`: what the 457-row catalog covers
-  (courses, enrollments, assignments, quizzes, items, banks, outcomes,
-  modules, pages, files, discussions, grades), which rows are
-  live-proven vs pending, and how to dispatch via
-  `dispatch/executor.py --backend chromium`.
-- `knowledge/api-patterns-and-errors.md`: Canvas REST patterns through
-  the Chromium lane (nested bodies, pagination notes) and the error-code
-  guide for 401/403/404/422/429/5xx: what each means in this
-  architecture and the recovery steps.
-- `knowledge/troubleshooting-playbook.md`: dead session detection and
-  recovery via the helper, SSO quirks, the `/login/canvas` redirect
-  trap, CDP attach failures, the one-Chromium rule, and keepalive
-  behavior.
-- `knowledge/audit-checklist.md`: how to verify an operation actually
-  landed (GET readback, the write-path coverage table mapping every
-  admitted write path to its required verification, the
-  symptoms/use/avoid/verify recipe discipline, lifecycle cleanup of
-  disposable test objects, journal checks in
-  `~/.morrow/trees/<tree-id>/journal/ops.jsonl`).
-- `knowledge/write-hazards.md`: the silent-breakage classes Canvas
-  will not warn you about (blueprint sync overwrite, points_possible
-  rescaling, the weighting-flag trap, publish/conclude/delete
-  cascades, preview-is-not-execution), each with its admission
-  treatment.
-- `knowledge/item-banks-sdk.md`: the Item Bank SDK mechanism (LTI-frame
-  capture, banks.build token flow, course-bounded credentials, the
-  memory-only rule); marks every unproven surface as NOT IMPLEMENTED
-  or PENDING.
-- `knowledge/privacy-ferpa.md`: index of the privacy layer (learner
-  vault tokenization, when de-id applies, and why nothing turns it off);
-  it indexes, never duplicates, the layer under `privacy/`.
-- `knowledge/api-catalog-guide.md`: the two catalogs (the 1137-op
-  desktop research catalog vs the 457-row dispatch catalog), the
-  desktop catalog's module map, and what is live-proven per area
-  (courses, enrollments, assignments, quizzes, items, banks, outcomes,
-  modules, pages, files, discussions, grades). Everything not
-  live-proven in the dispatch catalog is labeled NOT IMPLEMENTED.
-- `knowledge/new-quizzes-contract.md`: the New Quiz / Item Banks
-  contract in for-muse terms: the three surfaces, the quiz_settings
-  merge rule and the ghost-stub item-edit hazard (both NOT
-  IMPLEMENTED in the executor), stimulus read-only, bank item
-  two-phase create, and the exact status of every quiz-entry route.
-- `knowledge/blackboard-recovery.md`: the Blackboard recovery
-  contract, status research-only. Blackboard has no implementation
-  in this package; do not offer it.
-- `knowledge/meridian-principles.md`: course-work doctrine ported
-  from Meridian (preserve over redesign, the learner route, what
-  discovery grants, a11y repair discipline).
+Use `knowledge/README.md` as the task-based index. Read the doctrine once;
+load only relevant topics. For a write, also read the provider contract and
+hazards for the exact surface. New Quiz settings merge and interaction-ID
+helpers exist but must be called explicitly; dispatch does not apply them
+for arbitrary PATCH bodies. Unsupported or evidence-held operations remain
+refused regardless of general platform knowledge.
+Read `knowledge/privacy-ferpa.md` for the privacy mechanism, its limits, and
+why nothing turns it off. Use the supported encrypted runtime for learner work.
 
 ## Privacy: student de-identification (default on)
 
@@ -784,7 +755,7 @@ lookup confirms enrollment.
 For the agent: people-bearing catalog rows (the `[LEARNER-DATA]` rows
 and every route whose response carries people) dispatch only on the
 Chromium lane with the encrypted learner vault (the optional
-`cryptography` package). There every receipt is projected through the
+`cryptography` package, >= 50.0.1 in the activated runtime). There every receipt is projected through the
 source privacy boundary (`privacy/boundary.py`) in `dispatch_entry`'s
 success path, delegating to
 `privacy/executor_wire.py:project_learner_result`, before it becomes

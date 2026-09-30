@@ -1,6 +1,9 @@
 # Platform ask: script execution (or session-bound fetch) in browser tasks
 
-Status: DRAFT, not filed. Needs Braden's go-ahead before filing via the Muse feedback channel.
+Status: SUPERSEDED historical proposal, not filed. Morrow uses the Muse
+VM's local Chromium, a persistent helper profile, and in-page API calls
+through its private CDP pipe. This proposal does not define the shipped
+transport or its setup. See `../SKILL.md` and `../helper/MUSE-SETUP.md`.
 
 ## Who is asking
 

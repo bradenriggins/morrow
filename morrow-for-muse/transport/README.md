@@ -1,134 +1,50 @@
-# Browser-task transport lane
+# VM-local Chromium transport
 
-The Muse product executes Canvas REST calls inside the managed browser via
-browser tasks. The educator signs in once through takeover; the browser
-profile holds the session; the product NEVER holds cookie values, CSRF
-tokens, PATs, or any credential material.
+Canvas reads and writes run through `dispatch/executor.py --backend chromium`
+as in-page REST fetches in the educator's VM-local Chromium session. The
+managed Browser is not this execution lane. Sign-in is presented through the
+private native Muse helper; the persistent profile owns the browser session.
+Credentials never enter agent-visible configuration, commands, or chat.
 
-This lane replaces the old cookie-capture model (session/capture.py writing
-raw cookie values to ~/.morrow/session.json, replayed over raw HTTPS). That
-model is retired for the Muse product for two independent reasons
-(capture.py itself is in the source repository only, not in the release):
+## Current architecture
 
-1. The raw-HTTPS replay is OTP-walled on tenants like CHCP (302 to
-   /login/otp), so it does not work where it is needed most.
-2. Holding raw cookie values violates the no-exposure principle the product
-   is built on.
+- The helper launches one Chromium for this tree and profile through a private CDP pipe. There is no TCP debugging listener. Cross-process access uses the
+  token-authenticated helper proxy and verifies exact tree/profile/version.
+- `config.tree_config` resolves ports and paths from the current tree. Default
+  numbers are not global identity. Never attach to an arbitrary listener or
+  kill a foreign process to obtain a port.
+- Both bare and authenticated proxy environments use the protected loopback forwarder in `proxy_forwarder.py`. Chromium cannot reliably use every bare
+  platform proxy directly; the forwarder also handles upstream proxy auth.
+  It admits only launcher descendants and applies resource bounds. Direct
+  egress is used only when no proxy is configured and the probe permits it.
+- Platform TLS inspection and its exact CA-derived pin are disclosed in
+  `../INSTALL.md`. Never disable global certificate validation or remove a
+  configured proxy to bypass a failure.
+- First install runs `bash install.sh` with the supported runtime and tenant
+  probe. Later `bin/morrow start` restores supervision after a VM reboot.
+  Keepalive is an internal supervised maintenance path, not initial onboarding.
+- Healthy transport, authenticated account, privacy readiness, admitted
+  operation, and verified saved effect are separate checks. A live process or
+  an HTTP 200 helper status does not prove a usable Canvas session.
 
-Conflict resolved 2026-09-20: `session/capture.py` is retained as RIG/PROOF
-infrastructure only (bannered in its docstring), in the source repository:
-it is not in the release, and the installed product never runs it. The
-executor's `--backend https` lane is the same rig lane; the
-installed product lane for Canvas/Item Banks reads and writes is
-`--backend chromium` (synchronous, through the local Chromium's
-authenticated tab via CDP), which supersedes `--backend browser` for
-provider calls while reusing the same governance.
+## Governance and privacy
 
-Removal completed 2026-09-20 (code now matches the decision above):
+The executor applies current catalog, policy, principal, target, Plan/Edit,
+privacy, halt, and journal checks. Canvas response data is projected before
+agent-visible receipts and journals. Session-bound fetch and sensitive SDK
+credentials remain inside the authorized process/browser boundary. Do not
+route production Canvas calls through raw HTTPS or the legacy browser backend.
 
-- `dispatch/executor.py::SessionStore.slot_secret` no longer implements the
-  `canvas_session` or `moodle_session` cookie-jar branches. Requesting
-  either slot raises a retired error pointing at the browser lane. No
-  product path can replay raw cookie values anymore.
-- `dispatch/executor.py` default slots: quiz_api and canvas now default to
-  `canvas_pat` (express token lane); moodle defaults to `moodle_sesskey`
-  (visible, non-secret). Nothing defaults to a cookie jar.
-- The stale squarefree-era sample briefs (`transport/briefA.txt`,
-  `transport/briefA2.txt`, `transport/briefB.txt`) were deleted. The only
-  remaining "squarefree" mentions in the tree are selftest assertions that
-  rendered briefs contain no third-party form builder, and the historical
-  audit notes. The retired first-party form host (a static page and an
-  ephemeral localhost server for it) was deleted 2026-09-23. TRANSPORT
-  STATUS 2026-09-20: that localhost server was proven unreachable
-  from the managed browser (the managed browser runs on a separate leased
-  VM; loopback on the engineering VM is not its loopback), and file://
-  navigation crashes the managed browser (proven twice 2026-09-20). A
-  data: URL diagnostic completed 2026-09-20 with a negative verdict:
-  data: content renders and scripts execute, but the browser-task
-  automation crashes on data: URL navigation (goto) and Chromium blocks
-  web-initiated top-frame data: navigation, so there is no shippable way
-  to open the brief. The full evidence is in the source repository
-  (proof-battery/data-url-diagnostic/RESULT-2026-09-20.md), not in the
-  release. The browser-task lane therefore had no viable transport; the
-  local Chromium lane (`--backend chromium`, above) superseded it. Zero
-  hosted dependencies either way: no Cloudflare, no remote server,
-  nothing the user provisions. (A
-  Cloudflare-hosted proof-of-concept at form-helper.meetmorrow.app existed
-  briefly on 2026-09-20 and was removed the same day at Braden's direction;
-  the deploy script is gone and the page must never be published to any
-  hosted service.)
-- `lanes/detect.py` (PAT-mintability prober, in the source repository only,
-  not in the release) still accepts raw cookie input as a one-shot setup
-  diagnostic; it is not a transport and is flagged for
-  a browser-task-native rewrite. Out of scope for this decision.
+## Retired infrastructure
 
-## How it works
+Browser-task briefs, form-host experiments, cookie capture, and raw-HTTPS
+proof rigs are historical infrastructure, not current setup instructions or
+fallbacks. Do not spawn a managed browser task to execute a Canvas batch. Do
+not export a cookie jar or provision a remote form host. Historical live proofs
+establish only what was tested on their dated path; current admission still
+requires current packaged evidence and policy.
 
-`transport/batch.py` renders a self-contained brief from a batch of ops:
-
-    {"op_id", "method": GET|POST|PUT|DELETE, "path": "/api/v1/...",
-     "fields": {form fields for writes}}
-
-The Morrow agent spawns one browser task per batch with the rendered brief.
-The task:
-
-1. Checks the session: GET /api/v1/users/self, expects the principal.
-   Login page or redirect means session_dead; the batch aborts.
-2. Harvests the authenticity_token CSRF field from Canvas page HTML itself.
-   The value is used inside its forms and NEVER reported.
-3. Executes the ops in order. GETs are plain navigations. Writes are
-   form-encoded POSTs (session cookies ride along, even cross-origin).
-   PUT and DELETE use the _method form-field override, which Canvas honors.
-4. Reports per-op {op_id, status, body} plus a RESULTS_JSON array, which
-   `transport/batch.py::parse_results` parses back into structured results.
-
-`transport/state.py` persists lane metadata ONLY (base URL, principal
-id/name, timestamps). It refuses to persist anything shaped like credential
-material.
-
-## Proven live 2026-09-20 (chcp.instructure.com, principal 28206)
-
-- GET /api/v1/users/self by navigation: 200, principal JSON.
-- Form POST through the browser: 200 with echoed fields (httpbin control).
-- Full write cycle in course 89585: POST created assignment 4045367,
-  _method=PUT renamed it, _method=DELETE deleted it, GET verified gone.
-  Nothing left behind.
-- Mechanism notes: cross-origin form POSTs carry the Canvas session cookies;
-  Canvas requires the authenticity_token CSRF field on session-authenticated
-  writes (422 unprocessable_content without it; the task re-harvests on 422);
-  data: URLs crash the browser backend, so the task builds its forms on a
-  scratch form page.
-
-## Limits
-
-- No JavaScript execution in the browser task (documented platform rule,
-  verified by probe). Everything is navigation + form POST.
-- Batches capped at 15 ops; long browser tasks are fragile. Dependent ops
-  (create, then use the id) span two batches: parse batch N, render batch N+1.
-- Each batch is one browser task; per-call cost is an agent turn. Batch
-  aggressively. The filed platform request (consented session-bound fetch)
-  remains the speed upgrade; the transport interface is unchanged when it lands.
-- Sentinel watches browser-task egress; batches stay idempotent and resumable
-  so an approval pause cannot corrupt a multi-step job.
-
-## What the old code is now
-
-- session/capture.py, session/cdp.py: the rig capture path (the educator
-  signs in through the login helper page; capture.py reaches the helper's
-  browser through its token-authenticated /cdp/* proxy, W4-P0-3). Not
-  used by this lane. capture.py is in the source repository only, not in
-  the release.
-- dispatch/executor.py: the manifest pipeline with raw-HTTPS egress. Its
-  governance (frozen plans, journal, verify blocks, retry discipline) is
-  sound and reusable; its egress layer needs a browser-task backend, which
-  is the next build step (executor calls render_brief, the agent runs the
-  task, results feed back into apply_result_block).
-- lanes/detect.py: lane prober built on raw cookie input, in the source
-  repository only (not in the release). Needs a browser-task-native
-  rewrite (probe via the browser, no cookie values).
-- reauth/state_machine.py: halt/quarantine/notify mechanics are reusable;
-  the "re-run capture.py" re-sign-in step becomes takeover sign-in plus
-  browser-task verification.
+The decisions below describe implemented transport controls and their checks.
 
 ## Wave 4 adversarial audit decisions (2026-09-22)
 
@@ -167,7 +83,7 @@ foreign browser behind the same port is refused with a fail-closed
 RuntimeError rather than adopted. Same for the egress forwarder port
 (W3-P2-12): exact proxy_forwarder.py argv + exact port.
 
-### Authenticated egress forwarder (W4-P2-9)
+### Protected egress forwarder (W4-P2-9)
 
 The loopback CONNECT forwarder (proxy_forwarder.py) refuses to start
 without MORROW_FORWARDER_LAUNCHER_PID in its environment (fail closed,

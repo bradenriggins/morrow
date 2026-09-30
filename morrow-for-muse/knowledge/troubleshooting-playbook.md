@@ -1,16 +1,18 @@
 # Troubleshooting playbook: session, Chromium, and helper health
 
-The connector has exactly one session, one browser, and one helper.
-Almost every operational failure is one of: dead session, dead helper,
-or a second Chromium. Diagnose in that order before ever blaming the
-tenant, the network, or the educator.
+Each connector tree has its own helper and browser profile. Separate helper
+identity/liveness, page/network state, profile state, and authentication.
+`logged_in=false alone does not prove session expiry`. A Chrome error page,
+a blank tab, a wrong profile, and a genuine login redirect need different fixes.
 
 ## Healthy-state checklist
 
-Before any Canvas work, probe the helper:
+Before Canvas work, activate the supported runtime and inspect doctor. Resolve
+the configured helper endpoint and profile through `config.tree_config`; this
+also supports custom per-tree ports and configured TLS clients:
 
 ```
-curl -sf http://127.0.0.1:8901/status
+bin/morrow doctor --json
 ```
 
 Healthy means JSON with your Canvas URL, `"logged_in": true`, and
@@ -43,10 +45,10 @@ Healthy checklist: `"logged_in": true`, `"profile_has_cookies": true`,
 The wrong-profile diagnostic: `logged_in: false` with
 `profile_has_cookies: false` and `chromium_alive: true` on a fresh box
 is normal first onboarding (sign in once through the helper page).
-The same reading on a previously-working box is a config error (wrong
-profile path, e.g. `LOGIN_HELPER_PROFILE_DIR` pointing at a fresh
-profile): check `profile_dir` in the JSON, never a dead session, never
-a re-sign-in case.
+On a previously-working box, this can mean the wrong profile, cleared
+cookies, or session eviction. Check `profile_dir` and exact helper identity
+before asking for sign-in. Do not wipe the profile or infer expiry from this
+reading alone.
 
 Then confirm the principal through the executor (it reads the Canvas
 address from the tree's `helper/env`, and changes nothing):
@@ -58,19 +60,18 @@ PYTHONDONTWRITEBYTECODE=1 python3 dispatch/executor.py catalog \
 ```
 
 Confirm the returned identity is the educator before doing anything
-else. If the probe shows a login page or an error instead of profile
-JSON, the session did not stick: re-sign-in, verify again, then stop
-and report if it still fails.
+else. A verified login redirect or Canvas unauthenticated response requires
+sign-in recovery. A network/Chrome error needs transport diagnosis first;
+it does not prove expiry. Confirm the principal after recovery.
 
 The helper page rule: check before you open. Show the educator the
-helper page only when `/status` reports `"logged_in": false` (a
-genuine reauthentication need) or once for first onboarding. Never
+helper page only for verified reauthentication or once for first onboarding. Never
 open it preemptively or on every run; a healthy session needs no page.
 
 ## Dead session detection and recovery
 
 Detection signals:
-- `/status` reports `"logged_in": false`.
+- A verified sign-in redirect at the correct configured host; status alone is not proof.
 - A Canvas-origin 401 with `{"status":"unauthenticated"}`.
 - The tab shows a login page where profile JSON was expected.
 
@@ -146,32 +147,27 @@ navigate to login when the probe already says the session is dead.
 
 ## The one-Chromium rule
 
-The connector's Chromium IS the helper's Chromium: one profile
-(`helper/profile/`), one browser, one CDP port (127.0.0.1:19223).
-**Never launch a second Chromium on 19223.** A launcher that finds
-19223 live attaches to it (`launcher.attached`, no new process), which
-is the plugin-attachment proof in `helper/live_behavior_check.py`.
+One tree uses one profile and one helper-owned Chromium with a private CDP pipe.
+No TCP CDP listener exists. `LOGIN_HELPER_CDP_PORT` is configuration identity
+and a forwarder-port input, not a listener to attach to. Reuse requires exact
+tree, binary, profile, and version. A foreign listener is refused, not adopted.
 
-If CDP attach fails:
-1. Check something is actually listening: a launcher that finds 19223
-   live attaches; a second launcher binding 19223 fails or steals the
-   port. Do not start another browser process.
-2. Check the helper is up: `curl -sf http://127.0.0.1:8901/status`.
-   If the helper is down, restart it via `helper/keepalive.sh` (which
-   sources the tree's `helper/env` for `CANVAS_BASE`), never by launching
-   Chromium directly.
-3. After any machine restart: on a machine with cron, the keepalive
-   cron entry (every 5 minutes) brings the helper back. On the Muse VM
-   (no cron), keepalive runs from a background loop that a restart
-   ends: run `bin/morrow start` to start the loop again (any `morrow`
-   command also restarts it). Nothing brings the helper back until
-   then. The profile is never wiped on restart, so the session
-   survives if "Stay signed in" was left on.
-4. Never kill a Chromium process unless its exact `--user-data-dir`
-   argv value resolves to this tree's helper profile dir (the keepalive
-   reap is scoped that way), and never kill a helper server unless its
-   cmdline proves it belongs to this tree. A foreign tree's processes
-   are refused, never killed.
+If helper proxy access fails, check doctor and current tree configuration. For
+initial setup run the installer, which probes the tenant. After a VM restart
+run `bin/morrow start`; any Morrow command also restores supervision. Do not
+launch Chromium directly. Inspect process argv and profile ownership before
+stopping a process. Preserve foreign processes and all existing session data.
+
+## Chrome error or blank page
+
+`ERR_EMPTY_RESPONSE`, `chrome-error://chromewebdata/`, or a blank page is not
+an authenticated page even when Chromium is alive and cookies exist. Check the
+configured proxy, protected loopback forwarder, egress probe, CA-derived pin,
+and site reachability. Both bare and authenticated proxies use the forwarder.
+Use the current package and supported launch path; do not bypass the proxy,
+disable global TLS validation, rewrite credentials, or wipe the profile.
+Verify a real page and users/self after transport recovery before doing work.
+
 
 ## Install, onboarding sentinel, and the sign-in notice
 
@@ -287,8 +283,10 @@ Its health model:
 - Probes `/status` with retries and backoff (2s, 4s) before any
   recovery.
 - HTTP 200 alone is NOT healthy: it parses the JSON. Exit 2 is emitted
-  ONLY for a genuine signed-out session (`logged_in:false` with
-  `chromium_alive:true` and `starting:false`); a logged-out session is
+  only for an alive, non-starting browser with `logged_in:false` and
+  a login URL at the configured Canvas origin. Chrome errors, blank/missing
+  URLs, and unrelated sites are indeterminate, not sign-out. This does not
+  prove why the login is required (expiry, revocation, or cleared cookies); a logged-out session is
   reported, never "recovered": the script never attempts a sign-in.
 - A dead Chromium (`chromium_alive:false`) is recoverable: the helper
   is restarted, not reported as signed out. Unknown liveness (a server
@@ -297,8 +295,8 @@ Its health model:
 
 Exit codes: 0 healthy, 1 unrecoverable (helper down and could not be
 recovered, /status JSON unparseable, or status indeterminate), 2 helper
-responding, Chromium alive, not starting, but genuinely signed out
-(reported, no recovery attempted).
+responding, Chromium alive, not starting, with a login URL at the configured Canvas origin
+(reported, no recovery attempted). Other unverified page states return 1.
 
 Note: a login-page read during work is not a keepalive failure; it is
 session death. Run the dead-session recovery above, not a helper

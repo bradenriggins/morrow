@@ -212,10 +212,10 @@ and confirm the fields anyway.
   fields nest under `item.entry`. Readback: NQ GET, items GET with
   the expected count, points mirror (parent `points_possible` equals
   the item sum), parent assignment dates/overrides read. Caveats: the
-  `quiz_settings` merge
-  rule is NOT IMPLEMENTED in this package (a partial PATCH can
-  replace the whole settings block: read, merge locally, then
-  PATCH); ghost-stub choice hazards are in
+  `quiz_settings` merge helpers are implemented but must be called
+  explicitly (`plan_new_quiz_settings`, `new_quiz_settings_request`).
+  Read the complete saved block, merge locally, then PATCH; dispatch does
+  not automatically make a partial settings block safe. ghost-stub choice hazards are in
   `knowledge/new-quizzes-contract.md`.
 - **Discussions** (C-139/C-141/C-167 form-lane retired; C-238
   date_details PUT 204). Withheld from v1 and held by the admission
@@ -277,7 +277,7 @@ runs it (`plan-write`, then `approve-write`).
 
 Reads need no approval. A learner-data read (roster rows, anything the
 policy's learner-data signals hit) runs on the Chromium lane only when
-the optional `cryptography` package is installed: every receipt is
+the supported `cryptography` package (>= 50.0.1 in the activated runtime) is installed: every receipt is
 de-identified to labels (Student A1 and friends) before anyone sees
 it, so no name, email, or login ever reaches the assistant. Without
 that package the same read is refused (nothing was sent). Example
@@ -345,16 +345,19 @@ use them: the standing rule is Chromium-only, no-PAT auth through
 the educator's browser session. A "faster" backend that asks you for
 a token, cookie, or PAT is a refusal, not a shortcut.
 
-**Approval rule:** never mint or sign an approval yourself, and never
+**Approval rule:** never invent educator authorization, and never
 gate on the educator's wording: any non-empty educator reply approves
 (plan-write prints the exact approve-write command). Your job is to
 present the change in plain language, run approve-write with the
 educator's reply as the authorization text, and say what happened. A
-self-minted approval is a ceremony violation: stop and report it.
+record without an actual educator reply is a ceremony violation: stop and report it.
 
 Destructive operations that are evidence-held (course
 conclude/delete, anything on the policy's evidence-hold list) are
 refused on every tenant: no approval, frozen plan, or ceremony admits
-them today. Bank archive (IB-1) is admitted and requires the full
-admission ceremony: frozen plan plus educator-signed approval plus no
-write halt, and disposable test objects with full lifecycle cleanup.
+them today. Bank archive (IB-1) is admitted but irreversible. In Plan mode it requires
+its frozen plan and educator authorization. In Edit mode follow the standing
+grant and configured destructive confirmation. All other gates and the write
+halt still apply. Name the affected bank and shares before the change; verify
+the terminal provider state. Disposable test objects need lifecycle cleanup;
+production banks must never be deleted merely to clean up a test.

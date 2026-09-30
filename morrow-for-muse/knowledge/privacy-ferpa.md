@@ -33,9 +33,11 @@ they become agent-visible or journaled:
   `~/.morrow/morrow_source_vault.json` (0600). Labels stop resolving
   when the educator deletes the file; a fresh run mints a fresh
   vault. There is no automatic expiry; the educator owns deletion.
-- The raw provider payload stays in a 0600 pending envelope only so
-  internal machinery (deferred verify) can resolve result
-  references, and the envelope is deleted when the op completes.
+- In the current Chromium lane, raw responses are transient inside the
+  authorized execution process; the executor projects the result before
+  agent-visible receipts and journals. Historical browser-backend pending
+  envelopes are not the current Canvas execution lane or a product privacy
+  guarantee. Never use that legacy lane for production Canvas work.
 - The educator's own profile (`/users/self`) is explicitly not
   learner data and is never de-identified, so principal
   confirmation keeps working.
@@ -105,7 +107,7 @@ Saved back, each marker returns the exact text it stood for
 ## Current enforcement (do not work around it)
 
 People-bearing operations dispatch only on the Chromium lane with the
-encrypted learner vault (the optional `cryptography` package). There
+encrypted learner vault (the supported `cryptography` package (>= 50.0.1 in the activated runtime)). There
 the executor projects every receipt in `dispatch_entry`'s success path
 before anything is agent-visible or journaled. Everywhere else (the
 raw HTTPS lane, or no `cryptography`) they are refused

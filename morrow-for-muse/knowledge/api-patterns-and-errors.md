@@ -1,7 +1,7 @@
 # API patterns and error codes through the Chromium lane
 
 Every Canvas call runs as in-page `fetch()` inside the educator's own
-authenticated Chromium session, via CDP on 127.0.0.1:19223. No
+authenticated Chromium session, via the helper's private CDP pipe. No
 shell-side HTTP client may carry auth material. That shapes every
 pattern below: you write URLs and bodies, never tokens, cookies, or
 headers carrying identity.
@@ -63,12 +63,19 @@ what an agent sees:
   `extra={"query": {"per_page": 100, "page": 2}}`.
 
 The Chromium lane paginates for you: every catalog list read follows
-Canvas's `Link rel="next"` up to 20 pages and merges them into one
+Canvas's `Link rel="next"` up to 10 pages and merges them into one
 list. When more pages remain after that bound (or a page dies
 mid-walk), the result is marked partial (the
 `x-morrow-pagination-partial` header; the receipt keeps the
 `truncated` flag) and the executor says so loudly; it never hands you
-a partial list as if it were complete. For audit-grade verification
+a partial list as if it were complete. Preserve `x-morrow-next-page`
+(the same-origin continuation path/query) and the receipt's next-page state.
+Continue remaining pages through the same admitted operation and principal,
+using programmatic query arguments. Reduce page size if payload bounds require
+it. Merge without duplicate IDs and retain coverage evidence until no next page
+remains. If continuation is unavailable after an error, repeat the read from a
+known page and deduplicate; do not assert completeness. The 10-page bound is
+per fetch, not a course-count limit or a reason to omit courses. For audit-grade verification
 (e.g. "is the deleted object absent"), the terminal member GET or the
 follow-up readback matters, not the list length.
 

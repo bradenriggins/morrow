@@ -33,10 +33,10 @@ Security model (no-exposure principle):
 - No hosted dependencies, no third-party pages, no user-provisioned infra.
 
 Session bootstrap (one time per educator):
-- The connector navigates to the tenant login; credentials come from the
-  Secure Vault (filled via CDP Input, never logged); MFA codes are provided
-  by the educator in chat, used once, never stored. The authenticated
-  profile persists; subsequent runs reuse it without re-authentication.
+- The connector navigates to the tenant login. The educator enters
+  credentials and completes MFA directly in the private helper browser,
+  never in chat or commands. The authenticated profile persists;
+  subsequent runs reuse it until the institution requires sign-in again.
 """
 
 import base64
@@ -1660,11 +1660,10 @@ class ChromiumLauncher:
         return self._egress_probe
 
     def _needs_forwarder(self):
-        """True only when the upstream proxy carries credentials: Chrome
-        cannot do proxy auth itself, so the loopback forwarder injects
-        Proxy-Authorization. Unauthenticated proxies go straight into
-        --proxy-server; direct egress needs no proxy at all. A blocked
-        probe raises with the diagnostic instead of failing later."""
+        """Proxy modes use the protected loopback forwarder. Muse egress
+        can reject Chromium's direct proxy connections even without auth;
+        the forwarder owns upstream sockets and injects auth when needed.
+        Direct egress needs no proxy. A blocked probe raises immediately."""
         probe = self._probe()
         if probe["mode"] == "blocked":
             raise RuntimeError("no usable egress: " + probe["detail"])

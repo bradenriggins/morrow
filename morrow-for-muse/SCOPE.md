@@ -16,7 +16,7 @@ provider's proof as proof for the other.
 - The live-proven Canvas Chromium core: every operation dispatches
   through `dispatch/executor.py` with `--backend chromium`, executing as
   in-page `fetch()` inside the educator's own authenticated Chromium
-  session via CDP on 127.0.0.1:19223.
+  session via the helper's private CDP pipe.
 - Your own account: list your courses (C-437, the first request an
   educator makes: "Show me my courses") and read your own profile
   (C-436, `/api/v1/users/self`), proven live on 2026-09-22 and
@@ -159,8 +159,8 @@ live battery marks them live-proven in
   classification is structural (`dispatch/admission_policy.json`
   `learner_data`) plus the catalog `[LEARNER-DATA]` flag. `executor.py
   catalog` dispatches the `live-proven` ones only on the Chromium lane
-  with the encrypted learner vault (the optional `cryptography`
-  package), where every receipt is de-identified in `dispatch_entry`
+  with the encrypted learner vault (the supported `cryptography`
+  package (>= 50.0.1 in the activated runtime)), where every receipt is de-identified in `dispatch_entry`
   (course-scoped labels such as `Student A1`) before the agent or the
   journal sees it. Everywhere else (the raw HTTPS lane, or no
   `cryptography`) they are refused (`LearnerDataGated`). The educator

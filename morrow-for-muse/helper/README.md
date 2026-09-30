@@ -3,7 +3,7 @@
 The sign-in companion for Morrow's local-Chromium lane. The educator signs
 into Canvas **once** in the helper's browser; the persistent profile
 keeps the authenticated session across helper and machine restarts, so
-nobody signs in again unless Canvas itself expires the session.
+sign-in is repeated only when needed (expiry, cleared session, or account change).
 
 ## Profile design
 
@@ -14,15 +14,14 @@ nobody signs in again unless Canvas itself expires the session.
 - `LOGIN_HELPER_PROFILE_DIR` overrides the default (tests and special
   setups). The override is expanded (`~` etc.) at startup.
 - **Production-port guard:** requesting EITHER production port
-  (HTTP 8901 OR CDP 19223) without `LOGIN_HELPER_PROFILE_DIR` set is a
+  (HTTP identity 8901 OR CDP configuration identity 19223) without `LOGIN_HELPER_PROFILE_DIR` set is a
   FATAL error (exit 3), regardless of which profile would be used. This
   keeps a stray bare launch from ever squatting the production ports.
   (`LOGIN_HELPER_PRODUCTION=1` is the explicit escape hatch; it exists so
   tooling can bind the production ports deliberately. The helper itself
   never needs it, because keepalive.sh always exports the profile var.)
   A scratch profile on production ports is allowed here only when the
-  profile is explicitly pinned; the CDP attach check (a foreign browser
-  on the port is refused, never adopted) is the backstop.
+  profile is explicitly pinned; the exact-tree/profile/version helper reuse check is the backstop.
 - **Bind guard:** `LOGIN_HELPER_BIND` defaults to `127.0.0.1`. Binding a
   non-loopback address (e.g. `0.0.0.0`) without `LOGIN_HELPER_BIND_PUBLIC=1`
   is a FATAL error (exit 1) at startup. Publishing the helper's
@@ -52,7 +51,9 @@ nobody signs in again unless Canvas itself expires the session.
   `LOGIN_HELPER_ALLOW_TEST_ON_LIVE_PROFILE=1` is set. Bare test
   launches must pass an explicit scratch profile; they can never
   silently use the tree's real profile.
-- **The only supported launch path is `helper/keepalive.sh`**, which
+- **Initial setup must run `bash install.sh`**, including the tenant probe.
+  Later use `bin/morrow start` after a reboot. Supervision uses
+  `helper/keepalive.sh`, which
   sources the tree's own `helper/env` (not the global `~/.morrow/env`;
   the global file is honored for `CANVAS_BASE` only), pins
   `LOGIN_HELPER_PROFILE_DIR` to the tree's `helper/profile/` and
@@ -65,10 +66,10 @@ nobody signs in again unless Canvas itself expires the session.
   `LOGIN_HELPER_CDP_PORT` (default 19223). Ephemeral ports plus a
   scratch `LOGIN_HELPER_PROFILE_DIR` are how the selftests boot the
   server without touching anything live.
-- **CDP attach check:** when a CDP port is already held, the server
-  verifies the holder's `--user-data-dir` resolves to its own profile
-  before attaching. A foreign browser is refused loudly, never
-  adopted, never killed.
+- **Private CDP pipe:** Chromium has no TCP debugging listener. The helper
+  owns the pipe; other processes use its authenticated proxy after verifying
+  exact tree, profile, binary, and version. A foreign helper is refused,
+  never adopted or killed. Configured CDP numbers are identity/forwarder inputs.
 - **Version identity:** `/status` reports `helper_version` (the tree's
   `VERSION` file). keepalive.sh recycles a server whose version differs
   from the tree's instead of adopting it (stale pre-upgrade servers
@@ -81,7 +82,7 @@ nobody signs in again unless Canvas itself expires the session.
   `/input/*`, `/navigate` on `127.0.0.1:8901` (override with
   `LOGIN_HELPER_PORT` / `LOGIN_HELPER_BIND`). Needs `CANVAS_BASE` (env or
   first argument); refuses to start without a tenant. Every
-  POST/PUT/DELETE/PATCH endpoint and `GET /screenshot` require the
+  POST/PUT/DELETE/PATCH endpoint and `GET /screenshot` and `GET /page/layout` require the
   `X-Helper-Token` header (see "Token auth" below); `GET /status`,
   `GET /`, and `GET /logo.png` are open.
 - `index.html` - the sign-in UI served by the server.
@@ -170,7 +171,7 @@ password entry) through `/screenshot`.
   an ephemeral token at startup and prints it to the live console only
   (never to `server.log`); it dies with the process.
 - **Protected:** every POST/PUT/DELETE/PATCH endpoint on any path, plus
-  `GET /screenshot`. They require the `X-Helper-Token` header to equal
+  `GET /screenshot` and `GET /page/layout`. They require the `X-Helper-Token` header to equal
   the token; anything else gets `403` JSON `{"error":"forbidden"}`.
 - **Open:** `GET /status` (health only), `GET /` (the sign-in UI),
   `GET /logo.png`. The server injects the token into a
@@ -284,8 +285,9 @@ and is not a Chrome error page, a `/login` path, or a Canvas error
 page. Diagnostic: `logged_in: false` with
 `profile_has_cookies: false` and `chromium_alive: true` on a fresh box
 is normal first onboarding (sign in once); the same on a
-previously-working box is a config error (wrong profile path), never a
-dead session.
+previously-working box can mean the wrong profile, cleared cookies, or session
+eviction. Verify profile identity first. A blank or Chrome error page is a
+transport failure, not proof of expiry.
 
 ## Privacy
 
@@ -293,3 +295,43 @@ Keystrokes go straight into the Canvas page via CDP. The server logs event
 counts and types only: never key values, text, coordinates, cookies, or
 tokens. The profile directory holds the session and is never part of the
 download.
+
+
+## Ordered private input
+
+`POST /input/batch` requires the helper launch token and the existing Host,
+origin, rate, body-size, and request-budget gates. `/status` supplies
+`input_epoch`, a non-secret helper process identity. The payload has exactly
+`epoch`, `stream_id` (32 random lowercase hex), `sequence` (starts at 1), and
+`operations` (1–32). Each operation is either `{"type":"text","text":"..."}`
+or `{"type":"key","key":"Tab","code":"Tab","keyCode":9,"modifiers":0}`.
+Text is bounded to 4096 characters per operation and 8192 UTF-8 bytes total.
+Control key codes are 0–65535 and modifiers 0–15. Validation completes before
+any input. The browser applies text with `Input.insertText` and control keys
+as ordered down/up pairs, under a 10-second batch deadline. An uncertain key failure makes one bounded
+key-up cleanup attempt (up to one additional second), while the batch remains
+failed. A lost reply must not leave a modifier held.
+
+Success returns `{"ok":true,"sequence":1,"replayed":false}`. An identical
+retry of the last acknowledged sequence returns `replayed:true` without
+applying input again. Changed payloads, stale sequences, gaps, and an old
+helper epoch refuse with 409. A partial browser error blocks that stream;
+the outcome is unknown. Clear pending input, fetch a new frame, and let the
+user deliberately resume. Never automatically retype uncertain input.
+
+One card document uses one stream and one ordered queue. Keep the same body,
+sequence, and epoch for a transport retry. Advance only after acknowledgement.
+Coalesce text briefly and flush before pointer/control-key focus changes.
+Never route a password through agent chat, storage, logs, or plaintext local
+echo. Replay guards retain only hashes and last acknowledgements, with at most
+32 streams per helper lifetime. At capacity, new streams refuse with 429;
+no guard is evicted. Existing streams still work. A helper restart creates a
+new epoch. This endpoint does not widen the generic CDP allowlist.
+
+## Private sign-in layout
+
+The native card can use protected `GET /page/layout` to fit visible fields and
+nearby buttons on different sign-in pages. This fixed primary-tab endpoint
+returns geometry only. It rejects query parameters and reads no field values.
+See [the artifact contract](ARTIFACT-CONTRACT.md#protected-layout-contract) for
+the exact response, limits, embedded-frame behavior, and required UI checks.

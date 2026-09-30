@@ -1,12 +1,14 @@
 # Before we connect: what you are agreeing to
 
 *A plain summary for a busy educator. This is the whole deal; there is
-no fine print behind it. Muse shows it to you before you sign in.*
+read the installation trust notes and platform policies for the details. Muse shows it to you before you sign in.*
 
 ## What Morrow can do
 
-Morrow does Canvas tasks when you ask it to. It can do more than 200
-Canvas tasks that we have tested on a real Canvas site, for example:
+Morrow does supported Canvas tasks when you ask it to. Our tests cover
+more than 200 Canvas tasks, including Item Bank work, on real Canvas sites.
+Some tested tasks are still withheld in this version. Morrow runs only the
+tasks that are currently supported. Examples include:
 listing your courses and assignments; creating assignments, classic
 quizzes, pages, and modules; editing pages; and reading course files.
 It refuses anything we have not tested, instead of guessing. Morrow
@@ -158,15 +160,18 @@ When in doubt, ask your IT help desk before connecting.
 
 ## The part we would rather you hear from us
 
-Meta uses eligible Muse interaction data to train its models by
-default. That means your conversations with Muse, including anything
-you type about your courses, may be used for training unless you opt
-out. We have not yet verified the exact location of the opt-out
-switch in Muse's settings ourselves; check Muse's settings for the
-data-sharing opt-out. We are naming the default now because
-discovering it later would make everything above read as dishonest,
-and we will update this page the moment our own walkthrough
-is done.
+Muse's platform guidance, checked on 2026-09-30, says conversations contribute
+to AI at Meta development and that you can opt out in **Settings > Data Controls**
+in the Muse app or at muse.ai. It says confidential VM interactions are never
+used for AI training; that VM does not show the opt-out row, and the account-wide
+choice can be changed from a standard computer. Do not assume your VM is
+confidential without checking. These controls do not establish school approval
+or a FERPA compliance guarantee.
+
+Platform policies are authoritative: [Muse Privacy Policy](https://muse.ai/privacy),
+[Muse Terms](https://muse.ai/terms), and [Meta Privacy Center](https://www.facebook.com/privacy/genai).
+Check current platform guidance and your school's rules before connecting.
+Morrow does not set the platform's training, review, or retention policies.
 
 ## Getting help
 

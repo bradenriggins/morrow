@@ -77,8 +77,8 @@ policy-held, and refused when sent as `course[event]` or `offer` on a
 course update); destructive, no v1 claim.
 
 Enrollments: all pending (C-168 through C-174), learner-data gated.
-There is no enrollment write or read the agent may touch until the
-tokenization boundary lands.
+The privacy boundary is implemented, but these catalog rows remain pending.
+A ready vault does not override that catalog gate.
 
 Assignments: create/read/update/delete, overrides
 (create/read/update/delete, batch create/update, bulk date update),
@@ -99,10 +99,13 @@ C-289) are proven through the full governed product pipeline
 C-298 update, C-290 delete) are proven through the same pipeline
 (items 11057310, 11057311) and ship too. Publish never tested. The in-place item edit hazard
 (ghost-stub choices) and the quiz_settings merge rule are documented
-in `knowledge/new-quizzes-contract.md`; they are
-**NOT IMPLEMENTED** in the for-muse executor, so a New Quiz item
-edit through this package has no merge safety. Say so to the
-educator before offering one.
+in `knowledge/new-quizzes-contract.md`; explicit helpers are implemented (`plan_new_quiz_settings`,
+`new_quiz_settings_request`, `collect_interaction_ids`, and
+`check_interaction_ids_preserved`). Call them in planning against fresh
+saved state; dispatch does not automatically apply them to arbitrary PATCH
+bodies. Preserve all interaction IDs for in-place edits; membership changes
+require a separately authorized replacement plan with attempt/grade risks
+considered. Do not claim an arbitrary PATCH has automatic merge safety.
 
 Item Banks: bank operations (create, rename, share, unshare, archive,
 list, list entries, get entry, list shares) and item operations (IB-6
