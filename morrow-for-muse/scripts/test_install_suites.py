@@ -30,6 +30,8 @@ import shutil
 import subprocess
 import sys
 import pytest
+import tempfile
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TREE = os.path.dirname(HERE)
@@ -40,40 +42,44 @@ import carve  # noqa: E402
 
 
 @pytest.mark.parametrize("crypto_version", ["41.0.7", None])
-def test_shipped_privacy_suites_accept_unavailable_optional_crypto(tmp_path, crypto_version):
+def test_shipped_privacy_suites_accept_unavailable_optional_crypto(crypto_version):
     """Importable but unsupported crypto must not break course-only installs.
 
     The degraded suites must still check that learner data stays refused.
     """
-    tree = tmp_path / "release"
-    carve.carve(str(tree), run_gate=False)
-    shim = tmp_path / "dependency-state"
-    shim.mkdir()
-    (shim / "sitecustomize.py").write_text(
-        "import sys, types\n"
-        "for name in list(sys.modules):\n"
-        "    if name == 'cryptography' or name.startswith('cryptography.'):\n"
-        "        del sys.modules[name]\n"
-        + ("class MissingCrypto:\n"
-           "    def find_spec(self, fullname, path=None, target=None):\n"
-           "        if fullname == 'cryptography' or fullname.startswith('cryptography.'):\n"
-           "            raise ModuleNotFoundError('cryptography is unavailable')\n"
-           "sys.meta_path.insert(0, MissingCrypto())\n" if crypto_version is None else
-           "crypto = types.ModuleType('cryptography')\n"
-           "crypto.__version__ = %r\n"
-           "sys.modules['cryptography'] = crypto\n"
-           "for name in ['cryptography.hazmat', 'cryptography.hazmat.primitives',\n"
-           "             'cryptography.hazmat.primitives.ciphers',\n"
-           "             'cryptography.hazmat.primitives.ciphers.aead']:\n"
-           "    sys.modules[name] = types.ModuleType(name)\n"
-           "class UnsupportedAESGCM:\n"
-           "    def __init__(self, *args):\n"
-           "        raise AssertionError('unsupported crypto must not encrypt')\n"
-           "sys.modules['cryptography.hazmat.primitives.ciphers.aead'].AESGCM = UnsupportedAESGCM\n"
-           % crypto_version))
-    env = dict(os.environ, PYTHONPATH=str(shim), PYTHONDONTWRITEBYTECODE="1",
-               MORROW_HOME=str(tmp_path / "probe-state"))
-    probe = subprocess.run([sys.executable, "-c", """
+    work = os.path.join(os.path.dirname(TREE), "dist")
+    os.makedirs(work, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="optional-crypto-", dir=work) as scratch:
+        tmp_path = Path(scratch)
+        tree = tmp_path / "release"
+        carve.carve(str(tree), run_gate=False)
+        shim = tmp_path / "dependency-state"
+        shim.mkdir()
+        (shim / "sitecustomize.py").write_text(
+            "import sys, types\n"
+            "for name in list(sys.modules):\n"
+            "    if name == 'cryptography' or name.startswith('cryptography.'):\n"
+            "        del sys.modules[name]\n"
+            + ("class MissingCrypto:\n"
+               "    def find_spec(self, fullname, path=None, target=None):\n"
+               "        if fullname == 'cryptography' or fullname.startswith('cryptography.'):\n"
+               "            raise ModuleNotFoundError('cryptography is unavailable')\n"
+               "sys.meta_path.insert(0, MissingCrypto())\n" if crypto_version is None else
+               "crypto = types.ModuleType('cryptography')\n"
+               "crypto.__version__ = %r\n"
+               "sys.modules['cryptography'] = crypto\n"
+               "for name in ['cryptography.hazmat', 'cryptography.hazmat.primitives',\n"
+               "             'cryptography.hazmat.primitives.ciphers',\n"
+               "             'cryptography.hazmat.primitives.ciphers.aead']:\n"
+               "    sys.modules[name] = types.ModuleType(name)\n"
+               "class UnsupportedAESGCM:\n"
+               "    def __init__(self, *args):\n"
+               "        raise AssertionError('unsupported crypto must not encrypt')\n"
+               "sys.modules['cryptography.hazmat.primitives.ciphers.aead'].AESGCM = UnsupportedAESGCM\n"
+               % crypto_version))
+        env = dict(os.environ, PYTHONPATH=str(shim), PYTHONDONTWRITEBYTECODE="1",
+                   MORROW_HOME=str(tmp_path / "probe-state"))
+        probe = subprocess.run([sys.executable, "-c", """
 from privacy.executor_wire import project_learner_result
 entry = {'name': 't_users', 'request': {'url': 'https://school.instructure.com/api/v1/courses/1/users'}}
 result = {'receipt': [{'id': 8675309, 'name': 'Jane Doe'}], 'truncated': False, 'bytes_received': 10}
@@ -86,15 +92,15 @@ except Exception as exc:
 else:
     raise AssertionError('unsupported crypto must refuse learner data')
 """], cwd=tree, env=env, capture_output=True, text=True, timeout=30)
-    assert probe.returncode == 0, probe.stdout + probe.stderr
-    suites = ["transport/chromium_session_selftest.py",
-              "privacy/source_privacy_selftest.py",
-              "privacy/deidentif_selftest.py"]
-    proc = subprocess.run(["bash", str(tree / "scripts/install-suites.sh"),
-                           "--show-failures", *suites], cwd=tree, env=env,
-                          capture_output=True, text=True, timeout=180)
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert proc.stdout.splitlines()[-1] == "3/3 selftest suites pass"
+        assert probe.returncode == 0, probe.stdout + probe.stderr
+        suites = ["transport/chromium_session_selftest.py",
+                  "privacy/source_privacy_selftest.py",
+                  "privacy/deidentif_selftest.py"]
+        proc = subprocess.run(["bash", str(tree / "scripts/install-suites.sh"),
+                               "--show-failures", *suites], cwd=tree, env=env,
+                              capture_output=True, text=True, timeout=180)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert proc.stdout.splitlines()[-1] == "3/3 selftest suites pass"
 
 LIVE = {"MORROW_HOME": "/live/.morrow",
         "MORROW_TREE_STATE_DIR": "/live/.morrow/trees/t",

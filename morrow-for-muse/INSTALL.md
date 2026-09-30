@@ -100,12 +100,33 @@ Everything below assumes you are in the tree root
 
 ## Step 2: install the optional runtime packages, then run install.sh
 
-Install the hash-pinned packages before using the Moodle lane or Canvas
-student-data features:
+Use a virtual environment outside the connector tree. This also works when
+Muse's system Python reports `externally-managed-environment`. Install the
+hash-pinned packages before using the Moodle lane or Canvas student-data
+features:
 
 ```
+MORROW_RUNTIME="${MORROW_HOME:-$HOME/.morrow}/python-runtime"
+python3 -m venv "$MORROW_RUNTIME"
+. "$MORROW_RUNTIME/bin/activate"
 python3 -m pip install --require-hashes -r requirements-optional.txt
 ```
+
+Allow Muse's download requests for `pypi.org` and
+`files.pythonhosted.org`. Keep certificate validation on. If Python cannot
+create the environment, install your platform's Python venv support and
+repeat these commands. Do not use `--break-system-packages`.
+
+Activate this same environment before every Morrow command in a new shell:
+
+```
+MORROW_RUNTIME="${MORROW_HOME:-$HOME/.morrow}/python-runtime"
+. "$MORROW_RUNTIME/bin/activate"
+```
+
+The environment stays outside the connector tree through upgrades. The
+helper started from this shell inherits it. Do not put a virtual environment
+inside the connector folder; the integrity check rejects extra files.
 
 Then run the installer:
 
@@ -225,7 +246,8 @@ user is equivalent to use of the proxy credential. Do not run
 untrusted code as the same user on the install VM.
 
 The `cryptography` package (see Prerequisites): the encrypted learner
-vault needs it, installed hash-pinned:
+vault needs it. Activate the virtual environment from Step 2, then install
+it hash-pinned:
 
     python3 -m pip install --require-hashes -r requirements-optional.txt
 

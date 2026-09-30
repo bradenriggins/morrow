@@ -5,6 +5,7 @@
 The release package is `morrow-muse-connector-0.4.8.zip` from the `muse/v0.4.8` GitHub release.
 
 - Complete course-only installs when an older optional encryption library is already present. The install checks now use the same library readiness check as the learner vault.
+- Use a virtual environment outside the connector folder for the pinned runtime packages. Document activation in every shell so Muse system Python protection does not block setup.
 - Keep course-content de-identification available without the learner vault. Learner-data operations still refuse unsupported encryption versions and give the dependency install command.
 
 ## 0.4.7 (2026-09-30)
