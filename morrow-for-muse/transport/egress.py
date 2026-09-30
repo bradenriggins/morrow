@@ -303,8 +303,8 @@ def probe_egress(proxy_url=None, test_host=None, timeout=DIRECT_PROBE_TIMEOUT):
 
       mode:            "proxy_auth" | "proxy" | "direct" | "blocked"
       proxy:           redacted proxy URL (scheme://host:port) or None
-      needs_forwarder: True only when Chromium needs the loopback forwarder
-                       (authenticated proxy; Chrome cannot do proxy auth)
+      needs_forwarder: True for either proxy mode. The protected loopback
+                       forwarder owns upstream connections and proxy auth.
       upstream:        raw proxy URL for the forwarder subprocess env ONLY.
                        INTERNAL: never log, print, or argv this field.
       detail:          human-readable, credential-free explanation.
@@ -333,10 +333,10 @@ def probe_egress(proxy_url=None, test_host=None, timeout=DIRECT_PROBE_TIMEOUT):
         return {
             "mode": "proxy",
             "proxy": redacted,
-            "needs_forwarder": False,
+            "needs_forwarder": True,
             "upstream": raw,
-            "detail": ("unauthenticated egress proxy at %s; Chromium can "
-                       "use it directly via --proxy-server" % redacted),
+            "detail": ("unauthenticated egress proxy at %s; Chromium uses "
+                       "the protected loopback forwarder" % redacted),
         }
     host = test_host or default_test_host()
     ok, why = direct_egress_ok(host, timeout=timeout)

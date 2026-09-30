@@ -36,7 +36,9 @@ has no public URL; never assemble one.
 3. Check `/status`. Require `helper_version` to match `VERSION`, the
    configured profile to match, `chromium_alive=true`, and
    `starting=false`. A missing helper or mismatch needs a clear retry or
-   repair message. Do not show a stale frame as connected.
+   repair message. A Chrome error page or blank page is not a usable
+   sign-in page, even when Chromium is alive. Show the connection error
+   and a retry control. Do not show a stale frame as connected.
 4. Proxy only the sign-in controls through private native artifact
    actions: status, screenshot, key, mouse, wheel, and navigation to the
    configured Canvas address. Use the installed

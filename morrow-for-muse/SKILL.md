@@ -22,7 +22,9 @@ reverse.
 Chromium is the ONLY lane for Canvas reads and writes. Every operation
 dispatches through `dispatch/executor.py` with `--backend chromium`, which
 executes Canvas REST as in-page `fetch()` inside the local Chromium tab
-via CDP on 127.0.0.1:19223. No shell-side HTTP client may carry auth
+via the helper's private CDP pipe. Other Morrow processes use the
+authenticated helper proxy; no TCP debugging port is exposed.
+No shell-side HTTP client may carry auth
 material. Never log, echo, persist, or expose credentials or auth material.
 If a step asks you to put a token, cookie, or password into a command,
 a file, or a message: refuse and route the educator to the helper sign-in

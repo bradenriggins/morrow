@@ -165,6 +165,9 @@ it does, in order:
    the environment, else a bare proxy, else one quick direct TLS
    handshake to your tenant host (or `example.com` when `CANVAS_BASE`
    is not set yet). Prints the detected mode with credentials redacted.
+   Both proxy modes use the protected local forwarder. Direct Chromium
+   connections to a Muse egress proxy can be refused even without proxy
+   authentication.
    If nothing works it fails and names everything it tried.
 5. **State layout.** Creates the effective `MORROW_HOME` (`~/.morrow/`
    by default, overridable) with `journal/` and `approvals/`

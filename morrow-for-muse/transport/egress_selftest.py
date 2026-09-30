@@ -159,7 +159,7 @@ def main():
     with fake_env(https_proxy=FAKE_PROXY_BARE, HTTPS_PROXY=None):
         p = egress.probe_egress()
     check("probe bare mode", p["mode"] == "proxy", p["mode"])
-    check("probe bare needs no forwarder", p["needs_forwarder"] is False)
+    check("probe bare needs forwarder", p["needs_forwarder"] is True)
     check("probe bare proxy value",
           p["proxy"] == "http://proxy.example:3128", p["proxy"])
 
@@ -279,6 +279,13 @@ def main():
               FAKE_USER not in probe["detail"] and "@" not in probe["proxy"])
         check("launcher never started a browser", launcher.proc is None
               and launcher.cdp is None)
+
+    with fake_env(https_proxy=FAKE_PROXY_BARE, HTTPS_PROXY=None):
+        launcher = lc.ChromiumLauncher(_binary, probe_profile)
+        check("launcher bare proxy wants forwarder", launcher._needs_forwarder())
+        check("launcher bare proxy uses loopback relay",
+              launcher._proxy_arg("http://127.0.0.1:29223") ==
+              "http://127.0.0.1:29223")
 
     # ---- 8. forwarder graceful degradation -------------------------------
     fw = os.path.join(_HERE, "proxy_forwarder.py")
