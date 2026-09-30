@@ -717,6 +717,8 @@ hazards for the exact surface. New Quiz settings merge and interaction-ID
 helpers exist but must be called explicitly; dispatch does not apply them
 for arbitrary PATCH bodies. Unsupported or evidence-held operations remain
 refused regardless of general platform knowledge.
+Read `knowledge/privacy-ferpa.md` for the privacy mechanism, its limits, and
+why nothing turns it off. Use the supported encrypted runtime for learner work.
 
 ## Privacy: student de-identification (default on)
 
