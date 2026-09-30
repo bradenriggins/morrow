@@ -349,9 +349,11 @@ browser session to `MoodleSession`. See `moodle/SKILL.md` for the
 Moodle lane's exact scope and do not use the sandbox form-login command
 with a school account.
 
-Open the helper UI in your phone's browser (the artifact or page your
-agent points you to reaches the VM's `127.0.0.1:8901`). The UI shows the
-live Canvas login page. Sign in exactly as you normally would, including
+In Muse, ask your assistant to show the private sign-in artifact card.
+The assistant follows `helper/MUSE-SETUP.md`, uses the configured helper
+port, and keeps the artifact unpublished. A VM localhost URL cannot open
+that VM directly from your Mac or phone. The private card shows the live
+Canvas login page. Sign in exactly as you normally would, including
 SSO and MFA, and leave Canvas's "Stay signed in" (or "Remember me") option
 on: that is what keeps you signed in across helper and machine restarts.
 If Canvas or your SSO provider expires the session anyway (expiry,

@@ -135,7 +135,11 @@ preemptively and never on every run: a healthy session needs no page.
    The connector's Chromium IS the helper's Chromium: one profile
    (`helper/profile/`), one browser, one CDP port. Never launch a second
    one; a launcher that finds 19223 live attaches to it.
-3. The educator opens the helper UI and signs in to Canvas themselves,
+3. In Muse, follow `helper/MUSE-SETUP.md` to present the private sign-in
+   artifact card. VM localhost is not the educator's device. Retain Muse's
+   private artifact access and native action routing; do not invent viewer
+   identity fields or publish a browser proxy. The educator opens the
+   helper UI and signs in to Canvas themselves,
    SSO/MFA included, leaving "Stay signed in" on. That makes the
    session persist across helper and machine restarts in the normal
    case, but it is not a guarantee: the school can end sessions,
