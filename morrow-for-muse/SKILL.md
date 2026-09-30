@@ -229,8 +229,8 @@ run stops loudly instead of writing through a half-dead session:
    halt lifts. On mismatch the halt stays and the situation escalates;
    nothing resumes. With no pinned account (an install from before
    pinning), resume refuses and names the recovery: the educator
-   confirms in their own words that the signed-in account is theirs,
-   then `state_machine.py pin --confirm-account "<their words>"`, then
+   checks the named signed-in account and school and replies **yes**,
+   then `state_machine.py pin --confirm-account "yes"`, then
    `resume` again. A pin record that is unreadable or loosely
    permissioned also refuses; it is never read as "no pin".
    Then run `python3 reauth/state_machine.py notify`: it prints the

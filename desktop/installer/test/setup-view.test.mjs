@@ -264,7 +264,7 @@ test("an unprepared Bridge folder offers repair before the Chrome step", () => {
 test("a confirmed load in Chrome moves setup on to the connection", () => {
   const current = state({ ...READY_ASSISTANT, bridgeLoadedInChrome: true });
   const view = actionView(current, { chosenAssistantId: "codex" });
-  assert.equal(view.title, "Connect Morrow Bridge.");
+  assert.equal(view.title, "Pair Morrow Bridge.");
   assert.match(view.body, /data-action="check-bridge"/);
   assert.equal(step(current, "Morrow Bridge").status, "current");
   assert.equal(step(current, "Morrow Bridge").detail, "Installed; connect to Morrow");
@@ -273,9 +273,9 @@ test("a confirmed load in Chrome moves setup on to the connection", () => {
 test("a paired Bridge without a connected course asks for the course", () => {
   const current = state(PAIRED);
   const view = actionView(current, { chosenAssistantId: "codex" });
-  assert.equal(view.title, "Open your course in Chrome.");
+  assert.equal(view.title, "Pair your learning account.");
   // Every control the steps name exists in Morrow Bridge, and the panel ends with an action.
-  for (const label of ["Connect this course", "Open Plan and Edit settings", "Your courses", "Connect", "Check Bridge"]) {
+  for (const label of ["Pair Canvas account", "Open Plan and Edit settings", "Your courses", "Connect", "Check Bridge"]) {
     assert.ok(view.body.includes(`<strong>${label}</strong>`), `the steps name ${label}`);
   }
   for (const missing of ["Connect selected courses in Plan", "Connect Canvas", "Connect Moodle", "Plan and Edit settings</strong>, choose"]) {
@@ -664,7 +664,7 @@ test("an assistant whose project folder is gone names that folder and offers Rem
 test("the completed course connection shows the three status lines, then three example requests, each with its own Copy button", () => {
   const current = state({ ...CONNECTED_COURSE, firstPreview: { available: true, completed: true } });
   const view = actionView(current, { chosenAssistantId: "codex" });
-  assert.equal(view.title, "Your course is connected.");
+  assert.equal(view.title, "Morrow is ready.");
 
   // The status lines (D8) come first: one row per area, one state word, one action.
   const rows = [...view.body.matchAll(/<li class="home-status-row"><span class="home-status-label">(.*?)<\/span><span class="home-status-word">(.*?)<\/span><button class="secondary-button" type="button" data-action="(.*?)">(.*?)<\/button><\/li>/g)]
@@ -885,7 +885,7 @@ test("setup asks the teacher to quit and reopen the assistant before it says to 
   assert.equal(statusSummary(connectedCourse()), "Quit and reopen ChatGPT");
 
   const connected = actionView(connectedCourse({ connected: true }));
-  assert.equal(connected.title, "Your course is connected.");
+  assert.equal(connected.title, "Morrow is ready.");
   assert.match(connected.copy, /Continue in ChatGPT/);
 });
 
@@ -923,16 +923,22 @@ test("a failed assistant check names the button the panel shows, not a Check aga
   }
 });
 
-test("with more than one assistant set up, the reopen panel says Morrow cannot tell which one reopened", () => {
-  const CLAUDE_CODE = { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, detected: true, configured: true, connected: false };
-  const one = actionView(connectedCourse());
-  assert.doesNotMatch(one.body, /cannot tell which/);
-  const two = actionView(state({
-    ...connectedCourseFields(),
-    assistants: [{ ...CHATGPT, detected: true, configured: true, connected: false, selected: true }, CLAUDE_CODE],
-  }));
+test("each unconfirmed assistant keeps its own restart check when several assistants are configured", () => {
+  const claude = { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, needsWorkspace: true, detected: true, configured: true, connected: false, projectFolder: "/Home/Courses/Fall biology" };
+  const two = actionView(state({ ...connectedCourseFields(), selectedAssistantId: "codex", assistants: [{ ...CHATGPT, detected: true, configured: true, connected: false, selected: true }, claude] }));
   assert.equal(two.title, "Quit and reopen your assistant.");
-  assert.match(two.body, /Morrow can tell that an assistant opened Morrow, but it cannot tell which one\. Quit and reopen each assistant you set up: ChatGPT and Claude Code\./);
+  assert.match(two.body, /Check ChatGPT/);
+  assert.doesNotMatch(two.copy, /Continue in/);
+  const mixed = actionView(state({ ...connectedCourseFields(), selectedAssistantId: "codex", assistants: [{ ...CHATGPT, detected: true, configured: true, connected: true, selected: true }, claude] }));
+  assert.match(mixed.body, /Check Claude Code/);
+  assert.match(mixed.body, /Fall biology/);
+  assert.doesNotMatch(mixed.body, /Quit <strong>ChatGPT/);
+  for (const desktop of [{ ...CLAUDE_DESKTOP, detected: true, configured: true, connected: true }, { ...CLAUDE_DESKTOP, detected: true, pending: true }]) {
+    const view = actionView(state({ ...connectedCourseFields(), assistants: [{ ...CHATGPT, detected: true, configured: true, connected: false, selected: true }, desktop] }));
+    assert.equal(view.title, "Quit and reopen your assistant.");
+    assert.match(view.body, /Check ChatGPT/);
+    assert.doesNotMatch(view.body, /Quit <strong>Claude Desktop/);
+  }
 });
 
 test("while the panel says to quit and reopen the assistant, the rail shows the Assistant step as the current one", () => {
@@ -1020,12 +1026,12 @@ const PANEL_SUMMARIES = Object.freeze({
   "Morrow Bridge is not ready to open.": "Morrow Bridge is not ready to open",
   "Add Morrow Bridge.": "Set up Morrow Bridge in Chrome",
   "Install Morrow Bridge.": "Set up Morrow Bridge in Chrome",
-  "Connect Morrow Bridge.": "Connect Morrow Bridge",
-  "Open your course in Chrome.": "Morrow Bridge is connected",
+  "Pair Morrow Bridge.": "Pair Morrow Bridge",
+  "Pair your learning account.": "Morrow Bridge is connected",
   "Morrow cannot read your course yet.": "Morrow cannot read your course yet",
   "Check your course connection.": "First read is ready",
   "Quit and reopen your assistant.": "Quit and reopen ChatGPT",
-  "Your course is connected.": "First read complete"
+  "Morrow is ready.": "First read complete"
 });
 
 // Educators read these panels on every start, during repair, and during a Bridge

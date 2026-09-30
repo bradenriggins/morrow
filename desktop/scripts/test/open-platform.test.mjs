@@ -37,6 +37,7 @@ const MESSAGE_CODE_SOURCE = sliceIncluding("function messageCode(error) {", "\n}
 const HANDLER_SOURCE = sliceBefore("function awaitTabLoad(tabId, timeoutMs) {", "\nasync function disconnectConnector()");
 const ROUTER_SOURCE = sliceBefore("chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {", "\nchrome.permissions.onAdded.addListener");
 const POPUP_SENDER_SOURCE = sliceIncluding("function popupSender(sender) {", 'const POPUP_EDIT_POLICY_MESSAGES = new Set(["morrow_edit_policy_status", "morrow_edit_policy_revoke"]);');
+const SETTINGS_SENDER_SOURCE = sliceIncluding("function settingsSender(sender) {", "\n}\n");
 const ANCHOR_FOR_BINDING_SOURCE = sliceIncluding("function anchorForBinding(binding, anchors) {", "\n}\n");
 const SAVE_EDIT_POLICY_SOURCE = sliceIncluding(
   "async function saveEditPolicy(sourceBindingId, enabledCategories, authorityGeneration = state.courseDataAuthorityGeneration) {",
@@ -97,6 +98,8 @@ function harness({ anchors = [], bindings = [], matchResult = true, matchResults
     STORED_ANCHORS_SOURCE,
     MESSAGE_CODE_SOURCE,
     POPUP_SENDER_SOURCE,
+    SETTINGS_SENDER_SOURCE,
+    "const SETUP_GUIDE_PATH = 'onboarding/onboarding.html';",
     ANCHOR_FOR_BINDING_SOURCE,
     HANDLER_SOURCE,
     SAVE_EDIT_POLICY_SOURCE,
@@ -120,12 +123,12 @@ function harness({ anchors = [], bindings = [], matchResult = true, matchResults
     "    },",
     "  },",
     "  storage: { local: { set: async (values) => { calls.storageSet.push(values); } } },",
-    "  runtime: { onMessage: { addListener: (listener) => { routerListener = listener; } } },",
+    "  runtime: { id: 'test-extension', getURL: path => 'chrome-extension://test-extension/' + path, onMessage: { addListener: (listener) => { routerListener = listener; } } },",
     "};",
     ROUTER_SOURCE,
     "return {",
     "  calls,",
-    "  dispatch: (message, sender = {}) => new Promise((resolve) => { routerListener(message, sender, resolve); }),",
+    "  dispatch: (message, sender = { id: 'test-extension', url: 'chrome-extension://test-extension/popup/popup.html' }) => new Promise((resolve) => { routerListener(message, sender, resolve); }),",
     "  bindingForCommand: (command, operation) => bindingForCommand(command, operation),",
     "  saveEditPolicy: (sourceBindingId, enabledCategories) => saveEditPolicy(sourceBindingId, enabledCategories),",
     "};",
@@ -231,7 +234,7 @@ test("morrow_open_platform requires course data consent, like the other course-r
 
 test("morrow_open_platform is not restricted to the settings-page sender", async () => {
   const harness1 = harness({ anchors: [ANCHOR], bindings: [BINDING] });
-  const response = await harness1.dispatch({ type: "morrow_open_platform", siteAnchorId: ANCHOR.siteAnchorId, sourceBindingId: BINDING.sourceBindingId }, { id: "some-other-id", url: undefined });
+  const response = await harness1.dispatch({ type: "morrow_open_platform", siteAnchorId: ANCHOR.siteAnchorId, sourceBindingId: BINDING.sourceBindingId }, { id: "test-extension", url: "chrome-extension://test-extension/onboarding/onboarding.html" });
   assert.equal(response.ok, true, "the popup and the setup guide send this message too, not only Plan and Edit settings");
 });
 

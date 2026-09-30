@@ -41,8 +41,19 @@ const READY_STATUS = Object.freeze({
 
 const textOf = (state, id) => state.checks.find((check) => check.id === id).text;
 
-// Connect Morrow pairs in the popup in one step, so the guide has no approval step or page to reopen.
-test("setup guide has no approval step: Connect Morrow pairs in the popup", () => {
+test("Account access describes available courses and refresh without a course selector", () => {
+  const ready = setupGuideState({ ...READY_STATUS, courseAccessMode: "account" });
+  assert.match(ready.summary, /1 available course is ready/);
+  assert.equal(textOf(ready, "course"), "1 available course is ready");
+  assert.doesNotMatch(ready.summary, /selected/);
+  const empty = setupGuideState({ ...READY_STATUS, courseAccessMode: "account", bindings: [] });
+  assert.equal(empty.canOpenSettings, false);
+  assert.match(empty.detail, /Refresh courses/);
+  assert.doesNotMatch(textOf(empty, "course"), /select courses/);
+});
+
+// Pair Morrow pairs in the popup in one step, so the guide has no approval step or page to reopen.
+test("setup guide has no approval step: Pair Morrow pairs in the popup", () => {
   const state = setupGuideState({ paired: false, connected: false, bindings: [], siteAnchors: [] });
   assert.equal(state.title, "Open Morrow");
   assert.equal(Object.hasOwn(state, "canOpenApproval"), false);
@@ -58,9 +69,9 @@ test("setup guide has no approval step: Connect Morrow pairs in the popup", () =
 test("setup guide directs an unpaired Bridge to the graphical Morrow app", () => {
   const state = setupGuideState({ paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [] });
   assert.equal(state.title, "Open Morrow");
-  assert.equal(state.detail, "Open Morrow and choose your assistant. Then return to Morrow Bridge and select Connect Morrow.");
+  assert.equal(state.detail, "Open Morrow and choose your assistant. Then return to Morrow Bridge and select Pair Morrow.");
   assert.match(state.detail, /choose your assistant/i);
-  assert.match(state.detail, /select Connect Morrow/i);
+  assert.match(state.detail, /select Pair Morrow/i);
 });
 
 test("setup guide distinguishes a closed assistant, signed-out course, Plan selection, and ready course", () => {
@@ -68,14 +79,14 @@ test("setup guide distinguishes a closed assistant, signed-out course, Plan sele
   assert.equal(setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }).title, "Open Morrow again");
   assert.equal(setupGuideState({ ...connected, bindings: [], siteAnchors: [{ provider: "canvas", runtimeVerified: false }] }).title, "Reconnect Canvas");
   const plan = setupGuideState({ ...connected, bindings: [], siteAnchors: [{ runtimeVerified: true }] });
-  assert.equal(plan.title, "Select a course in Plan");
+  assert.equal(plan.title, "Choose your course access");
   assert.equal(plan.canOpenSettings, true);
   const ready = setupGuideState(READY_STATUS);
   assert.equal(ready.ready, true);
   assert.equal(ready.title, "Plan your first change");
   // The status this guide reads carries no Edit permission, so the ready text must be true whether
   // or not the educator has turned on Edit for a kind of change in that course.
-  assert.equal(ready.detail, "Ask your assistant for a change in your selected course. Each change waits for your review unless you turned on Edit for that kind of change in that course.");
+  assert.equal(ready.detail, "Ask your assistant for work in the courses you allowed. Give it course names, course IDs, or course links. Each change waits for your review unless you granted Edit access for that change.");
   assert.doesNotMatch(ready.detail, /every change/i);
 });
 
@@ -109,14 +120,14 @@ test("setup guide steps name only controls that exist", () => {
   const closed = setupGuideState({ ...connected, bindings: [], siteAnchors: [{ provider: "canvas", runtimeVerified: false }] });
   assert.equal(closed.detail, "Select Open Canvas in the Morrow Bridge popup, or open the saved Canvas course in Chrome yourself, and sign in if Canvas asks.");
   const none = setupGuideState({ ...connected, bindings: [], siteAnchors: [] });
-  assert.equal(none.detail, "Open a Canvas or Moodle course in Chrome and sign in. The Morrow Bridge popup then shows Connect this course. Select it and allow Chrome access to the exact address shown.");
+  assert.equal(none.detail, "Sign in to Canvas or Moodle in Chrome and open any course. Select Pair Canvas account or Pair Moodle account in Morrow Bridge, then allow access to the site Chrome shows. You pair each account once.");
   const plan = setupGuideState({ ...connected, bindings: [], siteAnchors: [{ runtimeVerified: true }] });
-  assert.equal(plan.detail, "Open Plan and Edit settings. The courses on your signed-in site are listed under Not connected. Select Connect on a course. It connects in Plan.");
+  assert.equal(plan.detail, "Choose Selected courses to allow specific courses in Plan and Edit settings. Choose Account access to let your assistant work across the account's courses without selecting each one in Bridge. Plan keeps changes in review.");
   const html = readFileSync(new URL("../../connector/extension/onboarding/onboarding.html", import.meta.url), "utf8");
   for (const text of [closed.detail, none.detail, plan.detail, html]) {
     assert.doesNotMatch(text, /Connect Canvas|Connect Moodle|Find available courses|Connect selected courses|matching platform button/);
   }
-  assert.match(html, /shows <b>Connect this course<\/b>/);
+  assert.match(html, /Pair Canvas account/);
 });
 
 // The five checks are the completion goal: an assistant approved this connection, Morrow matches
@@ -177,13 +188,13 @@ test("the version check separates a matching Morrow from one this connection can
     "Morrow matches this Morrow Bridge version and its list of course actions");
   // A status with no version answer at all is not treated as a match.
   assert.equal(setupGuideState({ ...connected }).ready, false);
-  // A saved connection reconnects by itself after the reload, so no step asks for Connect Morrow.
-  assert.doesNotMatch(mismatch.detail, /Connect Morrow/);
+  // A saved connection reconnects by itself after the reload, so no step asks for Pair Morrow.
+  assert.doesNotMatch(mismatch.detail, /Pair Morrow/);
 });
 
 // After a Morrow update Chrome still runs the old Morrow Bridge. Every surface gives the one real
 // step, a reload of Morrow Bridge, and the Morrow app's own Bridge step when a reload is not enough.
-test("the setup guide, the popup and the Connect Morrow error give the same version recovery", () => {
+test("the setup guide, the popup and the Pair Morrow error give the same version recovery", () => {
   const recovery = "Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.";
   const guide = setupGuideState({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
   assert.equal(guide.heading, "Morrow Bridge needs a reload");
@@ -204,7 +215,7 @@ test("a Morrow that refused this Bridge version asks for a reload, not for Morro
   assert.equal(textOf(state, "connection"), "Morrow Bridge reached Morrow, and Morrow expects a different version");
   assert.equal(textOf(state, "runtime"), "Morrow reports a different version from this Morrow Bridge");
   assert.match(state.detail, /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
-  assert.doesNotMatch(state.detail, /Connect Morrow/);
+  assert.doesNotMatch(state.detail, /Pair Morrow/);
 });
 
 // "Ready to use" is the claim a person acts on, so only a read that happened can raise it, and the
@@ -382,6 +393,8 @@ function stubElement(text = "", hidden = false) {
 
 test("the setup guide answers a failed status read with an unknown checklist, then clears it", async () => {
   const nodes = {
+    "#course-access-mode": stubElement(),
+    "#course-access-help": stubElement(),
     "#guide-mode": stubElement("Guide me"),
     "#consent-action": stubElement("Agree and continue"),
     "#consent-detail": stubElement("Select Agree and continue to accept this data use."),
@@ -401,6 +414,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     "#next-detail": stubElement("Open Morrow, choose your assistant, then return to Morrow Bridge."),
     "#open-settings": stubElement("Open Plan and Edit settings", true),
     "#reconnect-morrow": stubElement("Reconnect Morrow", true),
+    "#take-over-morrow": stubElement("Use this Chrome profile", true),
     "#data-disclosure": stubElement(),
     "#quick-open-settings": stubElement("Open Plan and Edit settings"),
     "#error": stubElement("", true),

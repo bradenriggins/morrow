@@ -475,3 +475,40 @@ test("a Store-installed Bridge never reloads through maintenance", async () => {
   const testFixture = fixture({ installType: "normal", values: { morrowBridgeQuiesceFence: { schema: "morrow.bridge.quiesce-fence.v1", extensionId: EXTENSION_ID, manifestVersion: VERSION, quiesceEpoch: "quiesce-12345678-1234-1234-1234-123456789abc" } } });
   await rejectsCode(() => testFixture.create().control({ action: "reload", quiesceEpoch: "quiesce-12345678-1234-1234-1234-123456789abc" }), "bridge_store_install_refused");
 });
+
+test("a restarted worker retains interrupted writes as unknown and permits a safe file-layer update", async () => {
+  const testFixture = fixture();
+  const previous = testFixture.create();
+  await previous.beginWrite({ operationId: "operation:interrupted", effectReceiptId: "effect:interrupted" });
+  const restarted = testFixture.create();
+  const quiesced = await restarted.control({ action: "quiesce" });
+  assert.equal(quiesced.quiescent, true);
+  assert.deepEqual(testFixture.values.get("morrowBridgeMaintenanceReceipts"), [{ operationId: "operation:interrupted", effectReceiptId: "effect:interrupted", state: "unknown" }]);
+  await restarted.control({ action: "resume", quiesceEpoch: quiesced.quiesceEpoch, fileLayerRestored: true });
+  await rejectsCode(() => restarted.beginWrite({ operationId: "operation:interrupted", effectReceiptId: "effect:interrupted" }), "bridge_maintenance_write_duplicate");
+  await restarted.beginWrite({ operationId: "operation:next", effectReceiptId: "effect:next" });
+  await restarted.finishWrite("operation:next", "known");
+  assert.deepEqual(testFixture.values.get("morrowBridgeMaintenanceReceipts"), [{ operationId: "operation:interrupted", effectReceiptId: "effect:interrupted", state: "unknown" }]);
+});
+
+test("failed interrupted-receipt persistence leaves the ledger unchanged and allows a later recovery", async () => {
+  const entries = [{ operationId: "operation:interrupted", effectReceiptId: "effect:interrupted", state: "pending" }];
+  const testFixture = fixture({ values: { morrowBridgeMaintenanceReceipts: entries } });
+  const maintenance = testFixture.create();
+  const originalSet = testFixture.chromeApi.storage.local.set;
+  testFixture.chromeApi.storage.local.set = async () => { throw new Error("private storage failure"); };
+  await rejectsCode(() => maintenance.control({ action: "quiesce" }), "bridge_maintenance_receipts_unavailable");
+  assert.deepEqual(testFixture.values.get("morrowBridgeMaintenanceReceipts"), entries);
+  testFixture.chromeApi.storage.local.set = originalSet;
+  assert.equal((await maintenance.control({ action: "quiesce" })).quiescent, true);
+  assert.equal(testFixture.values.get("morrowBridgeMaintenanceReceipts")[0].state, "unknown");
+});
+
+test("a full unknown-receipt ledger refuses new writes without poisoning maintenance", async () => {
+  const entries = Array.from({ length: 2000 }, (_, i) => ({ operationId: `operation:unknown-${i}`, effectReceiptId: `effect:unknown-${i}`, state: "unknown" }));
+  const testFixture = fixture({ values: { morrowBridgeMaintenanceReceipts: entries } });
+  const maintenance = testFixture.create();
+  await rejectsCode(() => maintenance.beginWrite({ operationId: "operation:extra", effectReceiptId: "effect:extra" }), "bridge_maintenance_receipts_capacity");
+  assert.deepEqual(testFixture.values.get("morrowBridgeMaintenanceReceipts"), entries);
+  assert.equal((await maintenance.control({ action: "quiesce" })).quiescent, true);
+});

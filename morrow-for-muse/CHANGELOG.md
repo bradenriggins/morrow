@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.7 (2026-09-29)
+
+This candidate is not published. Local Linux checks are separate from Muse Secure VM owner and sign-in proof.
+
+- Keep a custom Canvas address supplied to the installer.
+- Improve the sign-in helper's keyboard, pointer, touch, and scrolling controls. Retain input acknowledgements through retry and give clear feedback when the helper is busy.
+- Require the current principal confirmation and adjacent course data consent. Refuse an uncertain or missing Muse owner assertion.
+- Keep learner proof tools in the development package. Validate proof evidence before publishing a receipt and keep the operation catalog's live proof limits.
+
 ## 0.4.6 (2026-09-25)
 
 The release package is `morrow-muse-connector-0.4.6.zip` from the

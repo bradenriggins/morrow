@@ -551,7 +551,7 @@ def main():
     with open(server, encoding="utf-8") as fh:
         srv = fh.read()
     for endpoint in ("/status", "/screenshot", "/input/key",
-                     "/input/mouse"):
+                     "/input/mouse", "/input/wheel"):
         check("UI calls %s" % endpoint, '"%s"' % endpoint in ui)
         check("server implements %s" % endpoint,
               '"%s"' % endpoint in srv)
@@ -904,8 +904,15 @@ def main():
           srv.count("self._require_auth()") >= 2)
     check("UI carries the __HELPER_TOKEN__ placeholder",
           "__HELPER_TOKEN__" in ui)
+    post_start = ui.find("function post(path, payload)")
+    post_end = ui.find("function postMouse", post_start)
+    protected_post = ui[post_start:post_end] if post_start >= 0 and post_end > post_start else ""
     check("UI sends X-Helper-Token on the protected fetches",
-          ui.count("X-Helper-Token") >= 4)
+          'fetch("/screenshot", { cache: "no-store", headers: AUTH_HEADERS })' in ui
+          and '"X-Helper-Token": HELPER_TOKEN' in ui
+          and '"X-Helper-Token": HELPER_TOKEN' in protected_post
+          and all('post("%s",' % route in ui for route in
+                  ("/input/key", "/input/mouse", "/input/wheel")))
     check("UI /status poll stays token-free",
           'fetch("/status", { cache: "no-store" })' in ui)
     check("non-loopback LOGIN_HELPER_BIND is FATAL without opt-in",
@@ -1002,7 +1009,7 @@ def main():
             "        return dict(REAL_STATUS)\n"
             "    def screenshot(self):\n"
             "        return b'\\x89PNG\\r\\n\\x1a\\n' + b'\\x00' * 64\n"
-            "    def key(self, kind, key, code, key_code):\n"
+            "    def key(self, kind, key, code, key_code, modifiers=0):\n"
             "        CALLS.append(('key', kind))\n"
             "    def mouse(self, kind, x, y, button):\n"
             "        CALLS.append(('mouse', kind))\n"
@@ -1115,8 +1122,23 @@ def main():
             "       body=b'not-json{{{')[0] == 400)\n"
             "code, body = req('GET', '/')\n"
             "ck('GET / serves the UI open', code == 200)\n"
-            "ck('served UI has the token injected, no placeholder left',\n"
-            "   TOKEN.encode() in body and b'__HELPER_TOKEN__' not in body)\n"
+            "ck('M4M-F2: bare GET / carries no token, no placeholder',\n"
+            "   TOKEN.encode() not in body and b'__HELPER_TOKEN__'\n"
+            "   not in body)\n"
+            "code, body = req('POST', '/page-code', headers=H, body=b'{}')\n"
+            "ck('POST /page-code without token -> 403',\n"
+            "   req('POST', '/page-code', body=b'{}')[0] == 403)\n"
+            "ck('POST /page-code with token mints a code',\n"
+            "   code == 200 and len(json.loads(body).get('page_code', ''))\n"
+            "   == 32)\n"
+            "PCODE = json.loads(body)['page_code']\n"
+            "code, body = req('GET', '/?code=' + PCODE)\n"
+            "ck('one-time link injects the token, no placeholder left',\n"
+            "   code == 200 and TOKEN.encode() in body and\n"
+            "   b'__HELPER_TOKEN__' not in body)\n"
+            "code, body = req('GET', '/?code=' + PCODE)\n"
+            "ck('M4M-F2: a burned code serves the tokenless shell again',\n"
+            "   code == 200 and TOKEN.encode() not in body)\n"
             "ck('server_version is CanvasLoginHelper/0.3',\n"
             "   S.Handler.server_version == 'CanvasLoginHelper/0.3')\n"
             "srv.shutdown()\n"
@@ -1777,8 +1799,8 @@ TOKEN_RE = re.compile(rb"[0-9a-f]{64}")
 # 1. loopback Hosts are served.
 st, body = raw_request("127.0.0.1:%d" % PORT)
 ck("host 127.0.0.1 served", st == "200")
-ck("host 127.0.0.1 page still embeds token (unchanged behavior)",
-   TOKEN_RE.search(body) is not None)
+ck("host 127.0.0.1 bare page carries no token (M4M-F2 bootstrap gate)",
+   TOKEN_RE.search(body) is None)
 st, _ = raw_request("localhost:%d" % PORT)
 ck("host localhost served", st == "200")
 st, _ = raw_request("[::1]:%d" % PORT)

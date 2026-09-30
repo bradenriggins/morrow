@@ -97,9 +97,9 @@ test("before a course site is connected the popup names the state it is in", asy
     }],
     ["Morrow is not added to an assistant yet", () => connection(), {
       connection: "Not connected", courseLabel: "Course", course: "Not connected",
-      primary: "Connect Morrow", primaryDisabled: false, primaryBusy: "false",
+      primary: "Pair Morrow", primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
-      detail: "Add Morrow to your assistant, then open it. Select Connect Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses.",
+      detail: "Add Morrow to your assistant, then open it. Select Pair Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses.",
     }],
     ["Morrow Bridge is connecting", () => connection({ paired: true, connecting: true }), {
       connection: "Connecting…", courseLabel: "Course", course: "Not connected",
@@ -143,12 +143,12 @@ test("once Morrow is connected the popup names the course state and the one step
   const states = [
     ["a signed-in Canvas course is detected", () => connection({ paired: true, connected: true }), {
       connection: "Connected", courseLabel: "Course", course: "Not connected",
-      primary: "Connect this course", primaryDisabled: false, primaryBusy: "false",
+      primary: "Pair Canvas account", primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: true, account: null,
-      detail: "Morrow Bridge detected Canvas. Select Connect this course to allow access to this signed-in course.",
+      detail: "Pair your signed-in Canvas account with Morrow. Select Pair Canvas account and allow access to the site Chrome shows. This is a one-time setup for this account.",
     }],
     // WI-5.8: one primary action for the present tab. The saved course's own tab is closed, so
-    // "Open Canvas" is that one action; the generic "Connect this course" stays hidden here.
+    // "Open Canvas" is that one action; the generic "Pair Canvas account" stays hidden here.
     ["the saved Canvas connection is closed", () => connection({ paired: true, connected: true, siteAnchors: [anchor({ runtimeVerified: false })] }), {
       connection: "Connected", courseLabel: "Learning platform", course: "Canvas is closed",
       primary: null, primaryDisabled: false, primaryBusy: "false",
@@ -173,7 +173,7 @@ test("once Morrow is connected the popup names the course state and the one step
     ["two courses are selected and one site is open", () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 2, siteAnchors: [anchor()] }), {
       connection: "Connected", courseLabel: "Connection", course: "Connected",
       primary: null, primaryDisabled: false, primaryBusy: "false",
-      secondary: "Check or switch course", openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
+      secondary: "Pair another account", openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
       account: "Course: Anatomy · 2 courses selected",
       detail: "This selected course is connected. Keep one signed-in Canvas course tab open while you work in Morrow.",
     }],
@@ -252,9 +252,9 @@ test("the popup uses the platform detected in the active course tab", async () =
     tabs: [{ id: 24, url: "https://moodle.example.edu/course/view.php?id=42" }],
     handlers: { morrow_detect_course_platform: () => ({ provider: "moodle" }) },
   });
-  assert.equal(page.text("#primary"), "Connect this course");
+  assert.equal(page.text("#primary"), "Pair Moodle account");
   assert.equal(page.query("#primary").disabled, false);
-  assert.equal(page.text("#detail"), "Morrow Bridge detected Moodle. Select Connect this course to allow access to this signed-in course.");
+  assert.equal(page.text("#detail"), "Pair your signed-in Moodle account with Morrow. Select Pair Moodle account and allow access to the site Chrome shows. This is a one-time setup for this account.");
   assert.deepEqual(page.messages("morrow_detect_course_platform"), [{ type: "morrow_detect_course_platform", tabId: 24 }]);
 });
 
@@ -276,9 +276,9 @@ test("a version-mismatched Bridge exposes only setup recovery", async () => {
   assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
 });
 
-// Connect Morrow pairs in one step. The popup asks for it with nothing else, never asks Chrome for
+// Pair Morrow pairs in one step. The popup asks for it with nothing else, never asks Chrome for
 // access to whatever site the active tab shows, and moves on once the worker answers.
-test("Connect Morrow pairs in one step and asks Chrome for no site access", async () => {
+test("Pair Morrow pairs in one step and asks Chrome for no site access", async () => {
   let status = connection();
   const page = await openPopup({
     status: () => status,
@@ -291,7 +291,7 @@ test("Connect Morrow pairs in one step and asks Chrome for no site access", asyn
       morrow_connect_course_prepare: ({ tabId }) => ({ id: "intent-1", tabId, origins: ["https://mail.example.com/*"] }),
     },
   });
-  assert.equal(view(page).primary, "Connect Morrow");
+  assert.equal(view(page).primary, "Pair Morrow");
   await page.click("#primary");
   assert.deepEqual(page.messages("morrow_pair"), [{ type: "morrow_pair" }]);
   assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
@@ -309,7 +309,7 @@ test("a Bridge Morrow cannot confirm names the Bridge folder to load", async () 
   await page.click("#primary");
   assert.equal(page.hidden("#error"), false);
   assert.match(page.text("#error"), /Show Bridge folder/);
-  assert.match(page.text("#error"), /Connect Morrow again/);
+  assert.match(page.text("#error"), /Pair Morrow again/);
 });
 
 test("a Bridge whose version Morrow refused offers the setup guide, not a new connection", async () => {
@@ -339,7 +339,7 @@ test("the popup states when the course was connected, or that it cannot say", as
   assert.equal(undated.query("#account-connected-at").getAttribute("datetime"), null);
 });
 
-test("Connect this course asks Chrome for that one address, then opens course selection", async () => {
+test("Pair Canvas account asks Chrome for that one address, then opens course selection", async () => {
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true }),
     tabs: [{ id: 12, url: `${COURSE_ORIGIN}/courses/1` }],
@@ -348,6 +348,8 @@ test("Connect this course asks Chrome for that one address, then opens course se
       morrow_connect_course_complete: () => ({ siteAnchorId: "canvas:site" }),
     },
   });
+  assert.equal(page.text("#primary"), "Pair Canvas account");
+  assert.match(page.text("#detail"), /signed-in Canvas account/);
   await page.click("#primary");
   assert.deepEqual(page.messages("morrow_connect_course_prepare"), [{ type: "morrow_connect_course_prepare", tabId: 12 }]);
   assert.deepEqual(page.permissionCalls, [{ method: "request", origins: [`${COURSE_ORIGIN}/*`] }]);
@@ -357,6 +359,33 @@ test("Connect this course asks Chrome for that one address, then opens course se
   assert.equal(page.hidden("#notice"), true);
   // The state is read again, so the popup shows what the connection is now rather than what it was.
   assert.equal(page.messages("morrow_status").length, 2);
+  assert.deepEqual(page.messages("morrow_course_selection_save"), [], "site authorization does not choose a course");
+});
+
+test("one account connection presents thirty selected courses as one shared session", async () => {
+  const courses = Array.from({ length: 30 }, (_, i) => binding({ sourceBindingId: `canvas:course-${i + 1}`, courseName: `Course ${i + 1}` }));
+  const page = await openPopup({ status: () => connection({ paired: true, connected: true, courseAccessMode: "account", bindings: courses, bindingCount: 30, siteAnchors: [anchor()] }) });
+  assert.match(page.text("#detail"), /30 courses.*together/);
+  assert.match(page.text("#detail"), /one signed-in Canvas tab/);
+  assert.equal(page.text("#canvas-action"), "Pair another account");
+  assert.equal(page.permissionCalls.length, 0);
+});
+
+test("switching course access changes scope without pairing or enabling Edit", async () => {
+  let mode = "selected";
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, courseAccessMode: mode, siteAnchors: [anchor()], bindings: mode === "account" ? [binding()] : [] }),
+    handlers: { morrow_course_access_set: ({ mode: next }) => { mode = next; return { courseAccessMode: mode }; } },
+  });
+  assert.equal(page.query("#course-access-mode").value, "selected");
+  assert.match(page.text("#course-access-help"), /only the courses you allow/);
+  await page.choose("#course-access-mode", "account");
+  assert.equal(page.query("#course-access-mode").value, "account");
+  assert.match(page.text("#course-access-help"), /course name, course ID, or course link/);
+  assert.deepEqual(page.messages("morrow_course_access_set"), [{ type: "morrow_course_access_set", mode: "account" }]);
+  assert.deepEqual(page.messages("morrow_pair"), []);
+  assert.deepEqual(page.messages("morrow_edit_policy_save"), []);
+  assert.equal(page.optionsPageOpens, 0);
 });
 
 test("a Canvas address Chrome refuses is cancelled, named, and never reported as connected", async () => {
@@ -399,9 +428,9 @@ test("choosing courses opens Plan and Edit settings and asks Chrome for nothing"
   assert.equal(page.optionsPageOpens, 2);
 });
 
-// "Check or switch course" connects the course open in the active tab, then opens course selection,
-// where the course to work in is chosen, the same as Connect this course.
-test("Check or switch course connects the active tab's site, then opens course selection", async () => {
+// "Pair another account" connects the course open in the active tab, then opens course selection,
+// where the course to work in is chosen, the same as Pair Canvas account.
+test("Pair another account connects the active tab's site, then opens course selection", async () => {
   const page = await openPopup({
     status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
     tabs: [{ id: 12, url: `${COURSE_ORIGIN}/courses/2` }],
@@ -410,7 +439,7 @@ test("Check or switch course connects the active tab's site, then opens course s
       morrow_connect_course_complete: () => ({ siteAnchorId: "canvas:site" }),
     },
   });
-  assert.equal(page.text("#canvas-action"), "Check or switch course");
+  assert.equal(page.text("#canvas-action"), "Pair another account");
   await page.click("#canvas-action");
   assert.deepEqual(page.messages("morrow_connect_course_complete"), [{ type: "morrow_connect_course_complete", intentId: "intent-2" }]);
   assert.equal(page.optionsPageOpens, 1);

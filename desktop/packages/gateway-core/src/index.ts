@@ -10,3 +10,4 @@ export * from "./private-state-file.js";
 export * from "./private-sqlite-state.js";
 export * from "./source-mcp-privacy.js";
 export * from "./process-lifetime.js";
+export * from "./canvas-privacy-pagination.js";

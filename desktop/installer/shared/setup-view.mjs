@@ -140,7 +140,7 @@ export function progress(current) {
         ? "Open your course in Chrome"
         : "Open Canvas or Moodle in Chrome";
   return [
-    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : materialsMissing ? "Materials folder not found" : restart && active === 0 ? `Quit and reopen ${restart.title}` : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? pending.checking === true ? "Checking the Claude Desktop connection" : "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : materialsMissing || (restart && active === 0) ? "current" : assistant ? "done" : "current" },
+    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : materialsMissing ? "Materials folder not found" : restart && active === 0 ? restart.routeReady === false ? `Set up ${restart.title} again` : `Quit and reopen ${restart.title}` : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? pending.checking === true ? "Checking the Claude Desktop connection" : "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : materialsMissing || (restart && active === 0) ? "current" : assistant ? "done" : "current" },
     { label: "Morrow Bridge", detail: bridgeDetail, status: blocked ? "blocked" : active === 1 ? "current" : paired ? "done" : "pending" },
     { label: "Course", detail: courseDetail, status: firstPreviewCompleted ? "done" : active === 2 ? "current" : "pending" },
   ].map((step, index) => ({ ...step, current: index === active && step.status !== "done" }));
@@ -148,6 +148,7 @@ export function progress(current) {
 
 /** What an assistant card says when this computer does not have that assistant. */
 function notFoundDetail(assistant) {
+  if (assistant?.statusUnavailable === true) return "Morrow could not check this assistant. Select Check status again.";
   if (assistant?.id === "claude-desktop") return "Claude Desktop is not installed on this computer. Get it from claude.ai/download, then select Check status.";
   return "Not found on this computer.";
 }
@@ -222,6 +223,7 @@ function materialsRow(current, { optionalDisclosure = false } = {}) {
 
 /** What one assistant row says about that assistant, in the words it can prove. */
 function assistantDetail(assistant) {
+  if (assistant.statusUnavailable === true) return "Morrow could not check this assistant. Select Check status again.";
   if (assistant.configured === true) return "Morrow is set up in this assistant.";
   if (assistant.pending === true) return assistant.checking === true ? "Morrow is checking the connection to Claude Desktop." : "Waiting for your approval in Claude Desktop.";
   if (assistant.detected !== true) return "Not found on this computer.";
@@ -299,8 +301,11 @@ function examplePrompt(text) {
   return `<div class="prompt"><span class="prompt-text">${escapeHtml(text)}</span><div class="inline-actions"><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(text)}">Copy</button></div></div>`;
 }
 
-function homeStatusLines() {
-  return `<ul class="home-status">${HOME_STATUS_ROWS.map((row) => `<li class="home-status-row"><span class="home-status-label">${escapeHtml(row.label)}</span><span class="home-status-word">${escapeHtml(row.word)}</span><button class="secondary-button" type="button" data-action="${row.action}">${row.actionLabel}</button></li>`).join("")}</ul>`;
+function homeStatusLines(current) {
+  // An assistant whose own session Morrow has not confirmed is set up, not ready.
+  const unconfirmed = unconfirmedAssistants(current).length > 0;
+  const rows = HOME_STATUS_ROWS.map((row) => row.label === "Assistant" && unconfirmed ? { ...row, word: "Not confirmed", pending: true } : row);
+  return `<ul class="home-status">${rows.map((row) => `<li class="home-status-row"><span class="home-status-label">${escapeHtml(row.label)}</span><span class="home-status-word${row.pending ? " home-status-word-pending" : ""}">${escapeHtml(row.word)}</span><button class="secondary-button" type="button" data-action="${row.action}">${row.actionLabel}</button></li>`).join("")}</ul>`;
 }
 
 /**
@@ -329,7 +334,7 @@ function bridgeFolderBlock(current, { platform = null, bridgeWaitExpired = false
       : "In the folder picker Chrome opens, go to this path.";
   const guidance = bridgeWaitExpired
     ? '<div class="blocked-box"><strong>Bridge connection not confirmed</strong><p>If you already added Bridge in Chrome, select Check Bridge. If Morrow still cannot connect, use Load unpacked to select the exact Bridge folder shown below.</p></div>'
-    : '<div class="info-box"><strong>Next: add Bridge to Chrome</strong><p>Select Show Bridge folder, then follow the steps below. Return here and select Check Bridge after you select Connect Morrow in Chrome.</p></div>';
+    : '<div class="info-box"><strong>Next: add Bridge to Chrome</strong><p>Select Show Bridge folder, then follow the steps below. Return here and select Check Bridge after you select Pair Morrow in Chrome.</p></div>';
   if (typeof folder !== "string" || folder.length === 0) return guidance;
   return `${guidance}<div class="materials-row"><div><h3>Bridge folder</h3><p class="path-text">${escapeHtml(folder)}</p><p>${reach}</p></div><button class="secondary-button" type="button" data-action="copy-example-prompt" data-prompt="${escapeHtml(folder)}" aria-label="Copy the Bridge folder path">Copy path</button></div>`;
 }
@@ -443,7 +448,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       summary: "Set up Morrow Bridge in Chrome",
       title: "Add Morrow Bridge.",
       copy: "Add Morrow Bridge to Chrome from the folder below. It connects Morrow to the courses you choose in Chrome.",
-      body: bridgeFolderBlock(current, { platform, bridgeWaitExpired }) + '<ol class="instructions"><li>Select <strong>Show Bridge folder</strong>. Morrow opens the folder named <strong>Bridge</strong> and selects its manifest.json file.</li><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>On that page, turn on <strong>Developer mode</strong>.</li><li>Select <strong>Load unpacked</strong>, then select that <strong>Bridge</strong> folder.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Connect Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="reveal-bridge-folder">Show Bridge folder</button><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="repair">Repair Morrow</button></div>',
+      body: bridgeFolderBlock(current, { platform, bridgeWaitExpired }) + '<ol class="instructions"><li>Select <strong>Show Bridge folder</strong>. Morrow opens the folder named <strong>Bridge</strong> and selects its manifest.json file.</li><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>On that page, turn on <strong>Developer mode</strong>.</li><li>Select <strong>Load unpacked</strong>, then select that <strong>Bridge</strong> folder.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Pair Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="reveal-bridge-folder">Show Bridge folder</button><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="repair">Repair Morrow</button></div>',
     };
   }
   if (needsBridge(current) && bridge.delivery === "available") {
@@ -451,34 +456,34 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
       summary: "Set up Morrow Bridge in Chrome",
       title: "Install Morrow Bridge.",
       copy: "Morrow Bridge uses the learning platform where you are already signed in. It asks Chrome for access only to the exact learning platform you choose.",
-      body: '<ol class="instructions"><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Visit Chrome Web Store</strong>.</li><li>Search the store for <strong>Morrow Bridge</strong>, then select <strong>Add to Chrome</strong>.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Connect Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
+      body: '<ol class="instructions"><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Visit Chrome Web Store</strong>.</li><li>Search the store for <strong>Morrow Bridge</strong>, then select <strong>Add to Chrome</strong>.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Pair Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   if (bridge.paired !== true) {
     const title = assistant.title;
     return {
-      summary: "Connect Morrow Bridge",
-      title: "Connect Morrow Bridge.",
-      copy: `${title} is configured. Open Morrow Bridge in Chrome and select Connect Morrow.`,
-      body: '<ol class="instructions"><li>Open <strong>Morrow Bridge</strong> in Chrome.</li><li>Select <strong>Connect Morrow</strong>. Morrow connects only the Morrow Bridge loaded from the folder Morrow shows.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
+      summary: "Pair Morrow Bridge",
+      title: "Pair Morrow Bridge.",
+      copy: `${title} is configured. Open Morrow Bridge in Chrome and select Pair Morrow.`,
+      body: '<ol class="instructions"><li>Open <strong>Morrow Bridge</strong> in Chrome.</li><li>Select <strong>Pair Morrow</strong>. Morrow connects only the Morrow Bridge loaded from the folder Morrow shows.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   if (!verifiedCourse(current)) {
     return {
       summary: "Morrow Bridge is connected",
-      title: "Open your course in Chrome.",
-      copy: "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course.",
-      body: '<ol class="instructions"><li>Open a Canvas or Moodle course you can access in <strong>Chrome</strong> and sign in.</li><li>Open <strong>Morrow Bridge</strong>. It identifies the platform and shows <strong>Connect this course</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>In Morrow Bridge, select <strong>Open Plan and Edit settings</strong>. Under <strong>Your courses</strong>, select <strong>Connect</strong> next to each course Morrow may use. Each course starts in Plan.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
+      title: "Pair your learning account.",
+      copy: "Pair your signed-in Canvas or Moodle account once. Then choose Selected courses or Account access in Morrow Bridge.",
+      body: '<ol class="instructions"><li>Sign in to Canvas or Moodle in <strong>Chrome</strong> and open any course to identify your account.</li><li>Open <strong>Morrow Bridge</strong>. Select <strong>Pair Canvas account</strong> or <strong>Pair Moodle account</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>Choose <strong>Selected courses</strong> to allow specific courses under <strong>Your courses</strong> in <strong>Open Plan and Edit settings</strong>. Choose <strong>Account access</strong> to work across the account without selecting each course. Plan keeps changes in review.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   const course = bridge.firstPreviewCourseName || bridge.selectedCourseName || "your selected course";
-  if (previewCompleted(current) && restartAssistant(current)) return restartPanel(restartAssistant(current), current);
+  if (previewCompleted(current) && restartAssistant(current)) return restartPanel(restartAssistant(current));
   if (previewCompleted(current)) {
     return {
       summary: "First read complete",
-      title: "Your course is connected.",
-      copy: `Morrow read ${course} successfully. Continue in ${assistant.title} and ask what you want to do.`,
-      body: `${homeStatusLines()}<h3>Try asking</h3>${EXAMPLE_REQUESTS.map(examplePrompt).join("")}`,
+      title: "Morrow is ready.",
+      copy: `Morrow read ${course} successfully. Continue in ${assistant.title}. Give it course names, course IDs, or course links and ask what you want to do.`,
+      body: `${homeStatusLines(current)}<h3>Try asking</h3>${EXAMPLE_REQUESTS.map(examplePrompt).join("")}`,
     };
   }
   if (previewReady(current)) {
@@ -501,29 +506,40 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
 }
 
 /**
- * The configured assistant whose own Morrow session has not connected yet. An
- * assistant reads its settings when it starts, so it must be quit and opened
- * again before it can use Morrow. Claude Desktop is configured only once its
- * session connected, so it never needs this step.
+ * The configured assistants whose own Morrow session has not connected since
+ * Morrow last wrote their settings. An assistant reads its settings when it
+ * starts, so it must be quit and opened again before it can use Morrow. Claude
+ * Desktop is configured only once its session connected, so it never needs this.
  */
-function restartAssistant(current) {
-  const assistant = configuredAssistant(current);
-  return assistant && assistant.id !== "claude-desktop" && assistant.connected !== true ? assistant : null;
+function unconfirmedAssistants(current) {
+  return configuredAssistants(current).filter((assistant) => assistant.id !== "claude-desktop" && assistant.connected !== true);
 }
 
-function restartPanel(assistant, current) {
-  const title = escapeHtml(assistant.title);
-  // The runtime sees that an assistant session connected, not which assistant it is, so a check
-  // after any one reopens counts for every assistant set up.
-  const configured = configuredAssistants(current);
-  const which = configured.length > 1
-    ? `<div class="info-box"><strong>Reopen each assistant</strong><p>Morrow can tell that an assistant opened Morrow, but it cannot tell which one. Quit and reopen each assistant you set up: ${assistantTitles(configured)}.</p></div>`
-    : "";
-  // Claude Code and Gemini CLI read Morrow's entry only in the project folder chosen at setup, and
-  // Claude Code uses a project's server only after the person approves it there.
-  const folder = typeof assistant.projectFolder === "string" && assistant.projectFolder.length > 0
+/** The next configured assistant whose current route has not been confirmed. */
+function restartAssistant(current) {
+  const assistants = unconfirmedAssistants(current);
+  return assistants.find((assistant) => assistant.selected || assistant.id === current?.selectedAssistantId) || assistants[0] || null;
+}
+
+function projectFolderText(assistant) {
+  return typeof assistant.projectFolder === "string" && assistant.projectFolder.length > 0
     ? `<span class="path-text">${escapeHtml(assistant.projectFolder)}</span>`
     : null;
+}
+
+function restartPanel(assistant) {
+  const title = escapeHtml(assistant.title);
+  if (assistant.routeReady === false) {
+    return {
+      summary: `Set up ${assistant.title} again`,
+      title: "Set up your assistant again.",
+      copy: "This setup uses an earlier Morrow configuration. Set it up again so Morrow can confirm that this assistant loaded the current settings.",
+      body: `<div class="inline-actions"><button class="primary-button" type="button" data-action="install-assistant" data-assistant-id="${escapeHtml(assistant.id)}">Set up ${title} again</button></div>`,
+    };
+  }
+  // Claude Code and Gemini CLI read Morrow's entry only in the project folder chosen at setup, and
+  // Claude Code uses a project's server only after the person approves it there.
+  const folder = projectFolderText(assistant);
   const reopen = folder && assistant.id === "claude-code"
     ? `<li>Quit <strong>${title}</strong> completely.</li><li>Open <strong>${title}</strong> in the project folder ${folder}. When ${title} asks whether to use the morrow server from this project, approve it.</li>`
     : folder
@@ -535,7 +551,7 @@ function restartPanel(assistant, current) {
     copy: folder
       ? `${assistant.title} reads Morrow's entry only from the project folder you chose, and only when it starts there.`
       : `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
-    body: `${which}<ol class="instructions">${reopen}<li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
+    body: `<ol class="instructions">${reopen}<li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
   };
 }
 

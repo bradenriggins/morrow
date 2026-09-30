@@ -107,7 +107,9 @@ def world(tmp_path):
         'TREE_VERSION="0.4.6"',
     ])
     env = {k: v for k, v in os.environ.items()
-           if k not in ("CANVAS_BASE", "LOGIN_HELPER_PORT")}
+           if k not in ("CANVAS_BASE", "LOGIN_HELPER_PORT",
+                        "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED",
+                        "CANVAS_BASE_ALLOW_HTTP", "MORROW_HELPER_ENV_FILE")}
     env.update({"PATH": str(bindir) + os.pathsep + env.get("PATH", ""),
                 "FAKE_CURL_LOG": str(tmp_path / "curl.log"),
                 "FAKE_FLOCK_LOG": str(tmp_path / "flock.log")})
@@ -137,6 +139,30 @@ def test_a_healthy_helper_is_checked_on_the_pinned_port(world):
     calls = world["curl_log"].read_text()
     assert "http://127.0.0.1:18911/status" in calls, calls
     assert "8901" not in calls, calls
+
+
+@pytest.mark.parametrize("base,confirmation,allowed", [
+    ("https://canvas.school.edu", "canvas.school.edu", True),
+    ("https://canvas.school.edu", "", False),
+    ("https://canvas.school.edu", "canvas.other.edu", False),
+    ("https://127.0.0.1", "127.0.0.1", False),
+])
+def test_installer_uses_plain_custom_domain_confirmation_before_network(
+        world, base, confirmation, allowed):
+    env_path = world["home"].parent / "tree" / "helper" / "env"
+    env_path.write_text(
+        "CANVAS_BASE=%s\nLOGIN_HELPER_PORT=18911\n"
+        "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=%s\n" % (base, confirmation))
+    proc = _run(world, 0)
+    out = proc.stdout + proc.stderr
+    if allowed:
+        assert proc.returncode == 0, out
+        assert "helper healthy" in out, out
+        assert base in world["curl_log"].read_text()
+    else:
+        assert proc.returncode != 0, out
+        assert "FAIL tenant" in out, out
+        assert not world["curl_log"].exists(), "invalid tenant reached curl"
 
 
 def test_the_sign_in_notice_names_the_pinned_port(world):

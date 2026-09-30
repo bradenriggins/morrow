@@ -100,6 +100,18 @@ function respond(socket: WebSocket, onCommand: (command: BridgeCommand) => void)
   });
 }
 
+it("returns a structured not-sent result for an unavailable operation without contacting the Bridge", async () => {
+  const runtime = await start();
+  let commands = 0;
+  respond(sockets.at(-1)!, () => { commands += 1; });
+  for (const name of ["canvas_no_such_operation", "untrusted\noperation"]) {
+    const result = await runtime.call(name, {});
+    expect(result).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "operation_unavailable" } });
+    expect(JSON.stringify(result)).not.toContain(name);
+  }
+  expect(commands).toBe(0);
+});
+
 function privateAttachment() {
   const bytes = Buffer.from("private Moodle resource\n", "utf8");
   return {

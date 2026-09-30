@@ -229,7 +229,7 @@ describe("Canvas course-summary Full MCP exposure", () => {
       const thin = await gateway.call("canvas_get_course_gradebook_summary", { course_id: COURSE_ID, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
       const thinText = JSON.stringify(thin);
       expect(thin.isError).toBe(true);
-      expect(thinText).toContain("privacy_output_refused");
+      expect(thinText).toContain("canvas_get_course_gradebook_summary_invalid");
       for (const privateValue of ["Jane Canvas", "private grading comment", '"below_60":1', '"90_and_above":9', "score_distribution"]) {
         expect(thinText, `refusal leaked ${privateValue}`).not.toContain(privateValue);
       }
@@ -239,7 +239,7 @@ describe("Canvas course-summary Full MCP exposure", () => {
       const mismatched = await gateway.call("canvas_get_assignment_submission_summary", { course_id: COURSE_ID, assignment_id: "9", _morrow: { source_binding_id: SOURCE_BINDING_ID } });
       const mismatchedText = JSON.stringify(mismatched);
       expect(mismatched.isError).toBe(true);
-      expect(mismatchedText).toContain("privacy_output_refused");
+      expect(mismatchedText).toContain("canvas_get_assignment_submission_summary_invalid");
       expect(mismatchedText).not.toContain("submission_count");
 
       const disallowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_course_gradebook_summary", arguments: { course_id: COURSE_ID, _morrow: { source_binding_id: "canvas:wrong-course" } } } });

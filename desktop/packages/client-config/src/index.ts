@@ -45,6 +45,31 @@ export type SupportedMorrowClient = typeof SUPPORTED_MORROW_CLIENTS[number];
 export const MORROW_CLIENT_SCOPES = Object.freeze(["project", "user"] as const);
 export type MorrowClientScope = typeof MORROW_CLIENT_SCOPES[number];
 
+export interface MorrowClientRoute {
+  readonly id: string;
+  readonly generation: string;
+}
+
+export const MORROW_ROUTE_ENVIRONMENT = Object.freeze({
+  id: "MORROW_ROUTE_ID",
+  generation: "MORROW_ROUTE_GENERATION",
+});
+
+function exactRoute(value: unknown): MorrowClientRoute | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const route = value as Record<string, unknown>;
+  if (Object.keys(route).sort().join(",") !== "generation,id"
+    || typeof route.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(route.id)
+    || typeof route.generation !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(route.generation)) return null;
+  return { id: route.id, generation: route.generation };
+}
+
+function clientEnvironment(input: { upstreamConfigPath: string; route?: MorrowClientRoute }): Record<string, string> {
+  return { MORROW_UPSTREAMS_FILE: input.upstreamConfigPath,
+    ...(input.route ? { [MORROW_ROUTE_ENVIRONMENT.id]: input.route.id,
+      [MORROW_ROUTE_ENVIRONMENT.generation]: input.route.generation } : {}) };
+}
+
 export const MORROW_CLIENT_REFUSAL_CODES = Object.freeze([
   "client_scope_unsupported",
   "client_platform_unsupported",
@@ -146,6 +171,7 @@ export interface ClientConfigBundleOptions {
   readonly startupTimeoutSeconds?: number;
   readonly toolTimeoutSeconds?: number;
   readonly geminiTimeoutMilliseconds?: number;
+  readonly route?: MorrowClientRoute;
 }
 
 export interface ClientConfigFile {
@@ -161,7 +187,7 @@ export interface ClientConfigBundle {
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;
-  readonly environmentNames: readonly ["MORROW_UPSTREAMS_FILE"];
+  readonly environmentNames: readonly string[];
   readonly files: readonly ClientConfigFile[];
 }
 
@@ -304,6 +330,7 @@ function codexConfig(input: {
   serverEntryPath: string;
   workspaceRoot: string;
   upstreamConfigPath: string;
+  route?: MorrowClientRoute;
   startupTimeoutSeconds: number;
   toolTimeoutSeconds: number;
 }): string {
@@ -312,7 +339,7 @@ function codexConfig(input: {
     `command = ${tomlString(input.command)}`,
     `args = ${tomlStringArray([input.serverEntryPath])}`,
     `cwd = ${tomlString(input.workspaceRoot)}`,
-    `env = { MORROW_UPSTREAMS_FILE = ${tomlString(input.upstreamConfigPath)} }`,
+    `env = { ${Object.entries(clientEnvironment(input)).map(([key, value]) => `${key} = ${tomlString(value)}`).join(", ")} }`,
     `startup_timeout_sec = ${input.startupTimeoutSeconds}`,
     `tool_timeout_sec = ${input.toolTimeoutSeconds}`,
     'default_tools_approval_mode = "writes"',
@@ -326,6 +353,7 @@ function claudeConfig(input: {
   serverEntryPath: string;
   workspaceRoot: string;
   upstreamConfigPath: string;
+  route?: MorrowClientRoute;
 }): string {
   return jsonFile({
     mcpServers: {
@@ -334,9 +362,7 @@ function claudeConfig(input: {
         command: input.command,
         args: [input.serverEntryPath],
         cwd: input.workspaceRoot,
-        env: {
-          MORROW_UPSTREAMS_FILE: input.upstreamConfigPath,
-        },
+        env: clientEnvironment(input),
       },
     },
   });
@@ -348,6 +374,7 @@ function geminiConfig(input: {
   serverEntryPath: string;
   workspaceRoot: string;
   upstreamConfigPath: string;
+  route?: MorrowClientRoute;
   timeoutMilliseconds: number;
 }): string {
   return jsonFile({
@@ -356,9 +383,7 @@ function geminiConfig(input: {
         command: input.command,
         args: [input.serverEntryPath],
         cwd: input.workspaceRoot,
-        env: {
-          MORROW_UPSTREAMS_FILE: input.upstreamConfigPath,
-        },
+        env: clientEnvironment(input),
         timeout: input.timeoutMilliseconds,
         trust: false,
       },
@@ -376,6 +401,7 @@ function cursorConfig(input: {
   command: string;
   serverEntryPath: string;
   upstreamConfigPath: string;
+  route?: MorrowClientRoute;
 }): string {
   return jsonFile({
     mcpServers: {
@@ -383,9 +409,7 @@ function cursorConfig(input: {
         type: "stdio",
         command: input.command,
         args: [input.serverEntryPath],
-        env: {
-          MORROW_UPSTREAMS_FILE: input.upstreamConfigPath,
-        },
+        env: clientEnvironment(input),
       },
     },
   });
@@ -401,6 +425,7 @@ function vsCodeConfig(input: {
   serverEntryPath: string;
   workspaceRoot: string;
   upstreamConfigPath: string;
+  route?: MorrowClientRoute;
 }): string {
   return jsonFile({
     servers: {
@@ -409,9 +434,7 @@ function vsCodeConfig(input: {
         command: input.command,
         args: [input.serverEntryPath],
         cwd: input.workspaceRoot,
-        env: {
-          MORROW_UPSTREAMS_FILE: input.upstreamConfigPath,
-        },
+        env: clientEnvironment(input),
       },
     },
   });
@@ -422,8 +445,11 @@ function installPosix(input: {
   command: string;
   serverEntryPath: string;
   upstreamConfigPath: string;
+  route?: MorrowClientRoute;
 }): string {
-  const environment = `MORROW_UPSTREAMS_FILE=${input.upstreamConfigPath}`;
+  const entries = Object.entries(clientEnvironment(input)).map(([key, value]) => `${key}=${value}`);
+  const environment = entries.map(posixQuote).join(" ");
+  const geminiEnvironment = entries.map((entry) => `-e ${posixQuote(entry)}`).join(" ");
   return [
     "#!/usr/bin/env sh",
     "set -eu",
@@ -431,8 +457,8 @@ function installPosix(input: {
     "# Use `morrow mcp install <client> --scope project` for safe project configuration writes.",
     "# ChatGPT, the Codex CLI, and the Codex IDE extension read ~/.codex/config.toml, which is what codex mcp add writes.",
     "# For ChatGPT, use `morrow mcp install codex --scope user`. A project .codex/config.toml loads only in a project you have marked trusted.",
-    `claude mcp add ${posixQuote(input.serverName)} --scope project --env ${posixQuote(environment)} -- ${posixQuote(input.command)} ${posixQuote(input.serverEntryPath)}`,
-    `gemini mcp add --scope project -e ${posixQuote(environment)} ${posixQuote(input.serverName)} ${posixQuote(input.command)} ${posixQuote(input.serverEntryPath)}`,
+    `claude mcp add ${posixQuote(input.serverName)} --scope project --env ${environment} -- ${posixQuote(input.command)} ${posixQuote(input.serverEntryPath)}`,
+    `gemini mcp add --scope project ${geminiEnvironment} ${posixQuote(input.serverName)} ${posixQuote(input.command)} ${posixQuote(input.serverEntryPath)}`,
     "",
   ].join("\n");
 }
@@ -442,16 +468,19 @@ function installPowerShell(input: {
   command: string;
   serverEntryPath: string;
   upstreamConfigPath: string;
+  route?: MorrowClientRoute;
 }): string {
-  const environment = `MORROW_UPSTREAMS_FILE=${input.upstreamConfigPath}`;
+  const entries = Object.entries(clientEnvironment(input)).map(([key, value]) => `${key}=${value}`);
+  const environment = entries.map(powershellQuote).join(" ");
+  const geminiEnvironment = entries.map((entry) => `-e ${powershellQuote(entry)}`).join(" ");
   return [
     "$ErrorActionPreference = 'Stop'",
     "",
     "# Use `morrow mcp install <client> --scope project` for safe project configuration writes.",
     "# ChatGPT, the Codex CLI, and the Codex IDE extension read ~/.codex/config.toml, which is what codex mcp add writes.",
     "# For ChatGPT, use `morrow mcp install codex --scope user`. A project .codex/config.toml loads only in a project you have marked trusted.",
-    `claude mcp add ${powershellQuote(input.serverName)} --scope project --env ${powershellQuote(environment)} -- ${powershellQuote(input.command)} ${powershellQuote(input.serverEntryPath)}`,
-    `gemini mcp add --scope project -e ${powershellQuote(environment)} ${powershellQuote(input.serverName)} ${powershellQuote(input.command)} ${powershellQuote(input.serverEntryPath)}`,
+    `claude mcp add ${powershellQuote(input.serverName)} --scope project --env ${environment} -- ${powershellQuote(input.command)} ${powershellQuote(input.serverEntryPath)}`,
+    `gemini mcp add --scope project ${geminiEnvironment} ${powershellQuote(input.serverName)} ${powershellQuote(input.command)} ${powershellQuote(input.serverEntryPath)}`,
     "",
   ].join("\n");
 }
@@ -460,6 +489,7 @@ function readme(input: {
   serverName: string;
   repositoryRoot: string;
   upstreamConfigPath: string;
+  route?: MorrowClientRoute;
 }): string {
   return [
     `Morrow client bundle for ${input.serverName}`,
@@ -547,7 +577,10 @@ export function buildClientConfigBundle(
     "geminiTimeoutMilliseconds",
   );
 
+  const route = options.route === undefined ? undefined : exactRoute(options.route);
+  if (options.route !== undefined && !route) throw new TypeError("invalid installed client route");
   const shared = {
+    ...(route ? { route } : {}),
     serverName,
     command,
     serverEntryPath,
@@ -581,7 +614,7 @@ export function buildClientConfigBundle(
     command,
     args: [serverEntryPath],
     cwd: workspaceRoot,
-    environmentNames: ["MORROW_UPSTREAMS_FILE"],
+    environmentNames: Object.keys(clientEnvironment(shared)),
     files: baseFiles.map((entry) => ({
       path: entry.path,
       sha256: entry.sha256,
@@ -597,7 +630,7 @@ export function buildClientConfigBundle(
     command,
     args: [serverEntryPath],
     cwd: workspaceRoot,
-    environmentNames: ["MORROW_UPSTREAMS_FILE"],
+    environmentNames: Object.keys(clientEnvironment(shared)),
     files,
   };
 }
@@ -1306,7 +1339,7 @@ function serverEntry(
       command: bundle.command,
       args: [...bundle.args],
       cwd: bundle.cwd,
-      env: { MORROW_UPSTREAMS_FILE: exactAbsolutePath(upstreamConfigPath || "", "upstreamConfigPath") },
+      env: tomlObject(codexMcpServer(parseCodexToml("generated configuration", codexSection(bundle)), bundle.serverName, "generated configuration"), "generated entry").env,
     };
   }
   const { file: name, container } = CLIENT_JSON[client];
@@ -2070,6 +2103,23 @@ export function morrowServerEntryArguments(
   return Array.isArray(args) && args.every((value) => typeof value === "string") ? [...args] as string[] : null;
 }
 
+/** The installed route carried by Morrow's own entry, or null when absent or malformed. */
+export function morrowServerEntryRoute(
+  clientValue: SupportedMorrowClient,
+  content: string,
+  serverName = "morrow",
+): MorrowClientRoute | null {
+  const client = exactClient(clientValue);
+  try {
+    const entry = client === "codex"
+      ? codexMcpServer(parseCodexToml("assistant configuration", content), serverName, "assistant configuration")
+      : clientJsonServers("assistant configuration", parseClientJson("assistant configuration", content), CLIENT_JSON[client].container)[serverName];
+    if (!isMorrowServerEntry(entry)) return null;
+    const env = (entry as Record<string, unknown>).env as Record<string, unknown> | undefined;
+    return exactRoute({ id: env?.[MORROW_ROUTE_ENVIRONMENT.id], generation: env?.[MORROW_ROUTE_ENVIRONMENT.generation] });
+  } catch { return null; }
+}
+
 /**
  * Reads one supported client configuration without changing it and verifies
  * the exact Morrow server entry. Unrelated client settings do not affect the
@@ -2199,7 +2249,7 @@ export function buildClientParityReport(options: ClientConfigBundleOptions): Cli
     const equivalent = entry.command === bundle.command
       && JSON.stringify(entry.args) === JSON.stringify(bundle.args)
       && pinned && entry.cwd === bundle.cwd
-      && JSON.stringify(entry.env) === JSON.stringify({ MORROW_UPSTREAMS_FILE: options.upstreamConfigPath });
+      && JSON.stringify(entry.env) === JSON.stringify(clientEnvironment(options));
     return {
       client,
       command: String(entry.command),

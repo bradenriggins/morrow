@@ -32,6 +32,14 @@ function catalog(id: string, tools: {
 }
 
 describe("source catalogs", () => {
+  it("refuses a missing or invalid tool schema instead of widening input admission", () => {
+    for (const inputSchema of [undefined, null, "invalid", [], 42, { type: "array" }]) {
+      expect(() => buildSourceCatalog({ id: "fixture", label: "Fixture", kind: "synthetic" },
+        [{ name: "fixture_read", inputSchema: inputSchema as any }])).toThrow(/schema/i);
+    }
+    expect(buildSourceCatalog({ id: "fixture", label: "Fixture", kind: "synthetic" },
+      [{ name: "fixture_read", inputSchema: {} }]).tools[0]!.inputSchema).toEqual({ type: "object" });
+  });
   it("builds a timestamp-independent digest and verifies it on parse", () => {
     const first = buildSourceCatalog({
       id: "meridian",

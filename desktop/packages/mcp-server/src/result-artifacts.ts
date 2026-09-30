@@ -6,12 +6,14 @@ export const MAX_INLINE_RESULT_CHARACTERS = 64_000;
 export const MAX_RESULT_ARTIFACT_CHARACTERS = 2_000_000;
 export const MAX_RESULT_ARTIFACTS = 16;
 export const MAX_RESULT_PAGE_CHARACTERS = 16_000;
+const ACTIVE_PAGE_IDLE_MS = 10 * 60_000;
 
 interface ResultArtifact {
   readonly handle: string;
   readonly text: string;
   readonly sha256: string;
   audience?: string;
+  protectedUntil?: number;
 }
 
 export interface ResultArtifactPage {
@@ -128,6 +130,21 @@ export class ResultArtifactStore {
       };
     }
 
+    while (this.artifacts.size >= MAX_RESULT_ARTIFACTS) {
+      const available = [...this.artifacts.entries()].find(([, artifact]) => (artifact.protectedUntil ?? 0) <= Date.now());
+      if (!available) return {
+        isError: true,
+        content: [{ type: "text", text: "Morrow received a large result, but all saved result slots are being read. Finish one saved result before requesting another large read." }],
+        structuredContent: {
+          schema: "morrow.problem.v1",
+          code: "result_artifact_capacity",
+          maximumArtifacts: MAX_RESULT_ARTIFACTS,
+          detailDigest: sha256Text(text),
+        },
+        ...(gatewayMeta ? { _meta: structuredClone(gatewayMeta) } : {}),
+      };
+      this.artifacts.delete(available[0]);
+    }
     const handle = `result:${randomUUID()}`;
     const artifact: ResultArtifact = {
       handle,
@@ -135,11 +152,6 @@ export class ResultArtifactStore {
       sha256: sha256Text(text),
     };
     this.artifacts.set(handle, artifact);
-    while (this.artifacts.size > MAX_RESULT_ARTIFACTS) {
-      const oldest = this.artifacts.keys().next().value;
-      if (typeof oldest !== "string") break;
-      this.artifacts.delete(oldest);
-    }
 
     return {
       content: [{
@@ -180,7 +192,7 @@ export class ResultArtifactStore {
 
   page(handle: string, offset?: number, limit?: number, audience?: string): ResultArtifactPage {
     const artifact = this.artifacts.get(handle);
-    if (!artifact) throw new Error("Morrow could not find the requested result artifact");
+    if (!artifact) throw new Error("This saved result expired. Request a fresh read to get it again.");
     if (artifact.audience && audience !== artifact.audience) {
       throw new Error("Morrow could not authorize the requested result artifact");
     }
@@ -189,6 +201,9 @@ export class ResultArtifactStore {
     const maximum = exactLimit(limit);
     const text = serialized.slice(start, start + maximum);
     const nextOffset = start + text.length < serialized.length ? start + text.length : null;
+    artifact.protectedUntil = nextOffset === null ? 0 : Date.now() + ACTIVE_PAGE_IDLE_MS;
+    this.artifacts.delete(handle);
+    this.artifacts.set(handle, artifact);
     return {
       schema: "morrow.result-page.v1",
       handle: artifact.handle,

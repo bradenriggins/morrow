@@ -23,56 +23,91 @@
 export const VERSION_MISMATCH_RECOVERY = "Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.";
 
 const COPY = {
+  course_access_account_required: {
+    title: "This action needs Account access",
+    detail: "This action applies to the learning account and cannot be limited to selected courses. Morrow sent nothing.",
+    action: "Choose Account access in the Morrow Bridge popup to use it.",
+  },
+  course_access_account_scope: {
+    title: "Account access covers this course",
+    detail: "Disconnecting one course would conflict with the account access you chose.",
+    action: "Choose Selected courses in the Morrow Bridge popup to limit access to specific courses.",
+  },
+  course_access_mode_invalid: {
+    title: "Choose a course access mode",
+    detail: "Morrow accepts Selected courses or Account access.",
+    action: "Choose one of those modes in the Morrow Bridge popup.",
+  },
+  course_access_sender_refused: {
+    title: "Use Morrow Bridge's access controls",
+    detail: "This request did not come from Morrow Bridge's own setup controls.",
+    action: "Open the Morrow Bridge popup and choose Course access there.",
+  },
+  account_course_limit_reached: {
+    title: "Account access could not include every course",
+    detail: "Morrow supports up to 500 courses in this connection. Your earlier access scope was kept.",
+    action: "Use Selected courses and choose the courses for your work.",
+  },
   // --- Connecting Morrow, Chrome and a learning platform ---------------------------------------------
   bridge_not_connected: {
     title: "Morrow is not running on this computer",
     detail: "Morrow Bridge asked the Morrow app on this computer to start a connection, and nothing answered.",
-    action: "Open the Morrow app, then select Connect Morrow again.",
+    action: "Open the Morrow app, then select Pair Morrow again.",
   },
   bridge_pairing_refused: {
     title: "Morrow answered but did not start a connection",
     detail: "The Morrow app on this computer answered Morrow Bridge, and it did not start a new connection.",
-    action: "Quit and reopen the Morrow app, then select Connect Morrow again.",
+    action: "Quit and reopen the Morrow app, then select Pair Morrow again.",
   },
   bridge_pairing_folder_unconfirmed: {
     title: "Morrow could not confirm this copy of Morrow Bridge",
     detail: "Morrow connects only the Morrow Bridge that Chrome loaded from the folder Morrow set up on this computer, and this copy did not prove it came from that folder.",
-    action: "In the Morrow app, select Show Bridge folder. Load that folder with Load unpacked on the Chrome extensions page, then select Connect Morrow again.",
+    action: "In the Morrow app, select Show Bridge folder. Load that folder with Load unpacked on the Chrome extensions page, then select Pair Morrow again.",
   },
   bridge_pairing_sender_refused: {
-    title: "Connect Morrow was not started from Morrow Bridge",
-    detail: "Morrow Bridge starts a connection only when you select Connect Morrow in its popup or its setup guide.",
-    action: "Open the Morrow Bridge popup and select Connect Morrow.",
+    title: "Pair Morrow was not started from Morrow Bridge",
+    detail: "Morrow Bridge starts a connection only when you select Pair Morrow in its popup or its setup guide.",
+    action: "Open the Morrow Bridge popup and select Pair Morrow.",
   },
   bridge_reconnect_sender_refused: {
     title: "Connection check was not started from Morrow Bridge",
     detail: "Only the Morrow Bridge popup can retry its saved connection to Morrow.",
     action: "Open the Morrow Bridge popup and select Check connection.",
   },
+  bridge_takeover_sender_refused: {
+    title: "Moving Morrow to this profile was not started from Morrow Bridge",
+    detail: "Morrow moves its connection to this Chrome profile only when you select Use Morrow in this profile in the Morrow Bridge popup or its setup guide.",
+    action: "Open the Morrow Bridge popup and select Use Morrow in this profile.",
+  },
+  bridge_not_paired: {
+    title: "Morrow Bridge is not connected to Morrow in this profile yet",
+    detail: "This Chrome profile has no saved connection to Morrow, so there is no connection to move here.",
+    action: "Connect this profile first: select Pair Morrow in the Morrow Bridge popup, then choose Use Morrow in this profile if Morrow is still in another profile.",
+  },
   bridge_pairing_response_timeout: {
     title: "Morrow did not answer in time",
     detail: "Morrow Bridge reached the Morrow app on this computer, and the app did not finish answering in time, so nothing was connected.",
-    action: "Check that the Morrow app is open and responding, then select Connect Morrow again.",
+    action: "Check that the Morrow app is open and responding, then select Pair Morrow again.",
   },
   bridge_pairing_response_interrupted: {
-    title: "Connect Morrow stopped before it finished",
+    title: "Pair Morrow stopped before it finished",
     detail: "Morrow Bridge was disconnected, or course data use was no longer accepted, while it waited for the Morrow app, so nothing was connected.",
-    action: "Select Connect Morrow again when you want Morrow Bridge to connect.",
+    action: "Select Pair Morrow again when you want Morrow Bridge to connect.",
   },
   bridge_pairing_response_invalid: {
-    title: "Morrow Bridge could not read the answer to Connect Morrow",
+    title: "Morrow Bridge could not read the answer to Pair Morrow",
     detail: "The answer from the Morrow app's address on this computer is not in the form this Morrow Bridge uses, so nothing was connected. The Morrow app may be a different version, or another program may be answering at that address.",
-    action: "Quit and reopen the Morrow app, then select Connect Morrow again. If this continues, follow the Morrow Bridge step in the Morrow app.",
+    action: "Quit and reopen the Morrow app, then select Pair Morrow again. If this continues, follow the Morrow Bridge step in the Morrow app.",
   },
   bridge_pairing_response_too_large: {
-    title: "The answer to Connect Morrow was too large to come from Morrow",
+    title: "The answer to Pair Morrow was too large to come from Morrow",
     detail: "The answer from the Morrow app's address on this computer was far larger than Morrow's answer, so Morrow Bridge stopped reading it and connected nothing. Another program may be answering at that address.",
-    action: "Restart your computer, open the Morrow app, then select Connect Morrow again.",
+    action: "Restart your computer, open the Morrow app, then select Pair Morrow again.",
   },
   bridge_pairing_superseded: {
-    title: "A newer Connect Morrow replaced this one",
-    detail: "Connect Morrow was selected again, or Morrow Bridge was disconnected, while this one waited for the Morrow app. Morrow Bridge keeps only the newest request, so this one connected nothing.",
-    action: "Open the Morrow Bridge popup to see whether Morrow is connected. If it is not, select Connect Morrow once.",
+    title: "A newer Pair Morrow replaced this one",
+    detail: "Pair Morrow was selected again, or Morrow Bridge was disconnected, while this one waited for the Morrow app. Morrow Bridge keeps only the newest request, so this one connected nothing.",
+    action: "Open the Morrow Bridge popup to see whether Morrow is connected. If it is not, select Pair Morrow once.",
   },
   bridge_version_mismatch: {
     title: "Morrow and Morrow Bridge versions do not match",
@@ -117,32 +152,32 @@ const COPY = {
   course_tab_missing: {
     title: "No signed-in course tab is open here",
     detail: "Morrow connects the signed-in Canvas or Moodle course that is open in front of you, and this Chrome window has none.",
-    action: "Open the signed-in Canvas or Moodle course that Morrow should use. The Morrow Bridge popup then shows Connect this course.",
+    action: "Open the signed-in Canvas or Moodle course that Morrow should use. The Morrow Bridge popup then shows Pair Canvas account.",
   },
   course_site_access_required: {
     title: "Chrome has not given Morrow access to this Canvas or Moodle address",
     detail: "Morrow reads and changes only the Canvas or Moodle addresses you allow in Chrome, and this one is not allowed yet.",
-    action: "Select Connect this course in the Morrow Bridge popup, then choose Allow in Chrome.",
+    action: "Select Pair Canvas account in the Morrow Bridge popup, then choose Allow in Chrome.",
   },
   course_sign_in_required: {
     title: "This tab is not a signed-in course",
     detail: "Morrow could not find a signed-in Canvas or Moodle course in this tab.",
-    action: "Open a Canvas or Moodle course and sign in. The Morrow Bridge popup then shows Connect this course.",
+    action: "Open a Canvas or Moodle course and sign in. The Morrow Bridge popup then shows Pair Canvas account.",
   },
   course_permission_denied: {
     title: "Chrome did not give Morrow access to this Canvas or Moodle address",
     detail: "The Chrome access request was answered with no, so nothing is connected.",
-    action: "Select Connect this course again, then choose Allow in Chrome.",
+    action: "Select Pair Canvas account again, then choose Allow in Chrome.",
   },
   course_permission_prompt_missing: {
     title: "Chrome did not show its access request",
     detail: "Chrome never displayed the access request, so Morrow received no answer.",
-    action: "Close this popup and open it again on the signed-in course. Then select Connect this course.",
+    action: "Close this popup and open it again on the signed-in course. Then select Pair Canvas account.",
   },
   course_connection_superseded: {
     title: "Another course connection replaced this one",
-    detail: "Connect this course started again, or Morrow was disconnected, before this course finished connecting, so Morrow did not connect it.",
-    action: "Open the course you want in Chrome, then select Connect this course in the Morrow Bridge popup once.",
+    detail: "Pair Canvas account started again, or Morrow was disconnected, before this course finished connecting, so Morrow did not connect it.",
+    action: "Open the course you want in Chrome, then select Pair Canvas account in the Morrow Bridge popup once.",
   },
   blackboard_browser_unsupported: {
     title: "Morrow does not connect Blackboard through Chrome",
@@ -184,7 +219,7 @@ const COPY = {
   edit_policy_binding_missing: {
     title: "This course is no longer connected",
     detail: "The course this action names is not one of the courses connected in this Chrome session.",
-    action: "Refresh this page. If the course is still missing, open it in Canvas or Moodle and select Connect this course in the Morrow Bridge popup.",
+    action: "Refresh this page. If the course is still missing, open it in Canvas or Moodle and select Pair Canvas account in the Morrow Bridge popup.",
   },
   edit_policy_binding_stale: {
     title: "This course connection needs a signed-in tab again",
@@ -224,7 +259,7 @@ const COPY = {
   course_discovery_anchor_missing: {
     title: "No connected learning platform is selected",
     detail: "Morrow lists available courses from a signed-in Canvas or Moodle site, and this site is no longer connected.",
-    action: "Open a course on that site, select Connect this course in the Morrow Bridge popup, then select Refresh connected courses.",
+    action: "Open a course on that site, select Pair Canvas account in the Morrow Bridge popup, then select Refresh connected courses.",
   },
   course_discovery_anchor_stale: {
     title: "This learning platform needs a signed-in tab again",

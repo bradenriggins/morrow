@@ -47,7 +47,7 @@ Usage:
                                                # at first sign-in (keepalive
                                                # runs this; refused during a
                                                # re-auth halt)
-  state_machine.py pin --confirm-account "..." # educator-confirmed pin for
+  state_machine.py pin --confirm-account "yes" # educator-confirmed pin for
                                                # an install with no pin
   state_machine.py resume [--principal-id <id>]  # production recovery after
                                                # manual re-sign-in via the
@@ -105,6 +105,7 @@ _TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE_ROOT not in sys.path:
     sys.path.insert(0, _TREE_ROOT)
 from config.paths import morrow_home  # noqa: E402
+from config.consent import explicit_nonapproval  # noqa: E402
 
 STORE_DIR = morrow_home()
 STATE_PATH = os.path.join(STORE_DIR, "reauth_state.json")
@@ -886,8 +887,7 @@ def op_quarantine_status(op_id):
 
 # W6-P2-A5: the re-approval citation bar, matching the admission
 # ceremony's APPROVAL_AUTH_MIN_LEN (the state machine must not import
-# the dispatcher; the value is mirrored, not shared). Any non-empty
-# verbatim reply counts: "yes" is an approval.
+# the dispatcher; the value is mirrored, not shared). Explicit denial and uncertainty do not authorize re-dispatch.
 _REAPPROVAL_AUTH_MIN_LEN = 1
 
 
@@ -900,7 +900,7 @@ def approve_op(op_id, authorization=None):
     whose newest quarantine status is not 'approved'.
 
     W6-P2-A5: `authorization` is REQUIRED: the educator's verbatim
-    words approving THIS op's re-dispatch (any non-empty reply), sealed into
+    words approving THIS op's re-dispatch (a non-empty approving reply), sealed into
     the ledger entry. The old signature let the agent "approve" a
     quarantined op with no educator input at all; the whole
     "explicit approval" loop was agent-self-certified. A short or
@@ -914,8 +914,10 @@ def approve_op(op_id, authorization=None):
             or len(authorization.strip()) < _REAPPROVAL_AUTH_MIN_LEN):
         raise ValueError(
             "approve_op requires the educator's verbatim reply approving "
-            "the re-dispatch of this op (any non-empty reply); the agent "
+            "the re-dispatch of this op (a non-empty approving reply); the agent "
             "cannot self-approve a quarantined op")
+    if explicit_nonapproval(authorization):
+        raise ValueError("approve_op refuses an explicit denial or uncertain reply")
     changed = False
     with _ledger_locked():
         tmp = QUAR_PATH + ".mutate"
@@ -978,7 +980,7 @@ class PrincipalPinError(Exception):
 
 
 PIN_AUDIT_PATH_NAME = "principal_pin.json"
-PIN_CONFIRM_MIN_LEN = 1
+PIN_CONFIRM_REPLY = "yes"
 
 
 def _lane_state_module():
@@ -1040,11 +1042,17 @@ def pin_principal(base, principal_id, principal_name, first_signin=False,
     - No pin and no write halt (first_signin=True): the first sign-in
       is the educator's own onboarding, so it is pinned.
     - No pin during a write halt: pinning whoever signed back in would
-      defeat the check, so it needs the educator's verbatim confirming
-      words (confirmation, any non-empty reply).
+      defeat the check, so it needs the educator's explicit reply "yes"
+      to a question naming the signed-in account and school.
     """
     if principal_id in (None, ""):
         raise PrincipalPinError("no principal id to pin")
+    confirmed = (isinstance(confirmation, str)
+                 and confirmation.strip().casefold() == PIN_CONFIRM_REPLY)
+    if confirmation is not None and not confirmed:
+        raise PrincipalPinError(
+            'account confirmation requires the educator to reply "yes" '
+            'to the named signed-in account and school; no account was pinned')
     current = pinned_principal()
     lane = _lane_state_module()
     if current is not None:
@@ -1058,20 +1066,16 @@ def pin_principal(base, principal_id, principal_name, first_signin=False,
         name = str(principal_name or current.get("name") or "").strip()
         lane.save(current.get("base") or base, current["id"], name)
         return pinned_principal()
-    confirmed = (isinstance(confirmation, str)
-                 and len(confirmation.strip()) >= PIN_CONFIRM_MIN_LEN)
     if is_write_halted() and not confirmed:
         raise PrincipalPinError(
             "no Canvas account is pinned and paused work is waiting on a "
             "re-sign-in, so the signed-in account cannot be pinned "
             "automatically. The educator must confirm it is their own "
-            "account: state_machine.py pin --confirm-account \"<their "
-            "own words>\"")
+            'account and school: state_machine.py pin --confirm-account "yes"')
     if not first_signin and not confirmed:
         raise PrincipalPinError(
             "pinning needs either the first sign-in (--first-signin) or "
-            "the educator's confirming words (--confirm-account, any "
-            "non-empty reply)")
+            'the educator\'s explicit reply "yes" (--confirm-account "yes")')
     if not base:
         raise PrincipalPinError("no Canvas base URL to pin against")
     lane.save(base, principal_id, str(principal_name or "").strip())
@@ -1138,9 +1142,9 @@ _NO_PIN_RECOVERY = (
     "REFUSED: no Canvas account is pinned for this connector, so there is "
     "no way to prove the account that signed back in is the educator's. "
     "The write halt stays and paused work stays paused. Recovery: the "
-    "educator confirms, in their own words, that the signed-in account "
-    "is theirs; then run state_machine.py pin --confirm-account "
-    "\"<their words>\" and run resume again.")
+    'educator replies "yes" after checking the named signed-in account '
+    'and school; then run state_machine.py pin --confirm-account '
+    '"yes" and run resume again.')
 
 
 def verified_resume_after_manual_signin(principal_id, principal_name="",
@@ -1698,12 +1702,12 @@ def cmd_pin():
     """Pin the signed-in Canvas account (first sign-in, or recovery).
 
       state_machine.py pin --first-signin      # keepalive / FIRST_RUN step 4
-      state_machine.py pin --confirm-account "<educator's own words>"
+      state_machine.py pin --confirm-account "yes"
 
     --first-signin is quiet and succeeds when the same account is
     already pinned. It refuses during a re-auth halt (it would pin
     whoever signed back in). --confirm-account records the educator's
-    verbatim confirmation that the signed-in account is theirs.
+    explicit reply "yes" to the named signed-in account and school.
     """
     first = "--first-signin" in sys.argv
     confirmation = _arg("--confirm-account", None)

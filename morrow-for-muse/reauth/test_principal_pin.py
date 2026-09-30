@@ -121,6 +121,26 @@ def test_educator_confirmation_recovers_unpinned_install(home):
     assert rsm.op_quarantine_status(op) == "awaiting_approval"
 
 
+@pytest.mark.parametrize("reply", ["no", "not mine", "cancel", "maybe", "yes, but not this account", "", "  ", True, 1, ["yes"]])
+@pytest.mark.parametrize("first_signin", [False, True])
+def test_negative_or_uncertain_confirmation_never_pins(home, reply, first_signin):
+    op = _halt_with_op()
+    with pytest.raises(rsm.PrincipalPinError):
+        rsm.pin_principal(BASE, 777, "Edu T. Or", first_signin=first_signin,
+                          confirmation=reply)
+    assert rsm.pinned_principal() is None
+    assert rsm.check_write_allowed()[0] is False
+    assert rsm.op_quarantine_status(op) == "quarantined"
+
+
+@pytest.mark.parametrize("reply", ["no", "not mine", "maybe", ""])
+def test_explicit_refusal_cannot_be_overridden_by_first_signin(home, reply):
+    with pytest.raises(rsm.PrincipalPinError):
+        rsm.pin_principal(BASE, 777, "Edu T. Or", first_signin=True,
+                          confirmation=reply)
+    assert rsm.pinned_principal() is None
+
+
 @pytest.mark.parametrize("damage", ["loose_mode", "corrupt", "unreadable"])
 def test_damaged_pin_fails_closed(home, damage, capsys):
     rsm.pin_principal(BASE, 777, "Edu T. Or", first_signin=True)

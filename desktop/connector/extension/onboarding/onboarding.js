@@ -6,6 +6,8 @@ const consentAction = document.querySelector("#consent-action");
 const consentDetail = document.querySelector("#consent-detail");
 const dataDisclosure = document.querySelector("#data-disclosure");
 const setupContent = document.querySelector("#setup-content");
+const courseAccessMode = document.querySelector("#course-access-mode");
+const courseAccessHelp = document.querySelector("#course-access-help");
 const quickMode = document.querySelector("#quick-mode");
 const guidePanel = document.querySelector("#guide-panel");
 const quickPanel = document.querySelector("#quick-panel");
@@ -17,6 +19,7 @@ const nextTitle = document.querySelector("#next-title");
 const nextDetail = document.querySelector("#next-detail");
 const openSettings = document.querySelector("#open-settings");
 const reconnectMorrow = document.querySelector("#reconnect-morrow");
+const takeOverMorrow = document.querySelector("#take-over-morrow");
 const quickOpenSettings = document.querySelector("#quick-open-settings");
 const error = document.querySelector("#error");
 
@@ -27,6 +30,7 @@ let refreshTimer = null;
 let readGeneration = 0;
 let consentInFlight = false;
 let lastConsentRequired = null;
+let accessInFlight = false;
 
 // Every failure the service worker answers carries its own code, and this guide keeps that code as
 // the error it raises, so the page can name the state and the next action.
@@ -48,6 +52,11 @@ function render(status) {
   setupContent.hidden = consentRequired;
   consentAction.disabled = consentInFlight;
   if (consentRequired) return;
+  courseAccessMode.value = status?.courseAccessMode === "account" ? "account" : "selected";
+  courseAccessMode.disabled = accessInFlight || !status;
+  courseAccessHelp.textContent = courseAccessMode.value === "account"
+    ? "Ask your assistant to work in any course this account can access. Give it a course name, course ID, or course link. Plan and Edit still control changes."
+    : "Morrow can use only the courses you allow. Choose them once in Plan and Edit settings.";
   const state = setupGuideState(status);
   statusDot.classList.toggle("ready", state.tone === "ready");
   statusDot.classList.toggle("waiting", state.tone === "waiting");
@@ -58,6 +67,7 @@ function render(status) {
   nextDetail.textContent = state.detail;
   openSettings.hidden = !state.canOpenSettings;
   reconnectMorrow.hidden = !state.canReconnect;
+  takeOverMorrow.hidden = !state.canTakeOver;
 }
 
 // The cause reaches the page, not only the console: one code becomes what happened, why, and the
@@ -86,6 +96,22 @@ async function saveMode(mode) {
   setMode(mode);
   await chrome.storage.local.set({ [SETUP_MODE_KEY]: mode });
 }
+
+courseAccessMode.addEventListener("change", async () => {
+  if (accessInFlight) return;
+  accessInFlight = true;
+  courseAccessMode.disabled = true;
+  try {
+    await message("morrow_course_access_set", { mode: courseAccessMode.value });
+    await refresh();
+  } catch (cause) {
+    await refresh();
+    showError(cause);
+  } finally {
+    accessInFlight = false;
+    courseAccessMode.disabled = false;
+  }
+});
 
 // A status read reaches the course tab, so a slow one can still be open when the next starts. The
 // newest read owns the page: an earlier answer never replaces a later one.
@@ -140,6 +166,20 @@ reconnectMorrow.addEventListener("click", async () => {
     showError(cause);
   } finally {
     reconnectMorrow.disabled = false;
+  }
+});
+// Another Chrome profile holds the Morrow connection. This moves it here, in the one step the
+// person selects; the other profile then waits.
+takeOverMorrow.addEventListener("click", async () => {
+  takeOverMorrow.disabled = true;
+  try {
+    await message("morrow_bridge_takeover");
+    clearError();
+    await refresh();
+  } catch (cause) {
+    showError(cause);
+  } finally {
+    takeOverMorrow.disabled = false;
   }
 });
 quickOpenSettings.addEventListener("click", () => { void chrome.runtime.openOptionsPage(); });

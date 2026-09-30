@@ -585,7 +585,7 @@ function courseRows() {
       scope: bindingScope(binding)
     };
   });
-  const availableRows = discoveryItems()
+  const availableRows = (state.status?.courseAccessMode === "account" ? [] : discoveryItems())
     .filter((course) => !boundKeys.has(courseMetaKey(course.origin, course.courseId)))
     .map((course) => ({
       kind: "available",
@@ -1217,7 +1217,7 @@ function courseDetailDomId(sourceBindingId) {
 
 /** WI-1.1, WI-5.3: the reason a "Needs attention" row needs a button instead of the D7 text. */
 function attentionRowNote(binding) {
-  if (!isEligible(binding)) return "Morrow cannot identify this course. Open it in Canvas or Moodle and select Connect this course in the Morrow Bridge popup.";
+  if (!isEligible(binding)) return "Morrow cannot identify this course. Open it in Canvas or Moodle and select Pair Canvas account in the Morrow Bridge popup.";
   if (siteClosed(binding)) return `${providerName(binding)} is closed. Morrow Bridge can open it for you.`;
   return "";
 }
@@ -1310,9 +1310,10 @@ function renderCourseDetail(binding, isOpen) {
       ${listHtml}
       <div class="course-detail-links">
         <button type="button" class="secondary" data-open-customize="1">Customize</button>
-        <button type="button" class="secondary danger-action" data-disconnect="1" aria-label="${escapeHtml(courseSelectionAccessibleName(binding, "Disconnect"))}" ${state.busy ? "disabled" : ""}>Disconnect</button>
+        ${state.status?.courseAccessMode === "account" ? "" : `<button type="button" class="secondary danger-action" data-disconnect="1" aria-label="${escapeHtml(courseSelectionAccessibleName(binding, "Disconnect"))}" ${state.busy ? "disabled" : ""}>Disconnect</button>`}
       </div>
-      ${state.confirmingDisconnect === binding.sourceBindingId ? `
+      ${state.status?.courseAccessMode === "account" ? '<p class="field-help">Account access includes this course. To limit access to specific courses, choose Selected courses in the Morrow Bridge popup.</p>' : ""}
+      ${state.status?.courseAccessMode !== "account" && state.confirmingDisconnect === binding.sourceBindingId ? `
       <div class="course-disconnect-confirm" role="group" aria-label="Confirm disconnecting ${escapeHtml(courseName(binding))}">
         <p>Disconnect ${escapeHtml(courseName(binding))}? Morrow stops reading and changing this course, and its Edit access is removed. Your course in ${escapeHtml(providerName(binding))} is not changed. You can connect it again from this list.</p>
         <div class="action-buttons">
@@ -1387,7 +1388,7 @@ function renderCourseList(focus = courseFocusToRestore()) {
           <p>Open a course in Canvas or Moodle. Morrow Bridge finds it.</p>
           <button id="open-platform-empty" type="button" ${state.openPlatformBusy ? 'disabled aria-busy="true"' : ""}>${escapeHtml(openPlatformLabel(anchor, state.openPlatformProgressVisible))}</button>
         </div>`
-      : '<p class="state-message">Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Connect this course, and allow access when Chrome asks.</p>';
+      : '<p class="state-message">Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Pair Canvas account, and allow access when Chrome asks.</p>';
   } else if (!limited.length) {
     courseList.innerHTML = state.filters.q.trim() || state.filters.platform !== "all" || state.filters.term !== "all" || state.filters.scope !== "all"
       ? `<p class="state-message">No course matches this search or filter. Clear it to view every course in this list.</p>`
@@ -1593,8 +1594,10 @@ function renderOpenPlatformSetting() {
 }
 
 async function refreshOpenPlatformSetting() {
+  if (state.openPlatformSettingBusy) return;
   try {
     const stored = await chrome.storage.local.get(OPEN_PLATFORM_WHEN_NEEDED_KEY);
+    if (state.openPlatformSettingBusy) return;
     state.openPlatformWhenNeeded = stored[OPEN_PLATFORM_WHEN_NEEDED_KEY] !== false;
   } catch {
     state.openPlatformWhenNeeded = true;
@@ -1603,13 +1606,15 @@ async function refreshOpenPlatformSetting() {
 }
 
 async function setOpenPlatformWhenNeeded(value) {
+  const previous = state.openPlatformWhenNeeded;
+  state.openPlatformWhenNeeded = value;
   state.openPlatformSettingBusy = true;
   renderOpenPlatformSetting();
   try {
     await chrome.storage.local.set({ [OPEN_PLATFORM_WHEN_NEEDED_KEY]: value });
     state.openPlatformWhenNeeded = value;
   } catch {
-    await refreshOpenPlatformSetting();
+    state.openPlatformWhenNeeded = previous;
   } finally {
     state.openPlatformSettingBusy = false;
     renderOpenPlatformSetting();
@@ -2163,7 +2168,7 @@ function discoveryAnchor(siteAnchorId) {
  * WI-5.3 shows the result inline, under "Not connected", in the one merged course list.
  */
 async function autoStartDiscovery() {
-  if (state.busy) return;
+  if (state.busy || state.status?.courseAccessMode === "account") return;
   const pending = anchors().filter((anchor) => !state.discoveries.has(anchor.siteAnchorId) && !state.discoveryFailed.has(anchor.siteAnchorId));
   if (!pending.length) return;
   setBusy(true);
@@ -2525,12 +2530,22 @@ courseList.addEventListener("change", (event) => {
 
 // Refresh connected courses also reads every site's list of available courses again, including a
 // list that could not be read before.
-refreshButton.addEventListener("click", () => {
+refreshButton.addEventListener("click", async () => {
   clearError();
   clearNotice();
   state.discoveries.clear();
   state.discoveryFailed.clear();
-  void refresh();
+  if (state.status?.courseAccessMode === "account") {
+    setBusy(true);
+    try {
+      await request("morrow_course_access_set", { mode: "account" });
+    } catch (cause) {
+      showError(cause);
+    } finally {
+      setBusy(false);
+    }
+  }
+  await refresh();
 });
 returnPlanButton.addEventListener("click", () => void returnToPlan(selectedBindings()));
 askFirstAllCoursesButton.addEventListener("click", () => void returnToPlan(activeEditBindings(), { doneMessage: "Done. Morrow asks first in all courses." }));

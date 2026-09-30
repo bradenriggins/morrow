@@ -129,7 +129,7 @@ await import("../../connector/extension/src/service-worker.js");
 await new Promise((resolve) => setImmediate(resolve));
 assert.equal(typeof messageHandler, "function");
 
-function send(message, sender = {}) {
+function send(message, sender = { id: EXTENSION_ID, url: `${CATALOG_PREFIX}popup/popup.html` }) {
   return new Promise((resolve, reject) => {
     if (messageHandler(message, sender, resolve) !== true) reject(new Error(`no response for ${message.type}`));
   });

@@ -32,6 +32,16 @@ afterEach(() => {
 });
 
 describe("Canvas connector startup", () => {
+  it("validates Edit action binding IDs before calling the runtime", async () => {
+    const tools = registeredTools();
+    const schema = tools.get("morrow_browser_edit_options")!.inputSchema;
+    for (const source_binding_id of ["binding-42", "canvas:tenant.course_42@user"]) {
+      expect((await schema["~standard"].validate({ source_binding_id })).issues).toBeFalsy();
+    }
+    for (const source_binding_id of ["", "binding 42", "binding/42", "binding\n42", "é", "a".repeat(161)]) {
+      expect((await schema["~standard"].validate({ source_binding_id })).issues, source_binding_id).toBeTruthy();
+    }
+  });
   // Every connection builds the server again, and the packaged catalog has more
   // than a thousand tools. Compiling each input validator up front held the
   // first connection for seconds; a tool's validator is built when it is used.

@@ -237,6 +237,8 @@ describe("Canvas connector gateway path", () => {
     let pendingSubmissionReviewResponse: Promise<void> | null = null;
     let submissionReviewResponseError: unknown = null;
     let partialQuiz = false;
+    let partialRoster = false;
+    const rosterRequests: JsonObject[] = [];
     let filteredPage = false;
     let pagePlanOperationId = "";
     let pageContentGuard: JsonObject;
@@ -301,12 +303,15 @@ describe("Canvas connector gateway path", () => {
             });
           }
         }
+        if (partialRoster && command.toolName === "canvas_list_users_in_course_users") rosterRequests.push(command.arguments);
+        const rosterContinued = isJsonObject(command.arguments.morrow_list_resume) && command.arguments.morrow_list_resume.next_page === "current-roster-page-token";
         const browserResult = {
           schema: "morrow.canvas-browser-result.v1",
           ok: true,
           sent: true,
           status: 200,
-          truncated: partialQuiz && command.toolName === "canvas_list_quiz_items",
+          truncated: (partialQuiz && command.toolName === "canvas_list_quiz_items") || (partialRoster && command.toolName === "canvas_list_users_in_course_users" && !rosterContinued),
+          ...(partialRoster && command.toolName === "canvas_list_users_in_course_users" ? { morrow_pages_read: rosterContinued ? 51 : 50, ...(!rosterContinued ? { morrow_next_page: "current-roster-page-token" } : {}) } : {}),
           ...(command.toolName === "canvas_show_page_courses" ? { pageBodySha256: sha256Text(lesson.body) } : {}),
           data: command.toolName === "canvas_show_page_courses" ? { ...lesson, body: filteredPage ? "[filtered]" : lesson.body }
             : command.toolName === "canvas_show_revision_courses_latest" ? { revision_id: "1", latest: true, url: lesson.url, title: lesson.title, body: lesson.body }
@@ -316,7 +321,8 @@ describe("Canvas connector gateway path", () => {
               : command.toolName === "canvas_list_quiz_items"
                 ? command.arguments.assignment_id === "77" ? quizItems : [{ ...quizItems[3], id: "8" }]
               : command.toolName === "canvas_list_users_in_course_users"
-                ? learnerLeftCourse ? [] : [{ id: "9001", name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }]
+                ? learnerLeftCourse || (partialRoster && !rosterContinued) ? [] : [{ id: "9001", name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }]
+              : command.toolName === "canvas_list_enrollments_courses" ? []
               : command.toolName === "canvas_get_single_submission_courses"
                 ? { user_id: "9001", assignment_id: "88", workflow_state: "unsubmitted" }
               : command.toolName === "canvas_get_single_user"
@@ -1075,6 +1081,66 @@ describe("Canvas connector gateway path", () => {
       expect(JSON.stringify(entityPlan)).toContain("HTML character reference");
       expect(writeCommands).toBe(2);
       lesson.body = originalLessonBody;
+    }, CASE_TIMEOUT_MS);
+
+    it("continues a large-course privacy roster through the full MCP boundary", async () => {
+      const writesBefore = writeCommands;
+      const originalLessonBody = lesson.body;
+      partialRoster = true;
+      rosterRequests.length = 0;
+      lesson.body = "<p>Jane Doe submitted this example.</p>";
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client({ name: "morrow-roster-continuation", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+      try {
+        await client.connect(clientTransport);
+        const result = await client.callTool({ name: "morrow_capability_read", arguments: {
+          name: "canvas_show_page_courses", arguments: {
+            course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: sourceBindingId },
+          },
+        } });
+        const serialized = JSON.stringify(result);
+        expect(result.isError, serialized).not.toBe(true);
+        expect(serialized).toMatch(/Student A[1-9][0-9]*/);
+        expect(serialized).not.toMatch(/Jane Doe|jane.doe@example.edu|9001/);
+        expect(rosterRequests.length).toBeGreaterThanOrEqual(2);
+        for (let index = 0; index < rosterRequests.length; index += 2) {
+          expect(rosterRequests[index]!.morrow_list_resume).toEqual({});
+          expect(rosterRequests[index + 1]!.morrow_list_resume).toEqual({ next_page: "current-roster-page-token" });
+        }
+        expect(writeCommands).toBe(writesBefore);
+      } finally {
+        partialRoster = false;
+        lesson.body = originalLessonBody;
+        await client.close();
+        await server.close();
+      }
+    }, CASE_TIMEOUT_MS);
+
+    it("distinguishes a processing failure from a privacy refusal through MCP", async () => {
+      const store = Reflect.get(runtime, "resultArtifacts") as { bound: (...args: unknown[]) => unknown };
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client({ name: "morrow-processing-failure", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+      try {
+        await client.connect(clientTransport);
+        for (const [error, expectedCode] of [[new TypeError("private result store path /Users/private; Jane Doe 9001"), "morrow_result_processing_failed"], [new Error("privacy_sensitive_text_refused"), "privacy_sensitive_text_refused"]] as const) {
+          const injected = vi.spyOn(store, "bound").mockImplementationOnce(() => { throw error; });
+          try {
+            const result = await client.callTool({ name: "morrow_capability_read", arguments: {
+              name: "canvas_show_page_courses", arguments: { course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: sourceBindingId } },
+            } });
+            const serialized = JSON.stringify(result);
+            expect(result.isError).toBe(true);
+            expect(serialized).toContain(`"code":"${expectedCode}"`);
+            expect(serialized).not.toMatch(/Jane Doe|9001|Users\/private|TypeError/);
+            if (expectedCode === "morrow_result_processing_failed") {
+              expect(serialized).not.toContain("learner privacy boundary");
+              expect(serialized).toContain("operation status");
+            } else expect(serialized).toContain("learner privacy boundary");
+          } finally { injected.mockRestore(); }
+        }
+      } finally { await client.close(); await server.close(); }
     }, CASE_TIMEOUT_MS);
 
     it("returns visible Canvas page HTML without hidden markup or signed setting URLs", async () => {

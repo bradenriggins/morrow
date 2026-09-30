@@ -2,6 +2,17 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
+## 1.0.8 (2026-09-29)
+
+This candidate includes Morrow Bridge 1.0.127. It is not published. Native platform evidence is recorded separately from source checks.
+
+- Pair Canvas or Moodle accounts once. Choose Selected courses to keep a course limit, or Account access to work across available courses. Switching modes keeps the pairing. Site-wide actions require Account access. New courses start in Plan; Edit permission stays separate.
+- Give your assistant course names, course IDs, or course links. Account access refreshes courses automatically and supports up to 500 courses.
+- Restore closed course tabs, keep two Chrome profiles from replacing each other without a user action, and handle cancelled or interrupted requests without repeating a change.
+- Confirm each assistant through its own current setup route. Preserve assistant settings through retries and protect configuration backups from file races.
+- Bound Bridge messages and privacy roster continuations. Keep learner protection failures distinct from processing failures, and keep active result pages available.
+- Improve narrow setup screens, connection guidance, and setting feedback. Keep credentialed Item Bank execution isolated from page scripts.
+
 ## 1.0.7 (2026-09-25)
 
 This Mac release includes the unsigned `Morrow-1.0.7-mac-arm64.dmg` and `Morrow-1.0.7-mac-arm64.zip`, with Morrow Bridge 1.0.126. Windows remains on the published 1.0.5 installer; there is no Windows 1.0.7 installer or native Windows 1.0.7 smoke receipt.

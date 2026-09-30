@@ -757,6 +757,8 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
         cwd: paths.workspaceRoot,
         env: {
           ...process.env,
+          MORROW_ROUTE_ID: "",
+          MORROW_ROUTE_GENERATION: "",
           MORROW_UPSTREAMS_FILE: paths.upstreamsPath,
           ...(testTraceLauncher ? { MORROW_LOCAL_OWNER_TEST_STDERR_PATH: testTraceLauncher.ownerStderrPath } : {}),
         },
@@ -860,7 +862,15 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
   };
 
   const runMaintenance = async ({ action, holderPid }) => {
-    if ((action !== "acquire" && action !== "release" && action !== "commit") || !validPid(holderPid)) {
+    if ((action !== "acquire" && action !== "release" && action !== "commit" && action !== "routes") || !validPid(holderPid)) {
+      return maintenanceResult(action, "unavailable");
+    }
+    if (action === "routes") {
+      try {
+        const { requestLocalOwnerMaintenance } = await maintenanceModules(paths.serverEntryPath);
+        const result = await requestLocalOwnerMaintenance({ action, journalPath: paths.journalPath, workspaceRoot: paths.workspaceRoot, holderPid });
+        if (result.status === "routes") return { ...maintenanceResult(action, "routes"), routes: result.routes };
+      } catch {}
       return maintenanceResult(action, "unavailable");
     }
     if (action === "acquire") {

@@ -499,9 +499,12 @@ export function normalizeSourceId(value: unknown): string {
 
 export function normalizeInputSchema(value: unknown): JsonSchema {
   if (!isJsonObject(value)) {
-    return { type: "object", properties: {}, additionalProperties: true };
+    throw new TypeError("tool input schema must be an object");
   }
   const schema = structuredClone(value);
+  if (schema.type !== undefined && schema.type !== "object") {
+    throw new TypeError("tool input schema must describe an object");
+  }
   if (schema.type === undefined) {
     schema.type = "object";
   }

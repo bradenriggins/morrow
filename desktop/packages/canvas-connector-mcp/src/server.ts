@@ -1,5 +1,5 @@
 import { McpServer, fromJsonSchema as validateJsonSchema } from "@modelcontextprotocol/server";
-import { augmentBridgeInputSchema } from "@morrow/bridge-protocol";
+import { augmentBridgeInputSchema, BRIDGE_BINDING_ID_PATTERN } from "@morrow/bridge-protocol";
 import { canvasCatalogTools } from "@morrow/canvas-api-catalog";
 import { isJsonObject, type JsonObject, type JsonSchema } from "@morrow/contracts";
 import * as z from "zod/v4";
@@ -341,7 +341,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
   registerTool("morrow_browser_edit_options", {
     title: "Show course Edit actions",
     description: "Read the current individual Edit and Review-only actions for one exact saved browser course connection.",
-    inputSchema: z.strictObject({ source_binding_id: z.string().min(1).max(160) }),
+    inputSchema: z.strictObject({ source_binding_id: z.string().regex(BRIDGE_BINDING_ID_PATTERN) }),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (input) => toolResult(await runtime.editOptions(input.source_binding_id)));
   registerTool("morrow_browser_edit_policy_set", {

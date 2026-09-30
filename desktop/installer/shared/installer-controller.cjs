@@ -162,7 +162,9 @@ const ASSISTANT_CONFIG_READ_LIMIT = 4 * 1024 * 1024;
 const INSTALLER_RECORD_READ_LIMIT = 64 * 1024;
 const ASSISTANT_REMOVAL_READ_LIMIT = 16 * 1024;
 const ASSISTANT_REMOVAL_SCHEMA = "morrow.assistant-removal.v1";
-const ASSISTANT_CONNECTION_SCHEMA = "morrow.assistant-connections.v1";
+const ASSISTANT_CONNECTION_SCHEMA = "morrow.assistant-connections.v3";
+// Three proofs, one per assistant other than Claude Desktop, each naming two paths of up to 4096 characters, fit well inside this.
+const ASSISTANT_CONNECTION_READ_LIMIT = 64 * 1024;
 const CLAUDE_GENERATION_TRANSITION_READ_LIMIT = 64 * 1024;
 const CLAUDE_GENERATION_TRANSITION_SCHEMA = "morrow.claude-generation-transition.v1";
 const CLAUDE_SETUP_ROOT_LIMIT = 128;
@@ -170,9 +172,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const OPERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 async function readConfigurationFile(file) {
-  const info = await fs.lstat(file).then((value) => value, () => null);
-  if (!info || !info.isFile() || info.isSymbolicLink() || info.size > ASSISTANT_CONFIG_READ_LIMIT) return null;
-  return fs.readFile(file);
+  return require("./runtime.cjs").readAssistantConfiguration(file);
 }
 
 function sameBridgeChallenge(record, response) {
@@ -447,6 +447,25 @@ function exactObject(value, keys) {
 function canonicalAbsolutePath(value) {
   return typeof value === "string" && value.length > 0 && value.length <= 4096
     && !value.includes("\0") && path.isAbsolute(value) && path.normalize(value) === value;
+}
+
+/**
+ * One assistant's connection proof, or null. It names the configuration
+ * generation and materials folder the connection was observed with, so a
+ * later rewrite of either leaves it naming something that is no longer there.
+ */
+function connectionProof(value) {
+  if (!exactObject(value, ["id", "target", "sha256", "materialsFolder"])) return null;
+  if (value.id === "claude-desktop" || !ASSISTANTS.some((assistant) => assistant.id === value.id)) return null;
+  if (!canonicalAbsolutePath(value.target) || !canonicalAbsolutePath(value.materialsFolder)
+    || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
+  return { id: value.id, target: value.target, sha256: value.sha256, materialsFolder: value.materialsFolder };
+}
+
+/** Whether a proof was observed with exactly this configuration entry and materials folder. */
+function provesConnection(proof, assistantId, entry, materials) {
+  return proof.id === assistantId && typeof materials === "string" && proof.materialsFolder === materials
+    && proof.target === entry?.target && proof.sha256 === entry?.sha256 && Boolean(entry?.route);
 }
 
 function installerRecordDigest(record, home) {
@@ -1762,6 +1781,7 @@ class InstallerController {
       return true;
     };
     try {
+      const route = { id: crypto.randomUUID(), generation: crypto.randomBytes(32).toString("base64url") };
       const argumentsValue = [
         "mcp", "install", assistant.id === "claude-code" ? "claude" : assistant.id === "gemini-cli" ? "gemini" : assistant.id,
         "--scope", assistant.needsProject ? "project" : "user",
@@ -1769,7 +1789,9 @@ class InstallerController {
         "--upstreams", this.paths.upstreams,
         "--node", this.paths.node,
         "--server-entry", this.paths.server,
-        "--workspace-root", materials
+        "--workspace-root", materials,
+        "--route-id", route.id,
+        "--route-generation", route.generation
       ];
       if (project) argumentsValue.push("--client-project", project);
       argumentsValue.push("--replace-morrow-entry", "--json");
@@ -1777,7 +1799,10 @@ class InstallerController {
       const content = await readConfigurationFile(target);
       if (!content) throw errorDetails("assistant_configuration_changed");
       installedConfigurationSha256 = fileHash(content);
-      const entry = { target, sha256: installedConfigurationSha256 };
+      const module = await this.clientConfigModule();
+      const writtenRoute = module.morrowServerEntryRoute(assistant.id, content.toString("utf8"), MORROW_SERVER_NAME);
+      if (writtenRoute?.id !== route.id || writtenRoute?.generation !== route.generation) throw errorDetails("assistant_configuration_changed");
+      const entry = { target, sha256: installedConfigurationSha256, route };
       if (options.updateRecord !== false) {
         const updated = await this.record();
         await this.writeRecord({
@@ -2668,7 +2693,7 @@ class InstallerController {
     this.dataRemovalGuard = guard;
     if (!await this.confirmDataRemoval(parent, removable, kept, entries, bridgeLoaded)) {
       await this.releaseDataRemovalGuard(guard);
-      this.dataRemoval = { schema: DATA_REMOVAL_SCHEMA, status: "cancelled", removed: [], remaining: [], kept: keptPaths };
+      this.dataRemoval = { schema: DATA_REMOVAL_SCHEMA, status: "cancelled", removed: [], remaining: removable.map((location) => location.path), kept: keptPaths };
       return this.dataRemoval;
     }
     const stoppedGuard = await this.stopRuntimeForDataRemoval(guard);
@@ -3180,7 +3205,8 @@ class InstallerController {
         nodeCommand: this.paths.node,
         serverEntryPath: this.paths.server,
         workspaceRoot: materials,
-        serverName: MORROW_SERVER_NAME
+        serverName: MORROW_SERVER_NAME,
+        ...(entry.route ? { route: entry.route } : {})
       });
       return status?.path === entry.target && status.configured === true;
     } catch {
@@ -3189,28 +3215,30 @@ class InstallerController {
   }
 
   /**
-   * The assistants whose own Morrow session has reached the runtime since they
-   * were last set up. A file Morrow cannot read counts as none observed, so the
-   * restart step is shown again rather than skipped.
+   * The connection proofs Morrow recorded, each bound to the configuration
+   * generation and materials folder it was observed with. A file Morrow cannot
+   * read, or one an earlier Morrow wrote without that evidence, proves nothing,
+   * so the restart step is shown again rather than skipped.
    */
-  async connectedAssistantIds() {
+  async assistantConnectionProofs() {
     try {
       const content = await readPrivateRegularFile(this.assistantConnectionPath, {
-        maxBytes: 4 * 1024,
+        maxBytes: ASSISTANT_CONNECTION_READ_LIMIT,
         trustedRoot: this.paths.state,
       });
       const parsed = parseStrictJson(content, "assistant connection record");
       if (!exactObject(parsed, ["schema", "assistants"]) || parsed.schema !== ASSISTANT_CONNECTION_SCHEMA
-        || !Array.isArray(parsed.assistants)) return new Set();
-      return new Set(parsed.assistants.filter((id) => ASSISTANTS.some((assistant) => assistant.id === id)));
+        || !Array.isArray(parsed.assistants)) return [];
+      const proofs = parsed.assistants.map(connectionProof);
+      return proofs.every(Boolean) && new Set(proofs.map((proof) => proof.id)).size === proofs.length ? proofs : [];
     } catch {
-      return new Set();
+      return [];
     }
   }
 
-  async writeConnectedAssistantIds(ids) {
+  async writeAssistantConnectionProofs(proofs) {
     await this.ensureInstallerStateDirectory();
-    const assistants = ASSISTANTS.map((assistant) => assistant.id).filter((id) => ids.has(id));
+    const assistants = ASSISTANTS.flatMap((assistant) => proofs.filter((proof) => proof.id === assistant.id));
     const temporary = `${this.assistantConnectionPath}.tmp-${crypto.randomUUID()}`;
     try {
       await fs.writeFile(temporary, `${JSON.stringify({ schema: ASSISTANT_CONNECTION_SCHEMA, assistants })}\n`, { mode: 0o600, flag: "wx" });
@@ -3223,34 +3251,47 @@ class InstallerController {
 
   /** Setting an assistant up again means it must be restarted again. */
   async forgetAssistantConnection(assistantId) {
-    const ids = await this.connectedAssistantIds();
-    if (!ids.delete(assistantId)) return;
-    await this.writeConnectedAssistantIds(ids);
+    const proofs = await this.assistantConnectionProofs();
+    const kept = proofs.filter((proof) => proof.id !== assistantId);
+    if (kept.length === proofs.length) return;
+    await this.writeAssistantConnectionProofs(kept);
   }
 
-  /**
-   * Checks whether an assistant's own Morrow session is connected. The runtime
-   * grants its maintenance lease only while Morrow's own monitor is its sole
-   * client, so a refusal naming another client, or a request from one, is that
-   * session. A granted lease is released at once and means none is connected.
-   * The runtime cannot say which assistant it is, so every assistant configured
-   * now is recorded.
-   */
+  /** Records only installed routes observed in live sessions in this materials folder. */
   async checkAssistantConnection() {
     const refused = this.maintenanceAdmission();
     if (refused) throw errorDetails(refused);
-    const lease = await this.acquireRestartLease();
-    if (lease?.status === "granted") {
-      await this.releaseRestartLease(lease.leaseId);
-      throw errorDetails("assistant_not_connected");
+    const record = await this.record();
+    const materials = await this.effectiveWorkspace(record);
+    const monitor = await this.runtimeMonitorFor(materials);
+    if (!monitor || !materials) throw errorDetails("assistant_connection_unconfirmed");
+    await monitor.start();
+    const observation = await monitor.maintenance({ action: "routes", holderPid: process.pid });
+    if (observation?.status !== "routes" || !Array.isArray(observation.routes)) throw errorDetails("assistant_connection_unconfirmed");
+    const proofs = [];
+    for (const assistant of await this.assistantStates(record, materials)) {
+      const entry = record.configured?.[assistant.id];
+      if (assistant.id === "claude-desktop" || assistant.configured !== true || !entry?.route) continue;
+      if (!observation.routes.some((route) => route.id === entry.route.id && route.generation === entry.route.generation)) continue;
+      const content = await readConfigurationFile(entry.target);
+      const module = await this.clientConfigModule();
+      const route = content && module.morrowServerEntryRoute(assistant.id, content.toString("utf8"), MORROW_SERVER_NAME);
+      if (route?.id !== entry.route.id || route?.generation !== entry.route.generation) continue;
+      proofs.push({ id: assistant.id, target: entry.target, sha256: entry.sha256, materialsFolder: materials });
     }
-    if (lease?.reason !== "local_owner_other_client_connected" && lease?.reason !== "local_owner_request_in_flight") {
+    if (proofs.length === 0) throw errorDetails(observation.routes.length === 0 ? "assistant_not_connected" : "assistant_connection_unconfirmed");
+    try {
+      const configured = record.configured;
+      const kept = (await this.assistantConnectionProofs())
+        .filter((earlier) => !proofs.some((proof) => proof.id === earlier.id) && provesConnection(earlier, earlier.id, configured[earlier.id], materials));
+      await this.writeAssistantConnectionProofs([...kept, ...proofs]);
+    } catch {
       throw errorDetails("assistant_connection_unconfirmed");
     }
-    const record = await this.record();
-    const ids = await this.connectedAssistantIds();
-    for (const id of Object.keys(record.configured || {})) ids.add(id);
-    await this.writeConnectedAssistantIds(ids);
+    const recorded = await this.assistantConnectionProofs();
+    if (!proofs.every((proof) => recorded.some((observed) => provesConnection(observed, proof.id, record.configured[proof.id], materials)))) {
+      throw errorDetails("assistant_connection_unconfirmed");
+    }
     return true;
   }
 
@@ -3274,6 +3315,48 @@ class InstallerController {
   }
 
   /**
+   * What setup knows about each assistant: whether Morrow is set up there now,
+   * and whether that setup's own session connected since Morrow last wrote it.
+   */
+  async assistantStates(record, materials) {
+    const configured = record.configured && typeof record.configured === "object" ? record.configured : {};
+    const proofs = await this.assistantConnectionProofs();
+    return Promise.all(ASSISTANTS.map(async (assistant) => {
+      const entry = configured[assistant.id];
+      let statusUnavailable = false;
+      const unavailable = (fallback) => { statusUnavailable = true; return fallback; };
+      // Claude Desktop is configured once its connection receipt is present and
+      // bound to this installation. Whether Claude is open right now is a
+      // separate fact, `claude.running`, and closing Claude must not make a
+      // configured assistant look unconfigured.
+      const claude = assistant.id === "claude-desktop" && entry
+        ? await inspectClaudeDesktopConnection(entry, { platform: this.platform, homeDirectory: this.home }).catch(() => unavailable(null))
+        : null;
+      const present = claude ? claude.installed === true : await this.assistantConfigurationPresent(assistant, entry, materials).catch(() => unavailable(false));
+      const moved = !claude && present !== true && await this.assistantEntryMoved(assistant, entry);
+      const projectFolder = entry && assistant.needsProject ? configuredProject(assistant, this.home, entry.target)?.project ?? null : null;
+      const detected = await this.detectedAssistant(assistant).catch(() => unavailable(false));
+      return {
+        moved,
+        ...assistant,
+        projectFolder,
+        projectFolderMissing: projectFolder !== null && !await projectFolderPresent(projectFolder),
+        detected,
+        statusUnavailable,
+        configured: present,
+        routeReady: assistant.id === "claude-desktop" || Boolean(entry?.route),
+        // Claude Desktop counts as configured only after its session connected.
+        connected: present === true && (assistant.id === "claude-desktop"
+          || proofs.some((proof) => provesConnection(proof, assistant.id, entry, materials))),
+        pending: assistant.id === "claude-desktop" && entry && present !== true,
+        checking: claude?.checking === true,
+        selected: record.selectedAssistantId === assistant.id,
+        needsWorkspace: true
+      };
+    }));
+  }
+
+  /**
    * Everything setup shows. `recheckAssistants` is the person selecting Check
    * status: it drops the cached detection answers so this read looks at the
    * computer again. Every other read, including the one on window focus, uses
@@ -3286,35 +3369,7 @@ class InstallerController {
     catch { return repairRequiredState(this.updateSnapshot()); }
     const materials = await this.effectiveWorkspace(record);
     const complete = await this.ensureRuntime().then(() => true, () => false);
-    const configured = record.configured && typeof record.configured === "object" ? record.configured : {};
-    const connectedIds = await this.connectedAssistantIds();
-    const assistants = await Promise.all(ASSISTANTS.map(async (assistant) => {
-      const entry = configured[assistant.id];
-      // Claude Desktop is configured once its connection receipt is present and
-      // bound to this installation. Whether Claude is open right now is a
-      // separate fact, `claude.running`, and closing Claude must not make a
-      // configured assistant look unconfigured.
-      const claude = assistant.id === "claude-desktop" && entry
-        ? await inspectClaudeDesktopConnection(entry, { platform: this.platform, homeDirectory: this.home })
-        : null;
-      const present = claude ? claude.installed === true : await this.assistantConfigurationPresent(assistant, entry, materials);
-      const moved = !claude && present !== true && await this.assistantEntryMoved(assistant, entry);
-      const projectFolder = entry && assistant.needsProject ? configuredProject(assistant, this.home, entry.target)?.project ?? null : null;
-      return {
-        moved,
-        ...assistant,
-        projectFolder,
-        projectFolderMissing: projectFolder !== null && !await projectFolderPresent(projectFolder),
-        detected: await this.detectedAssistant(assistant),
-        configured: present,
-        // Claude Desktop counts as configured only after its session connected.
-        connected: present === true && (assistant.id === "claude-desktop" || connectedIds.has(assistant.id)),
-        pending: assistant.id === "claude-desktop" && entry && present !== true,
-        checking: claude?.checking === true,
-        selected: record.selectedAssistantId === assistant.id,
-        needsWorkspace: true
-      };
-    }));
+    const assistants = await this.assistantStates(record, materials);
     // An explicit Check status action must return the state that this check
     // observed. Passive window reads stay non-blocking and may show the last
     // completed observation while the next bounded refresh runs.

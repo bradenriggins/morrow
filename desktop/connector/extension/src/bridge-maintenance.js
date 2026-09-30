@@ -261,6 +261,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
       await queueStorage(async () => {
         const entries = await receiptLedger();
         if (entries.some((entry) => entry.operationId === operationId || entry.effectReceiptId === effectReceiptId)) fail("bridge_maintenance_write_duplicate");
+        if (entries.length >= MAX_RECEIPTS) fail("bridge_maintenance_receipts_capacity");
         await chromeApi.storage.local.set({ [RECEIPTS_KEY]: [...entries, { operationId, effectReceiptId, state: "pending" }] });
       });
     } catch (error) {
@@ -310,7 +311,17 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     inMemoryFence = { quiesceEpoch, state: "admitting" };
     try {
       if (await loadFence()) fail("bridge_quiesce_active");
-      const entries = await receiptLedger();
+      const entries = await queueStorage(async () => {
+        const prior = await receiptLedger();
+        if (!prior.some((entry) => entry.state === "pending")) return prior;
+        // Admission is fenced and this worker has no active writes. A persisted
+        // pending entry belongs to an interrupted worker, whose outcome is unknown.
+        const recovered = prior.map((entry) => entry.state === "pending" ? { ...entry, state: "unknown" } : entry);
+        await beforeMutation?.();
+        try { await chromeApi.storage.local.set({ [RECEIPTS_KEY]: recovered }); }
+        catch { fail("bridge_maintenance_receipts_unavailable"); }
+        return recovered;
+      });
       // An unknown receipt is durable evidence that Morrow must not replay that
       // write. Chrome keeps it across an unpacked-extension reload, so it does
       // not represent work that can still advance in this worker. Only a

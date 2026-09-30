@@ -294,16 +294,45 @@ async function canonicalDirectory(value) {
  * the file and the time, for example config.toml.2026-09-22T10-11-12Z.bak, so
  * a person can tell which file it restores.
  */
+async function readAssistantConfiguration(file) {
+  const limit = 4 * 1024 * 1024;
+  const admitted = (info) => info?.isFile() && !info.isSymbolicLink() && info.nlink === 1
+    && info.size <= limit && (typeof process.getuid !== "function" || info.uid === process.getuid());
+  const stable = (left, right) => admitted(left) && admitted(right) && left.dev === right.dev
+    && left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
+  const before = await fs.lstat(file).catch((error) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!admitted(before)) return null;
+  const handle = await fs.open(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+  try {
+    const opened = await handle.stat();
+    if (!stable(before, opened) || !stable(opened, await fs.lstat(file))) throw new Error("assistant_configuration_changed");
+    const content = Buffer.alloc(limit + 1);
+    let length = 0;
+    while (length < content.length) {
+      const { bytesRead } = await handle.read(content, length, content.length - length, null);
+      if (!bytesRead) break;
+      length += bytesRead;
+    }
+    const after = await handle.stat();
+    if (length > limit || length !== opened.size || !stable(opened, after)
+      || !stable(after, await fs.lstat(file))) throw new Error("assistant_configuration_changed");
+    return content.subarray(0, length);
+  } finally { await handle.close(); }
+}
+
 async function captureConfiguration(file, backupRoot, now = new Date()) {
-  const present = await exists(file);
-  if (!present) return { file, backup: null, present: false };
+  const content = await readAssistantConfiguration(file);
+  if (content === null) return { file, backup: null, present: false };
   await mkdirPrivate(backupRoot);
   const stamp = now.toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "-");
   let backup = null;
   for (let attempt = 0; backup === null; attempt += 1) {
     const candidate = path.join(backupRoot, `${path.basename(file)}.${stamp}${attempt === 0 ? "" : `-${attempt}`}.bak`);
     try {
-      await fs.copyFile(file, candidate, fs.constants.COPYFILE_EXCL);
+      await fs.writeFile(candidate, content, { flag: "wx", mode: 0o600 });
       backup = candidate;
     } catch (error) {
       if (error?.code !== "EEXIST" || attempt >= 99) throw error;
@@ -326,4 +355,4 @@ async function restoreConfiguration(snapshot, expectedCurrentSha256) {
   return true;
 }
 
-module.exports = { payloadLayout, windowDataDirectory, exists, isComplete, runtimeStatus, mkdirPrivate, canonicalDirectory, captureConfiguration, restoreConfiguration, verifyMcpRuntime };
+module.exports = { payloadLayout, windowDataDirectory, exists, isComplete, runtimeStatus, mkdirPrivate, canonicalDirectory, readAssistantConfiguration, captureConfiguration, restoreConfiguration, verifyMcpRuntime };

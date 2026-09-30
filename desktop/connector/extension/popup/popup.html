@@ -20,6 +20,11 @@
     <p id="error" role="alert" hidden></p>
     <p id="status-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
     <div id="connection-content" hidden>
+      <section class="course-access" aria-labelledby="course-access-title">
+        <label id="course-access-title" for="course-access-mode">Course access</label>
+        <select id="course-access-mode"><option value="selected">Selected courses</option><option value="account">Account access</option></select>
+        <p id="course-access-help">Morrow can use only the courses you allow. Choose them once in Plan and Edit settings.</p>
+      </section>
       <section id="reviews-waiting" class="reviews-waiting" aria-labelledby="reviews-waiting-title" hidden>
         <h2 id="reviews-waiting-title">Waiting for your review</h2>
         <div id="reviews-list"></div>
@@ -38,8 +43,8 @@
         <button id="all-courses" class="secondary" type="button" hidden>All courses</button>
       </section>
       <section id="account" class="account" hidden><span id="account-label">Selected course</span><strong id="account-origin"></strong><time id="account-connected-at"></time></section>
-      <button id="primary" type="button" disabled>Connect Morrow</button>
-      <button id="canvas-action" class="secondary" type="button" hidden>Check or switch course</button>
+      <button id="primary" type="button" disabled>Pair Morrow</button>
+      <button id="canvas-action" class="secondary" type="button" hidden>Pair another account</button>
       <button id="open-platform-action" class="secondary" type="button" hidden>Open Canvas</button>
       <button id="disconnect" class="secondary" type="button" hidden>Disconnect Morrow</button>
       <p id="detail">Checking the connection…</p>
@@ -50,8 +55,8 @@
         <summary>How to connect</summary>
         <ol>
           <li><strong>Choose your assistant in Morrow.</strong> Open the Morrow app and follow the action it shows.</li>
-          <li><strong>Finish Morrow Bridge setup.</strong> Add Morrow Bridge in Chrome, review and accept the course data disclosure, and select <strong>Connect Morrow</strong>.</li>
-          <li><strong>Open and connect your course.</strong> Open a signed-in Canvas or Moodle course. Morrow Bridge detects the platform and shows <strong>Connect this course</strong>. Select that button, then choose courses in <strong>Plan and Edit settings</strong>.</li>
+          <li><strong>Finish Morrow Bridge setup.</strong> Add Morrow Bridge in Chrome, review and accept the course data disclosure, and select <strong>Pair Morrow</strong>.</li>
+          <li><strong>Pair your learning account once.</strong> Sign in to Canvas or Moodle in Chrome and open any course. Select <strong>Pair Canvas account</strong> or <strong>Pair Moodle account</strong>, then allow access to the site Chrome shows. <strong>Selected courses</strong> limits Morrow to courses you allow in Plan and Edit settings. <strong>Account access</strong> lets your assistant use the account's courses without selecting each one here. Give it course names, course IDs, or course links.</li>
         </ol>
         <p>Chrome asks for access only to the Canvas or Moodle address you connect. If Canvas New Quizzes or Item Banks is open, it may also ask for access to that quiz address.</p>
         <p>Disconnect Morrow stops this connection and removes that platform access. It does not sign you out or undo course changes.</p>

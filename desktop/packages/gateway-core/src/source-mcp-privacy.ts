@@ -156,6 +156,14 @@ function failure(): JsonObject {
   };
 }
 
+function sourceOperationFailure(): JsonObject {
+  return {
+    isError: true,
+    content: [{ type: "text", text: "Morrow could not complete this source operation. Check the operation status before another change." }],
+    structuredContent: { schema: "morrow.problem.v1", ok: false, code: "source_operation_failed", recoverable: false },
+  };
+}
+
 function bindingIdentity(binding: SourcePrivacyBinding): string {
   return JSON.stringify([binding.sourceBindingId, binding.provider, binding.courseId, binding.origin, binding.siteUrl,
     binding.principalFingerprint, binding.accountFingerprint, binding.sessionGeneration, binding.catalogDigest, binding.runtimeVerified]);
@@ -203,6 +211,14 @@ export class SourceMcpPrivacyBoundary {
     if (current.length !== 1 || bindingIdentity(current[0]!) !== bindingIdentity(binding)) throw new Error("privacy_binding_changed");
   }
 
+  private async executeHandler(
+    handler: (resolved: Record<string, unknown>) => Promise<unknown>,
+    resolved: Record<string, unknown>,
+  ): Promise<unknown> {
+    try { return await handler(resolved); }
+    catch { return sourceOperationFailure(); }
+  }
+
   async invoke(
     toolName: string,
     args: Readonly<Record<string, unknown>>,
@@ -211,7 +227,7 @@ export class SourceMcpPrivacyBoundary {
   ): Promise<JsonObject> {
     try {
       if (this.authenticated(meta)) {
-        const result = await handler({ ...args });
+        const result = await this.executeHandler(handler, { ...args });
         return isJsonObject(result) ? result : failure();
       }
       if (isJsonObject(meta) && INTERNAL_SOURCE_CAPABILITY_META in meta) return failure();
@@ -243,7 +259,7 @@ export class SourceMcpPrivacyBoundary {
       const context = await this.context(binding);
       const resolved = resolveLearnerTokens(args, this.vault, context.learnerScope, context.learnerRoster,
         sourceLearnerIdentifierFields(toolName));
-      const result = await handler(resolved);
+      const result = await this.executeHandler(handler, resolved);
       this.assertCurrent(binding);
       // Legacy donor tokens have no identity proof in this source vault.
       if (/\bStudent_[A-Za-z0-9_-]+\b/.test(JSON.stringify(result))) return failure();

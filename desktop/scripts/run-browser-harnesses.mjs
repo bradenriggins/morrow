@@ -3,10 +3,10 @@
 /**
  * Runs Morrow's browser and permission harnesses in sequence and writes one receipt.
  *
- * `pnpm scripts:test` globs `scripts/test/*.test.mjs`, so the four harnesses named here are outside
- * the always-on gate on purpose: three drive a real Chromium with the Bridge loaded, one of those
- * needs a person answering Chrome's own permission prompts, and one runs only on native Windows
- * against a built installer. This command is the named opt-in gate for them, and the receipt it
+ * `pnpm scripts:test` globs `scripts/test/*.test.mjs`, so the harnesses named here are outside
+ * the always-on gate. They drive Chromium or isolated runtime processes; one needs a person
+ * answering Chrome's own permission prompts, and one runs only on native Windows against a
+ * built installer. This command is the named opt-in gate for them, and the receipt it
  * writes is what `scripts/lib/release-candidate.mjs` reads before it calls a candidate promotable.
  *
  * Every harness reaches the receipt by name, including one this host cannot run. A harness that did
@@ -49,6 +49,21 @@ export const HARNESSES = Object.freeze([
     summary: "Loads the Bridge into Chromium and drives pairing, the popup, Settings and the setup guide against a synthetic Canvas.",
   }),
   Object.freeze({
+    id: "account_access_browser",
+    script: "scripts/test/canvas-connector-browser.mjs",
+    args: Object.freeze(["--account-access-only"]),
+    timeoutMs: 600_000,
+    attendedOnly: false,
+    summary: "Pairs one account through the real Chrome popup and reads thirty courses without a course selector, then restores Selected courses.",
+  }),
+  Object.freeze({
+    id: "bridge_recovery_first_use",
+    script: "scripts/test/bridge-recovery-first-use.mjs",
+    timeoutMs: 300_000,
+    attendedOnly: false,
+    summary: "Runs the shipped Bridge worker and loopback runtime through moved tabs, two profiles, explicit takeover and closed-course recovery.",
+  }),
+  Object.freeze({
     id: "bridge_maintenance_cft",
     script: "scripts/test/bridge-maintenance-cft.mjs",
     timeoutMs: 300_000,
@@ -61,6 +76,13 @@ export const HARNESSES = Object.freeze([
     timeoutMs: 300_000,
     attendedOnly: false,
     summary: "Renders the desktop app's setup views in Chromium at desktop and 320px widths and checks text, paths and Copy feedback fit.",
+  }),
+  Object.freeze({
+    id: "desktop_first_use",
+    script: "scripts/test/desktop-first-use.mjs",
+    timeoutMs: 300_000,
+    attendedOnly: false,
+    summary: "Runs isolated assistant setup and connection proof through the real controller and renderer at narrow and desktop widths.",
   }),
   Object.freeze({
     id: "canvas_file_optional_permission",
@@ -77,7 +99,7 @@ export const HARNESSES = Object.freeze([
     attendedOnly: false,
     summary: "Installs, starts, damages, repairs and uninstalls the Windows desktop app, then compares retained data.",
     notRunStatus: "not-run-on-this-host",
-    notRunReason: "This harness needs native Windows and a built NSIS installer, which this command does not produce. The windows-2022 job in .github/workflows/desktop-release.yml runs it on manual dispatch.",
+    notRunReason: "This harness needs native Windows and a built NSIS installer, which this command does not produce. Run desktop-windows-smoke.mjs on a Windows host with the exact installer and package receipt. GitHub Actions is disabled for this repository.",
   }),
 ]);
 
@@ -163,7 +185,7 @@ export async function runHarness(harness, { attended = false, logPath, maxLogByt
   };
   let result;
   try {
-    result = await runOwnedProcess(process.execPath, [resolve(ROOT, harness.script)], {
+    result = await runOwnedProcess(process.execPath, [resolve(ROOT, harness.script), ...(harness.args || [])], {
       workingDirectory: ROOT,
       input: attended ? "inherit" : "ignore",
       timeoutMs: harness.timeoutMs,

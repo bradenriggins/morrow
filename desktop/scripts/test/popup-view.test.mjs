@@ -41,7 +41,7 @@ const statuses = [
 // never promise one step while the click takes another.
 test("every primary label names the one action a click on it takes", () => {
   const actionFor = { "Try again": "retry", "Check connection": "retry", "Open setup guide": "open_setup", "Reconnect Morrow": "pair",
-    "Connect Morrow": "pair", "Choose courses": "choose_courses", "Waiting for your assistant": "wait", "Connect this course": "connect_course", "": "none" };
+    "Pair Morrow": "pair", "Choose courses": "choose_courses", "Waiting for your assistant": "wait", "Pair Canvas account": "connect_course", "": "none" };
   const cases = [
     ...statuses.map((status) => [status, null]),
     ...statuses.map((status) => [status, "canvas"]),
@@ -54,7 +54,7 @@ test("every primary label names the one action a click on it takes", () => {
     assert.equal(action.label, primaryLabel(status, detected), JSON.stringify(status));
     assert.equal(action.id, actionFor[action.label], `${action.label}: ${JSON.stringify(status)}`);
   }
-  // Connect Morrow pairs in one step, so no status ever waits on an approval page. A status that
+  // Pair Morrow pairs in one step, so no status ever waits on an approval page. A status that
   // still carries an older pairing flag is read by its other fields alone.
   assert.equal(primaryAction({ paired: true, pairing: true, connected: false, bindings: [], siteAnchors: [] }, "canvas").id, "retry");
 });
@@ -228,10 +228,10 @@ test("no popup text calls this product a preview", () => {
 
 test("known connection states keep their own value, label, and detail", () => {
   assert.equal(statusValue(statuses[1]), "Not connected");
-  assert.equal(primaryLabel(statuses[1]), "Connect Morrow");
+  assert.equal(primaryLabel(statuses[1]), "Pair Morrow");
   // Pairing has no waiting state: a status that still carries an older pairing flag reads as unpaired.
   assert.equal(statusValue(statuses[2]), "Not connected");
-  assert.equal(primaryLabel(statuses[2]), "Connect Morrow");
+  assert.equal(primaryLabel(statuses[2]), "Pair Morrow");
   assert.equal(controlState(statuses[2]).primaryDisabled, false);
   assert.match(detailText(statuses[1]), /Connecting does not approve changes to your courses\.$/);
   assert.equal(statusValue(statuses[3]), "Connecting…");
@@ -243,10 +243,10 @@ test("known connection states keep their own value, label, and detail", () => {
   assert.equal(courseValue(statuses[6]), "Not connected");
   assert.equal(primaryLabel(statuses[6]), "", "no platform detected: no primary action at all (WI-5.8)");
   assert.equal(controlState(statuses[6]).primaryDisabled, true);
-  assert.equal(primaryLabel(statuses[6], "canvas"), "Connect this course", "the wording never names a platform (WI-5.8)");
+  assert.equal(primaryLabel(statuses[6], "canvas"), "Pair Canvas account", "the wording never names a platform (WI-5.8)");
   assert.equal(controlState(statuses[6], { detectedProvider: "canvas" }).primaryDisabled, false);
-  assert.equal(primaryLabel(statuses[6], "moodle"), "Connect this course");
-  assert.match(detailText(statuses[6], "moodle"), /detected Moodle.*Connect this course/);
+  assert.equal(primaryLabel(statuses[6], "moodle"), "Pair Moodle account");
+  assert.match(detailText(statuses[6], "moodle"), /signed-in Moodle account.*Pair Moodle account/);
   assert.equal(canChooseCourses(statuses[7]), true);
   assert.equal(courseValue(statuses[7]), "Ready");
   assert.equal(primaryLabel(statuses[7]), "Choose courses");
@@ -305,11 +305,13 @@ function stubElement(text = "", hidden = false) {
 
 test("the popup answers a failed first status read with a retry, then clears it when the retry works", async () => {
   const nodes = {
-    "#primary": stubElement("Connect Morrow"),
+    "#primary": stubElement("Pair Morrow"),
     "#consent-action": stubElement("Agree and continue"),
     "#consent-detail": stubElement("Select Agree and continue to accept this data use."),
     "#connection-content": stubElement("", true),
-    "#canvas-action": stubElement("Check or switch course", true),
+    "#course-access-mode": stubElement(),
+    "#course-access-help": stubElement(),
+    "#canvas-action": stubElement("Pair another account", true),
     "#open-platform-action": stubElement("Open Canvas", true),
     "#disconnect": stubElement("Disconnect Morrow", true),
     "#status-label": stubElement("Morrow"),

@@ -33,6 +33,10 @@ header .brand-wordmark { flex-basis: auto; margin: 0; }
 #consent-detail { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
 #consent-action { margin-top: 0; }
 #connection-content { margin-top: 0; }
+.course-access { margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-sunken); }
+.course-access label { display: block; margin-bottom: var(--space-2); font-size: 0.8125rem; font-weight: 700; }
+.course-access select { width: 100%; min-height: 44px; }
+.course-access p { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
 button { width: 100%; margin-top: var(--space-2); }
 #detail { margin: var(--space-4) 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.4; }
 #error { padding: var(--space-3); border: 1px solid var(--danger); border-radius: var(--radius-card); background: color-mix(in srgb, var(--danger) 6%, var(--surface)); color: var(--danger); font-size: 0.8125rem; line-height: 1.4; overflow-wrap: anywhere; }

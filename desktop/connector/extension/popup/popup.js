@@ -7,6 +7,8 @@ const consentDetail = document.querySelector("#consent-detail");
 const dataDisclosure = document.querySelector("#data-disclosure");
 const privacyLink = document.querySelector("#privacy-link");
 const connectionContent = document.querySelector("#connection-content");
+const courseAccessMode = document.querySelector("#course-access-mode");
+const courseAccessHelp = document.querySelector("#course-access-help");
 const canvasAction = document.querySelector("#canvas-action");
 const openPlatformAction = document.querySelector("#open-platform-action");
 const disconnect = document.querySelector("#disconnect");
@@ -93,7 +95,7 @@ function renderEditBanner() {
 // action and to Plan and Edit settings, not to this glance.
 function renderCourses() {
   const { shown } = connectedCourseRows(editBindings);
-  coursesSection.hidden = shown.length === 0;
+  coursesSection.hidden = shown.length === 0 || current?.courseAccessMode === "account";
   coursesList.innerHTML = shown
     .map((row) => `<li class="course-row"><span class="course-row-name">${escapeHtml(row.name)}</span><span class="course-row-state">${escapeHtml(row.state)}</span></li>`)
     .join("");
@@ -102,6 +104,10 @@ function renderCourses() {
 
 function render(status) {
   current = status;
+  courseAccessMode.value = status?.courseAccessMode === "account" ? "account" : "selected";
+  courseAccessHelp.textContent = courseAccessMode.value === "account"
+    ? "Ask your assistant to work in any course this account can access. Give it a course name, course ID, or course link. Plan and Edit still control changes."
+    : "Morrow can use only the courses you allow. Choose them once in Plan and Edit settings.";
   const nextAnnouncement = statusAnnouncement(status);
   if (announcement.textContent !== nextAnnouncement) announcement.textContent = nextAnnouncement;
   const consentRequired = status?.consentRequired === true;
@@ -132,8 +138,11 @@ function render(status) {
   value.textContent = statusValue(status);
   account.hidden = !binding && !anchor;
   if (binding || anchor) {
-    accountLabel.textContent = binding ? "Course" : anchor?.runtimeVerified === true ? "Connected platform" : "Saved platform";
-    accountOrigin.textContent = binding
+    const accountAccess = status?.courseAccessMode === "account";
+    accountLabel.textContent = accountAccess ? "Paired account" : binding ? "Course" : anchor?.runtimeVerified === true ? "Connected platform" : "Saved platform";
+    accountOrigin.textContent = accountAccess
+      ? `${anchor?.origin || binding?.origin || "Learning platform"} · ${status.bindingCount || status.bindings?.length || 0} courses available`
+      : binding
       ? `${binding.courseName || "Selected course"}${status.bindingCount > 1 ? ` · ${status.bindingCount} courses selected` : ""}`
       : `${anchor?.provider === "moodle" ? "Moodle" : anchor?.provider === "canvas" ? "Canvas" : "Learning platform"}`;
     setConnectedAt(binding?.lastSeenAt ?? anchor?.lastSeenAt);
@@ -156,7 +165,7 @@ function render(status) {
   setupGuide.hidden = runtimeNeedsReload(status);
   // WI-5.8: one primary action for the present tab. Reopening the saved course (closed) already has
   // its own control above, and an already-connected course needs none, so primary is hidden in both,
-  // leaving "Connect this course" as the only text it ever shows.
+  // leaving "Pair Canvas account" as the only text it ever shows.
   const primaryText = primaryLabel(status, detectedProvider);
   primary.hidden = alreadyConnected || closed || primaryText === "";
   primary.textContent = primaryText;
@@ -178,6 +187,7 @@ function setConnectedAt(lastSeenAt) {
 
 function updateControls(status = current) {
   consentAction.disabled = actionInFlight;
+  courseAccessMode.disabled = actionInFlight || !status || status.consentRequired === true;
   if (status?.consentRequired === true) return;
   const controls = controlState(status, { actionInFlight, detectedProvider });
   primary.disabled = controls.primaryDisabled;
@@ -309,6 +319,12 @@ async function connectCanvasCourse() {
   return await authorizeActiveCanvasTab();
 }
 
+courseAccessMode.addEventListener("change", async () => {
+  const mode = courseAccessMode.value;
+  await runAction(() => message("morrow_course_access_set", { mode }), () => clearNotice());
+  courseAccessMode.value = current?.courseAccessMode === "account" ? "account" : "selected";
+});
+
 consentAction.addEventListener("click", async () => {
   if (actionInFlight) return;
   actionInFlight = true;
@@ -345,21 +361,29 @@ primary.addEventListener("click", async () => {
     openCourseSelection();
     return;
   }
+  if (action === "refresh_account") {
+    await runAction(() => message("morrow_course_access_set", { mode: "account" }), () => clearNotice());
+    return;
+  }
   if (action === "pair") {
     await runAction(() => message("morrow_pair"), () => clearNotice());
+    return;
+  }
+  if (action === "takeover") {
+    await runAction(() => message("morrow_bridge_takeover"), () => clearNotice());
     return;
   }
   if (action !== "connect_course") return;
   await runAction(connectCanvasCourse, (result) => {
     clearNotice();
-    if (result?.siteAnchorId) openCourseSelection();
+    if (result?.siteAnchorId && current?.courseAccessMode !== "account") openCourseSelection();
   });
 });
 
 canvasAction.addEventListener("click", async () => {
   await runAction(connectCanvasCourse, (result) => {
     clearNotice();
-    if (result?.siteAnchorId) openCourseSelection();
+    if (result?.siteAnchorId && current?.courseAccessMode !== "account") openCourseSelection();
   });
 });
 

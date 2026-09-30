@@ -107,6 +107,19 @@
     font-size: 13px; padding: 10px 14px;
   }
 
+  /* ---------- one-time-link notice (M4M-F2) ---------- */
+  #nolink {
+    display: none;
+    margin: 14px auto 0; max-width: 1600px; width: calc(100% - 28px);
+    background: rgba(240, 184, 96, 0.14);
+    border: 2px solid var(--amber);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    font-size: 14px;
+  }
+  #nolink strong { color: var(--amber); display: block; margin-bottom: 6px; font-size: 15px; }
+  #nolink .fine { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+
   /* ---------- stage: the browser window, as large as the screen allows ---------- */
   main { flex: 1; display: flex; flex-direction: column; padding: 14px; }
   #stage {
@@ -123,11 +136,19 @@
     display: block; width: 100%; height: auto; background: #fff;
     user-select: none; -webkit-user-select: none; touch-action: none;
   }
+  /* Before the first screenshot arrives: a blank page-shaped stage, not a broken image. */
+  #screen:not([src]) { visibility: hidden; aspect-ratio: 16 / 10; }
   #hint {
     text-align: center; font-size: 12.5px; color: var(--muted);
     padding: 10px 16px 4px; max-width: 900px; margin: 0 auto;
   }
   #hint b { color: var(--text); }
+  #keys {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    flex-wrap: wrap; font-size: 12.5px; color: var(--muted);
+    padding: 10px 16px 0; max-width: 900px; margin: 0 auto;
+  }
+  #keys .btn:focus-visible { outline: 3px solid var(--morrow-lime); outline-offset: 2px; }
   footer {
     text-align: center; font-size: 11.5px; color: #6b739e;
     padding: 10px 0 14px;
@@ -158,14 +179,22 @@
   <div class="fine">You can close this page. Morrow keeps your Canvas sign-in in this private browser on your Muse computer, and you won&rsquo;t need to sign in again unless Canvas itself expires it. If that ever happens, just come back here. The name above is the Canvas account Morrow was connected to on this computer; on every task, Morrow checks the account signed in to this browser and pauses if it is not that one.</div>
 </div>
 <div id="err" role="alert"></div>
+<div id="nolink" role="alert">
+  <strong>This sign-in link is missing or already used.</strong>
+  <div class="fine">Ask the agent for a fresh one-time helper link, then open that instead. The page below cannot drive the helper until then; the sign-in status above still updates.</div>
+</div>
 <div id="session-notice" role="alert">
   <strong>Action needed: your Canvas session notice</strong>
   <div class="body" id="session-notice-body"></div>
 </div>
 
 <main>
-  <div id="stage" tabindex="0" aria-label="Canvas page. Click to focus, then type.">
+  <div id="stage" tabindex="0" aria-label="Your school's sign-in page" aria-describedby="keys-help">
     <img id="screen" alt="Live Canvas page" draggable="false">
+  </div>
+  <div id="keys">
+    <span id="keys-help">While the page has a blue outline, every key you press, Tab included, goes to the sign-in page. Press <b>Esc</b> to leave it and use this page. Scroll with your mouse wheel, trackpad, or one finger.</span>
+    <button id="capture" class="btn" type="button">Type into the sign-in page</button>
   </div>
   <div id="hint"><b>Click the page, then type.</b> Sign in exactly as you normally would, including SSO and MFA. If Canvas offers <b>&ldquo;Stay signed in&rdquo;</b>, leave it on. Nothing you type is shown here or sent anywhere except the Canvas page itself.</div>
 </main>
@@ -183,41 +212,120 @@
   var noticeEl = document.getElementById("session-notice");
   var noticeBody = document.getElementById("session-notice-body");
   var urlEl = document.getElementById("url");
+  var errEl = document.getElementById("err");
 
-  // W3-P0-7: the server injects this tree's launch token into the
-  // __HELPER_TOKEN__ placeholder when it serves this page. Every
+  // W3-P0-7 / M4M-F2: the server injects this tree's launch token
+  // into the __HELPER_TOKEN__ placeholder ONLY when this load carries
+  // a valid single-use page code (?code=, burned on use). Every
   // protected endpoint (all POSTs, plus /screenshot) sends it back as
   // the X-Helper-Token header. /status stays open and needs no token.
+  // A code-less load gets an empty token: the status poll still works,
+  // but the drive calls stay idle behind the one-time-link notice.
   var HELPER_TOKEN = "__HELPER_TOKEN__";
   var AUTH_HEADERS = { "X-Helper-Token": HELPER_TOKEN };
+  if (!HELPER_TOKEN) {
+    var nolink = document.getElementById("nolink");
+    if (nolink) nolink.style.display = "block";
+    // Without a token nothing here can reach the sign-in page, so the
+    // stage and its keyboard controls are not offered.
+    document.querySelector("main").style.display = "none";
+  }
 
-  function showErr(msg) {
+  // Repeated identical failures leave the alert text untouched, so a
+  // screen reader announces each distinct problem once, not every poll.
+  var screenshotError = "";
+  var inputError = "";
+  function renderError() {
+    var msg = inputError || screenshotError;
+    if (!msg) {
+      errEl.style.display = "none";
+      errEl.textContent = "";
+      return;
+    }
+    if (errEl.style.display === "block" && errEl.textContent === msg) return;
     errEl.style.display = "block";
     errEl.textContent = msg;
   }
+  function showErr(msg) { screenshotError = msg; renderError(); }
   function clearErr() {
-    errEl.style.display = "none";
-    errEl.textContent = "";
+    screenshotError = "";
+    renderError();
+  }
+  function inputFailure(e, releasing) {
+    inputError = e.status === 403
+      ? "This sign-in link has expired. Ask your agent for a fresh one-time link."
+      : releasing
+        ? "The helper could not release the keyboard. Keep this page open; it will retry."
+        : "The helper did not confirm your input. Wait for it to reconnect, then try again.";
+    renderError();
+  }
+  function failureMessage(e) {
+    if (e.invalidImage) {
+      return "The helper sent an unreadable image. Keep this page open; " +
+        "it will try again.";
+    }
+    if (!e.status) {
+      return "Cannot reach the Morrow helper. It may be restarting; keep " +
+        "this page open and it will reconnect on its own.";
+    }
+    if (e.status === 403) {
+      return "This page is no longer connected to the helper (HTTP 403). " +
+        "Ask your agent for a fresh one-time sign-in link and open it.";
+    }
+    if (e.status === 429 || e.status === 503) {
+      return "The helper is busy (HTTP " + e.status + "). This page slows " +
+        "down and tries again on its own.";
+    }
+    return "The helper could not show the school page (HTTP " + e.status +
+      "). Its browser may be restarting; keep this page open and it " +
+      "will try again.";
   }
 
-  // --- screenshot stream: refresh every 500ms ---
+  // --- screenshot stream: every 500ms, one request at a time ---
+  // A failure is shown with its HTTP status and retried after a pause
+  // (the server's Retry-After when it sends one), so a busy or
+  // restarting helper is not flooded by this page.
+  var SHOT_INTERVAL_MS = 500;
   var lastObjUrl = null;
   function refresh() {
     fetch("/screenshot", { cache: "no-store", headers: AUTH_HEADERS })
       .then(function (r) {
-        if (!r.ok) throw new Error("screenshot HTTP " + r.status);
+        if (!r.ok) {
+          var failure = new Error("HTTP " + r.status);
+          failure.status = r.status;
+          failure.retryAfter = parseInt(r.headers.get("Retry-After"), 10) || 0;
+          throw failure;
+        }
         return r.blob();
       })
       .then(function (blob) {
-        clearErr();
-        if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
-        lastObjUrl = URL.createObjectURL(blob);
-        img.src = lastObjUrl;
+        var nextUrl = URL.createObjectURL(blob);
+        var nextImage = new Image();
+        nextImage.src = nextUrl;
+        return nextImage.decode().then(function () {
+          img.src = nextUrl;
+          if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
+          lastObjUrl = nextUrl;
+          clearErr();
+          setTimeout(refresh, SHOT_INTERVAL_MS);
+        }).catch(function () {
+          URL.revokeObjectURL(nextUrl);
+          var failure = new Error("unreadable image");
+          failure.invalidImage = true;
+          throw failure;
+        });
       })
-      .catch(function (e) { showErr("Screenshot stream failed: " + e.message); });
+      .catch(function (e) {
+        showErr(failureMessage(e));
+        setTimeout(refresh, Math.max(2000, (e.retryAfter || 0) * 1000));
+      });
   }
-  setInterval(refresh, 500);
-  refresh();
+  // M4M-F2: without a token the screenshot endpoint answers 403;
+  // stay idle instead of error-spamming until the educator opens a
+  // one-time link. The /status poll below still runs either way.
+  if (HELPER_TOKEN) {
+    refresh();
+  }
 
   // --- login status ---
   function pollStatus() {
@@ -270,74 +378,235 @@
   pollStatus();
 
   // --- coordinate mapping: displayed px -> page px ---
-  function toPage(e) {
+  // The screenshot is scaled to fit this page; every pointer position is
+  // mapped back to the remote page's pixels and clamped to the image, so
+  // the helper never receives a point outside the remote viewport.
+  function pageScale() {
     var r = img.getBoundingClientRect();
-    var sx = img.naturalWidth / r.width;
-    var sy = img.naturalHeight / r.height;
-    return { x: Math.round((e.clientX - r.left) * sx),
-             y: Math.round((e.clientY - r.top) * sy) };
+    if (!img.naturalWidth || !r.width || !r.height) return null;
+    return { rect: r, x: img.naturalWidth / r.width,
+             y: img.naturalHeight / r.height };
+  }
+  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+  function toPage(e) {
+    var s = pageScale();
+    if (!s) return null;
+    return {
+      x: clamp(Math.round((e.clientX - s.rect.left) * s.x), 0, img.naturalWidth - 1),
+      y: clamp(Math.round((e.clientY - s.rect.top) * s.y), 0, img.naturalHeight - 1)
+    };
   }
 
-  function postMouse(kind, x, y, button) {
-    fetch("/input/mouse", {
+  function post(path, payload) {
+    if (!HELPER_TOKEN) return Promise.reject(new Error("missing sign-in token"));
+    var controller = new AbortController();
+    var timeout = setTimeout(function () { controller.abort(); }, 5000);
+    return fetch(path, {
       method: "POST",
+      signal: controller.signal,
       headers: { "Content-Type": "application/json",
                  "X-Helper-Token": HELPER_TOKEN },
-      body: JSON.stringify({ kind: kind, x: x, y: y, button: button || "left" })
-    }).catch(function () {});
+      body: JSON.stringify(payload)
+    }).then(function (response) {
+      if (!response.ok) {
+        var failure = new Error("HTTP " + response.status);
+        failure.status = response.status;
+        failure.retryAfter = Math.min(5, parseInt(response.headers.get("Retry-After"), 10) || 0);
+        throw failure;
+      }
+      return response;
+    }).finally(function () { clearTimeout(timeout); });
   }
-  function postKey(kind, key, code, keyCode) {
-    fetch("/input/key", {
-      method: "POST",
-      headers: { "Content-Type": "application/json",
-                 "X-Helper-Token": HELPER_TOKEN },
-      body: JSON.stringify({ kind: kind, key: key, code: code, keyCode: keyCode })
-    }).catch(function () {});
+  function postMouse(kind, p, button) {
+    if (!p) return;
+    post("/input/mouse", { kind: kind, x: p.x, y: p.y, button: button || "left" })
+      .catch(function (e) { inputFailure(e, false); });
   }
+  var keyQueue = Promise.resolve();
+  function postKey(kind, key, code, keyCode, modifiers, released) {
+    // HTTP handlers can run concurrently. Keep key down/up in their original order.
+    keyQueue = keyQueue.then(function () {
+      function send() {
+        return post("/input/key", { kind: kind, key: key, code: code,
+          keyCode: keyCode, modifiers: modifiers }).then(function () {
+          if (released) released();
+          inputError = "";
+          renderError();
+        }).catch(function (e) {
+          inputFailure(e, kind === "up");
+          if (kind === "up" && e.status !== 403) {
+            // Releasing a key is safe to repeat after an uncertain response.
+            return new Promise(function (done) {
+              setTimeout(done, Math.max(500, (e.retryAfter || 0) * 1000));
+            }).then(send);
+          }
+          if (kind === "down") releaseKeys();
+        });
+      }
+      return send();
+    });
+  }
+
+  // --- scrolling: wheel, trackpad, and one-finger swipes ---
+  // Motion is summed and sent at most every 100ms, one request at a time,
+  // so a fast trackpad or swipe stays inside the helper's rate limit.
+  // The helper refuses steps larger than MAX_WHEEL_DELTA page pixels.
+  var WHEEL_INTERVAL_MS = 100;
+  var MAX_WHEEL_DELTA = 5000;
+  var wheelPending = null;
+  var wheelTimer = null;
+  var wheelInFlight = false;
+  function queueWheel(p, dx, dy) {
+    if (!p) return;
+    if (!wheelPending) wheelPending = { x: p.x, y: p.y, dx: 0, dy: 0 };
+    wheelPending.x = p.x;
+    wheelPending.y = p.y;
+    wheelPending.dx += dx;
+    wheelPending.dy += dy;
+    if (!wheelTimer) wheelTimer = setTimeout(flushWheel, WHEEL_INTERVAL_MS);
+  }
+  function flushWheel() {
+    wheelTimer = null;
+    if (wheelInFlight) {
+      wheelTimer = setTimeout(flushWheel, WHEEL_INTERVAL_MS);
+      return;
+    }
+    var w = wheelPending;
+    wheelPending = null;
+    if (!w) return;
+    var dx = clamp(Math.round(w.dx), -MAX_WHEEL_DELTA, MAX_WHEEL_DELTA);
+    var dy = clamp(Math.round(w.dy), -MAX_WHEEL_DELTA, MAX_WHEEL_DELTA);
+    if (!dx && !dy) return;
+    wheelInFlight = true;
+    post("/input/wheel", { x: w.x, y: w.y, deltaX: dx, deltaY: dy })
+      .catch(function (e) { inputFailure(e, false); })
+      .finally(function () { wheelInFlight = false; });
+  }
+  img.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    var s = pageScale();
+    if (!s) return;
+    // deltaMode 1 is lines, 2 is pages; the remote page takes pixels.
+    var unit = e.deltaMode === 1 ? 40 : (e.deltaMode === 2 ? img.naturalHeight : 1);
+    queueWheel(toPage(e), e.deltaX * unit * s.x, e.deltaY * unit * s.y);
+  }, { passive: false });
 
   // --- mouse: click to focus fields, drag-free simple clicks ---
   img.addEventListener("mousedown", function (e) {
     e.preventDefault();
     stage.focus();
-    var p = toPage(e);
-    postMouse("pressed", p.x, p.y, e.button === 2 ? "right" : "left");
+    postMouse("pressed", toPage(e), e.button === 2 ? "right" : "left");
   });
   img.addEventListener("mouseup", function (e) {
-    var p = toPage(e);
-    postMouse("released", p.x, p.y, e.button === 2 ? "right" : "left");
+    postMouse("released", toPage(e), e.button === 2 ? "right" : "left");
   });
-  // Touch: one tap = click (mobile sign-in).
-  img.addEventListener("touchstart", function (e) {
-    e.preventDefault();
-    stage.focus();
-    var t = e.changedTouches[0];
-    var p = toPage(t);
-    postMouse("pressed", p.x, p.y, "left");
-    postMouse("released", p.x, p.y, "left");
-  }, { passive: false });
   var lastMove = 0;
   img.addEventListener("mousemove", function (e) {
     var now = Date.now();
     if (now - lastMove < 60) return; // throttle hover traffic
     lastMove = now;
-    var p = toPage(e);
-    postMouse("moved", p.x, p.y);
+    postMouse("moved", toPage(e));
   });
   img.addEventListener("contextmenu", function (e) { e.preventDefault(); });
 
-  // --- keyboard: forward everything while the stage is focused ---
+  // Touch: a tap is a click; a one-finger drag past TAP_SLOP_PX scrolls
+  // the remote page the way the finger moves.
+  var TAP_SLOP_PX = 8;
+  var touch = null;
+  img.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    if (e.touches.length !== 1) { touch = null; return; }
+    var t = e.touches[0];
+    touch = { startX: t.clientX, startY: t.clientY,
+              lastX: t.clientX, lastY: t.clientY, moved: false };
+  }, { passive: false });
+  img.addEventListener("touchmove", function (e) {
+    e.preventDefault();
+    if (!touch || e.touches.length !== 1) return;
+    var t = e.touches[0];
+    if (!touch.moved && Math.abs(t.clientX - touch.startX) < TAP_SLOP_PX
+        && Math.abs(t.clientY - touch.startY) < TAP_SLOP_PX) return;
+    touch.moved = true;
+    var s = pageScale();
+    if (s) {
+      queueWheel(toPage(t), (touch.lastX - t.clientX) * s.x,
+                 (touch.lastY - t.clientY) * s.y);
+    }
+    touch.lastX = t.clientX;
+    touch.lastY = t.clientY;
+  }, { passive: false });
+  img.addEventListener("touchend", function (e) {
+    e.preventDefault();
+    if (touch && !touch.moved) {
+      stage.focus();
+      var p = toPage({ clientX: touch.startX, clientY: touch.startY });
+      postMouse("pressed", p, "left");
+      postMouse("released", p, "left");
+    }
+    touch = null;
+  }, { passive: false });
+  img.addEventListener("touchcancel", function () { touch = null; });
+
+  // --- keyboard: forward every key while the stage has focus ---
+  // Tab goes to the remote page too (username to password). Escape is
+  // the one key kept here: it releases the keyboard to this page and
+  // moves focus to the "Type into the sign-in page" button, which
+  // returns to the stage. Tab and Shift+Tab also re-enter the stage.
+  var captureBtn = document.getElementById("capture");
+  var heldKeys = Object.create(null);
+  function keyModifiers(e) {
+    return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) |
+      (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+  }
+  function releaseKeys() {
+    var keys = Object.keys(heldKeys);
+    keys.reverse().forEach(function (code) {
+      var key = heldKeys[code];
+      if (key.releasing) return;
+      key.releasing = true;
+      var remaining = Object.keys(heldKeys).filter(function (c) {
+        return !heldKeys[c].releasing;
+      }).map(function (c) { return heldKeys[c].key; });
+      var modifiers = (remaining.indexOf("Alt") >= 0 ? 1 : 0) |
+        (remaining.indexOf("Control") >= 0 ? 2 : 0) |
+        (remaining.indexOf("Meta") >= 0 ? 4 : 0) |
+        (remaining.indexOf("Shift") >= 0 ? 8 : 0);
+      postKey("up", key.key, key.code, key.keyCode, modifiers, function () {
+        if (heldKeys[code] === key) delete heldKeys[code];
+      });
+    });
+  }
   stage.addEventListener("keydown", function (e) {
     e.preventDefault();
-    postKey("down", e.key, e.code, e.keyCode);
+    if (e.key === "Escape") {
+      releaseKeys();
+      captureBtn.focus();
+      return;
+    }
+    heldKeys[e.code || e.key] = { key: e.key, code: e.code, keyCode: e.keyCode };
+    postKey("down", e.key, e.code, e.keyCode, keyModifiers(e));
   });
   stage.addEventListener("keyup", function (e) {
     e.preventDefault();
-    postKey("up", e.key, e.code, e.keyCode);
+    if (e.key === "Escape") return;
+    var code = e.code || e.key;
+    var key = heldKeys[code];
+    if (key && key.releasing) return;
+    if (key) key.releasing = true;
+    postKey("up", e.key, e.code, e.keyCode, keyModifiers(e), function () {
+      if (heldKeys[code] === key) delete heldKeys[code];
+    });
   });
+  stage.addEventListener("blur", releaseKeys);
+  window.addEventListener("blur", releaseKeys);
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) releaseKeys();
+  });
+  captureBtn.addEventListener("click", function () { stage.focus(); });
   // Note: no blur refocus here. Clicking the badge or header must not
   // steal focus back mid-typing; clicking the stage image refocuses.
 
-  stage.focus();
+  if (HELPER_TOKEN) stage.focus();
 })();
 </script>
 </body>

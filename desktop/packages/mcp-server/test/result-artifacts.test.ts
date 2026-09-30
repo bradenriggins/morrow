@@ -11,6 +11,48 @@ import {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("ResultArtifactStore", () => {
+  const large = () => ({ content: [{ type: "text", text: "x".repeat(MAX_INLINE_RESULT_CHARACTERS + 100) }] });
+  const handle = (result: JsonObject) => (result.structuredContent as JsonObject).handle as string;
+
+  it("keeps a result being paged when the seventeenth result arrives", () => {
+    const store = new ResultArtifactStore();
+    const first = handle(store.bound(large()));
+    for (let index = 0; index < 15; index += 1) store.bound(large());
+    const page = store.page(first, 0, 16);
+    expect(page.nextOffset).toBe(16);
+    store.bound(large());
+    expect(store.page(first, 16, 16).offset).toBe(16);
+  });
+
+  it("reports capacity instead of evicting all sixteen active pages or creating an unusable handle", () => {
+    const store = new ResultArtifactStore();
+    const active: string[] = [];
+    for (let index = 0; index < 16; index += 1) {
+      const saved = store.bound(large());
+      store.bindAudience(saved, "assistant-a");
+      active.push(handle(saved));
+      store.page(active.at(-1)!, 0, 16, "assistant-a");
+    }
+    const next = store.bound(large());
+    expect(next).toMatchObject({ isError: true, structuredContent: { code: "result_artifact_capacity" } });
+    expect(() => store.bindAudience(next, "assistant-a")).not.toThrow();
+    for (const saved of active) expect(store.page(saved, 16, 16, "assistant-a").offset).toBe(16);
+  });
+
+  it("allows unused paging protection to expire without allowing a foreign audience to refresh it", () => {
+    const store = new ResultArtifactStore();
+    let clock = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const saved = store.bound(large());
+    store.bindAudience(saved, "assistant-a");
+    const first = handle(saved);
+    store.page(first, 0, 16, "assistant-a");
+    for (let index = 0; index < 15; index += 1) store.bound(large());
+    clock += 30 * 60_000;
+    expect(() => store.page(first, 16, 16, "assistant-b")).toThrow(/authorize/);
+    store.bound(large());
+    expect(() => store.page(first, 16, 16, "assistant-a")).toThrow(/expired/);
+  });
   it("derives a distinct audience for each local-owner proxy and workspace", () => {
     const protocol = {
       sessionId: undefined,

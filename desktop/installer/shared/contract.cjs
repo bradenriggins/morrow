@@ -230,6 +230,8 @@ function installerState(input) {
     tier: assistant.tier,
     detected: assistant.detected === true,
     configured: assistant.configured === true,
+    routeReady: assistant.routeReady !== false,
+    statusUnavailable: assistant.statusUnavailable === true,
     pending: assistant.pending === true,
     // Claude Desktop connected, and Morrow is still confirming the Claude app
     // that started it. The launcher keeps asking until it can say.

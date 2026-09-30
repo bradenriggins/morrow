@@ -425,7 +425,7 @@ async function main() {
     await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
     await popup.getByRole("button", { name: "Agree and continue", exact: true }).click();
     setStage("connect_morrow");
-    await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
+    await popup.getByRole("button", { name: "Pair Morrow", exact: true }).click();
     setStage("wait_for_local_pairing");
     await waitFor(async () => (await popup.evaluate(async () => await chrome.runtime.sendMessage({ type: "morrow_status" })))?.result?.connected === true,
       "connector_pairing_not_ready");
@@ -434,7 +434,7 @@ async function main() {
 
     reader = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
     setStage("operator_course_site_permission");
-    await askOperator(reader, "course-ready", "In Chrome for Testing, use the Morrow Bridge toolbar popup on the visible Canvas course. Select Connect this course and allow the exact Canvas-site permission.");
+    await askOperator(reader, "course-ready", "In Chrome for Testing, use the Morrow Bridge toolbar popup on the visible Canvas course. Select Pair Canvas account and allow the exact Canvas-site permission.");
     setStage("verify_course_site_permission");
     await waitFor(async () => {
       const site = await popup.evaluate(async () => await chrome.runtime.sendMessage({ type: "morrow_status" }));

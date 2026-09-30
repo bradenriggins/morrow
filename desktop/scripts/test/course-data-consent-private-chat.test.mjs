@@ -171,7 +171,7 @@ test("a rogue Bridge learns no secret, and withdrawing consent terminates Privat
   assert.deepEqual(socket.closeRecord, { code: 4403, reason: "bridge_server_identity_refused" });
   assert.equal(socket.sent.some((message) => message.schema === "morrow.bridge.hello.v1"), false);
   assert.equal(local.values.token, token);
-  await send({ type: "morrow_course_data_consent_accept" }, {});
+  await send({ type: "morrow_course_data_consent_accept" }, { id: extensionId, url: `${extensionPrefix}popup/popup.html` });
 
   const authenticatedSocket = await eventually(() => FakeWebSocket.instances[1]);
   authenticatedSocket.open();
@@ -220,7 +220,7 @@ test("a rogue Bridge learns no secret, and withdrawing consent terminates Privat
     completedAt: authenticatedSocket.sent.find((message) => message.requestId === first.requestId).completedAt,
   });
 
-  assert.deepEqual(await send({ type: "morrow_course_data_consent_accept" }, {}), {
+  assert.deepEqual(await send({ type: "morrow_course_data_consent_accept" }, { id: extensionId, url: `${extensionPrefix}popup/popup.html` }), {
     ok: true,
     result: { accepted: true },
   });

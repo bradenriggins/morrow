@@ -122,7 +122,7 @@ test("Disconnect invalidates an in-flight pairing confirmation before it can res
   const generation = local.values.pairingAuthority.generation;
   assert.equal(local.values.pairingAuthority.status, "requesting");
   const disconnected = await new Promise((resolve, reject) => {
-    if (onMessage({ type: "morrow_disconnect" }, {}, resolve) !== true) reject(new Error("Disconnect was not accepted"));
+    if (onMessage({ type: "morrow_disconnect" }, popup, resolve) !== true) reject(new Error("Disconnect was not accepted"));
   });
   assert.deepEqual(disconnected, { ok: true, result: { disconnected: true, permissionsRevoked: true } });
   assert.equal(confirmationSignal.aborted, true);

@@ -50,7 +50,13 @@ export type BridgeCommandKind =
   /** Private, local-only assistant relay. Never a catalog capability. */
   | "private_chat_exchange"
   /** Private desktop-to-Bridge maintenance control. Never a catalog capability. */
-  | "bridge_maintenance";
+  | "bridge_maintenance"
+  /**
+   * Asks the Bridge to prove one saved course connection again, opening its site when the person
+   * allows it. It carries no operation and reads nothing from the course; admission still needs the
+   * binding the Bridge publishes afterwards to be runtime-verified.
+   */
+  | "binding_recover";
 
 export type BridgeProvider = "canvas" | "moodle" | "blackboard";
 
@@ -252,6 +258,13 @@ export interface BridgeHello {
   readonly runtimeRevision: string;
   readonly catalogDigest: string;
   readonly bindings: readonly BridgeBinding[];
+  /**
+   * A random id this Chrome profile keeps for its Bridge. Morrow lets the profile that holds the
+   * connection reconnect over itself, and refuses another profile instead of replacing the owner.
+   */
+  readonly instanceId?: string;
+  /** Present only when the person chose to use Morrow in this profile instead of the owning one. */
+  readonly takeover?: true;
   readonly sentAt: number;
 }
 
@@ -585,10 +598,12 @@ export const PAGE_GUARD_SCHEMA: JsonObject = {
   ],
 };
 
-const TOOL_OR_SOURCE = /^[A-Za-z0-9_.:@-]{1,160}$/;
+export const BRIDGE_BINDING_ID_PATTERN = /^[A-Za-z0-9_.:@-]{1,160}$/;
+const TOOL_OR_SOURCE = BRIDGE_BINDING_ID_PATTERN;
 const REQUEST_ID = /^[A-Za-z0-9_.:-]{8,160}$/;
 const EXTENSION_ID = /^[a-p]{32}$/;
 const HEX_SHA256 = /^[0-9a-f]{64}$/;
+export const BRIDGE_INSTANCE_ID = /^[A-Za-z0-9_-]{16,64}$/;
 const DECIMAL_ID = /^[1-9][0-9]{0,18}$/;
 const EDIT_FIELD = /^[A-Za-z_][A-Za-z0-9_]{0,159}$/;
 const PRINTABLE_TEXT = /^[\x20-\x7e]+$/;
@@ -883,6 +898,28 @@ function parseOuterGrant(value: unknown): BridgeOuterGrant {
   if (value.dispatch_attempt !== 1) throw new TypeError("_morrow.outer_grant.dispatch_attempt must be 1");
   const authorization = value.authorization === undefined ? undefined : parseOuterAuthorization(value.authorization);
   return { planDigest, approvalGrantDigest, effectReceiptId, dispatchAttempt: 1, gatewayProcessId, ...(authorization ? { authorization } : {}) };
+}
+
+export function normalizeBridgeOuterGrant(value: unknown): BridgeOuterGrant {
+  if (!isJsonObject(value) || Object.keys(value).some((key) => !["planDigest", "approvalGrantDigest", "effectReceiptId", "dispatchAttempt", "gatewayProcessId", "authorization"].includes(key))) {
+    throw new TypeError("outerGrant has unsupported fields");
+  }
+  const authorization = value.authorization;
+  if (authorization !== undefined && (!isJsonObject(authorization)
+    || Object.keys(authorization).some((key) => !["kind", "policyDigest", "policyRevision"].includes(key))
+    || (authorization.kind === "review" && Object.keys(authorization).length !== 1))) {
+    throw new TypeError("outerGrant.authorization has unsupported fields");
+  }
+  return parseOuterGrant({
+    plan_digest: value.planDigest,
+    approval_grant_digest: value.approvalGrantDigest,
+    effect_receipt_id: value.effectReceiptId,
+    dispatch_attempt: value.dispatchAttempt,
+    gateway_process_id: value.gatewayProcessId,
+    ...(authorization === undefined ? {} : { authorization: authorization.kind === "edit_scope"
+      ? { kind: authorization.kind, policy_digest: authorization.policyDigest, policy_revision: authorization.policyRevision }
+      : { kind: authorization.kind } }),
+  });
 }
 
 function parseEditPermissionRule(value: unknown, index: number): BridgeEditPermissionRule {
@@ -1550,7 +1587,7 @@ export function parseBridgeChallenge(value: unknown): BridgeChallenge {
 
 export function parseBridgeHello(value: unknown): BridgeHello {
   if (!isJsonObject(value) || value.schema !== BRIDGE_SCHEMAS.hello
-    || Object.keys(value).some((key) => !["schema", "protocolVersion", "clientNonce", "serverNonce", "clientProof", "extensionId", "runtimeRevision", "catalogDigest", "bindings", "sentAt"].includes(key))) {
+    || Object.keys(value).some((key) => !["schema", "protocolVersion", "clientNonce", "serverNonce", "clientProof", "extensionId", "runtimeRevision", "catalogDigest", "bindings", "instanceId", "takeover", "sentAt"].includes(key))) {
     throw new TypeError("bridge hello has an invalid schema");
   }
   if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) {
@@ -1566,6 +1603,10 @@ export function parseBridgeHello(value: unknown): BridgeHello {
   if (!EXTENSION_ID.test(extensionId)) throw new TypeError("extensionId is invalid");
   const catalogDigest = requiredString(value.catalogDigest, "catalogDigest", 64);
   if (!HEX_SHA256.test(catalogDigest)) throw new TypeError("catalogDigest must be a SHA-256 digest");
+  if (value.instanceId !== undefined && (typeof value.instanceId !== "string" || !BRIDGE_INSTANCE_ID.test(value.instanceId))) {
+    throw new TypeError("bridge hello instanceId is invalid");
+  }
+  if (value.takeover !== undefined && value.takeover !== true) throw new TypeError("bridge hello takeover must be true when present");
   return {
     schema: BRIDGE_SCHEMAS.hello,
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
@@ -1576,6 +1617,8 @@ export function parseBridgeHello(value: unknown): BridgeHello {
     runtimeRevision: requiredString(value.runtimeRevision, "runtimeRevision", 160),
     catalogDigest,
     bindings: normalizeBridgeBindings(value.bindings),
+    ...(value.instanceId === undefined ? {} : { instanceId: value.instanceId as string }),
+    ...(value.takeover === true ? { takeover: true as const } : {}),
     sentAt: requiredInteger(value.sentAt, "sentAt"),
   };
 }

@@ -148,6 +148,25 @@ async function openCustomizeGroup(page, areaId, kind) {
 
 after(clearExtensionGlobals);
 
+test("Account access keeps Edit controls but has no course allow or disconnect controls", async () => {
+  const site = { siteAnchorId: "canvas:site-1", provider: "canvas", origin: "https://canvas.example.edu", principalId: "teacher@example.edu", sessionGeneration: 1, runtimeVerified: true };
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY], { courseAccessMode: "account", siteAnchors: [site] }),
+    handlers: { morrow_course_access_set: () => ({ ok: true }) },
+  });
+  const detail = await openCourseDetail(page, ANATOMY.sourceBindingId);
+  assert.equal(detail.querySelectorAll("[data-disconnect]").length, 0);
+  assert.equal(detail.querySelectorAll("[data-open-customize]").length, 1);
+  assert.match(detail.textContent, /Account access includes this course/);
+  assert.equal(page.messages("morrow_course_discovery_start").length, 0);
+  assert.equal(page.queryAll("[data-connect-row]").length, 0);
+  await page.click("#refresh");
+  await page.waitFor(() => page.messages("morrow_course_access_set").length === 1, "refresh did not check the account's courses");
+  assert.deepEqual(page.messages("morrow_course_access_set"), [{ type: "morrow_course_access_set", mode: "account" }]);
+  assert.equal(page.messages("morrow_course_discovery_start").length, 0);
+  assert.equal(page.messages("morrow_pair_prepare").length, 0);
+});
+
 test("with no connected course the page states that, and offers no course to act on", async () => {
   const page = await openSettings({ status: () => statusFixture([]) });
   assert.equal(page.text("#connection-status"), "No course is connected yet.");
@@ -155,7 +174,7 @@ test("with no connected course the page states that, and offers no course to act
   // find courses you can connect." to the composed empty message. No site is saved here, so it
   // carries no action. Morrow Bridge cannot see a course tab before Chrome grants it that site, so
   // the message names the popup step that does, not a course the Bridge finds by itself.
-  assert.equal(page.text("#course-list"), "Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Connect this course, and allow access when Chrome asks.");
+  assert.equal(page.text("#course-list"), "Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Pair Canvas account, and allow access when Chrome asks.");
   assert.equal(page.queryAll("#course-list button").length, 0);
   assert.equal(page.query("#course-list").getAttribute("aria-busy"), "false");
   assert.equal(page.text("#selection-summary"), "No course selected. Select a course above, then choose Plan or Edit.");
@@ -251,7 +270,7 @@ test("the connected-course summary counts only runtime-verified eligible courses
     "0 connected courses are ready to use. 1 saved course needs an open course tab or a reconnected site.");
   await reread([], "No course is connected yet.");
   // WI-F.10 pin: see "with no connected course the page states that, and offers no course to act on".
-  assert.equal(page.text("#course-list"), "Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Connect this course, and allow access when Chrome asks.");
+  assert.equal(page.text("#course-list"), "Open a signed-in Canvas or Moodle course in Chrome. Then open the Morrow Bridge popup, select Pair Canvas account, and allow access when Chrome asks.");
 });
 
 // WI-5.3: a course loses its checkbox and moves to "Needs attention" the moment its site closes; a
@@ -720,7 +739,7 @@ test("a closed course row whose saved site is gone says so when Open Canvas is s
 test("recovery text names the Open and Connect controls that exist, not a reconnect step", async () => {
   const unnamed = { sourceBindingId: "canvas:unnamed", provider: "canvas", runtimeVerified: true, editPolicyRevision: 0 };
   const page = await openSettings({ status: () => statusFixture([unnamed]) });
-  assert.equal(page.text('[data-row-kind="attention"] .course-row-note'), "Morrow cannot identify this course. Open it in Canvas or Moodle and select Connect this course in the Morrow Bridge popup.");
+  assert.equal(page.text('[data-row-kind="attention"] .course-row-note'), "Morrow cannot identify this course. Open it in Canvas or Moodle and select Pair Canvas account in the Morrow Bridge popup.");
   assert.match(page.text(".access-rules-list"), /If a course needs sign-in again, select Open Canvas or Open Moodle on its row, and sign in if asked\./);
   assert.doesNotMatch(page.text("body"), /reconnect it from the Morrow popup|Open and reconnect/i);
 });
@@ -1928,6 +1947,22 @@ test("the open-platform checkbox reads the stored setting, and writes a change b
   assert.equal(reopened.query("#open-platform-when-needed").checked, false);
 });
 
+test("the open-platform checkbox keeps the chosen value while storage is pending", async () => {
+  const page = await openSettings({ status: () => statusFixture([]), storage: { openPlatformWhenNeeded: false } });
+  const originalSet = chrome.storage.local.set;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  chrome.storage.local.set = async value => { await gate; return originalSet(value); };
+  try {
+    await page.click("#open-platform-when-needed");
+    assert.equal(page.query("#open-platform-when-needed").checked, true);
+    assert.equal(page.query("#open-platform-when-needed").disabled, true);
+  } finally { release(); }
+  await page.waitFor(() => !page.query("#open-platform-when-needed").disabled, "setting stayed busy");
+  assert.equal(page.storage.openPlatformWhenNeeded, true);
+  assert.equal(page.query("#open-platform-when-needed").checked, true);
+});
+
 test("course file access is off until Chrome grants it, and off again the moment Chrome takes it back", async () => {
   // The manifest is the contract Chrome enforces: HTTPS access is optional, so Chrome asks the
   // person for it only when they turn course file access on.
@@ -2039,7 +2074,7 @@ async function disconnectMorrow(connected) {
     assert.ok(serviceWorkerMessage, "the service worker registered no message listener");
     Object.assign(local, connected);
     const answer = await new Promise((resolve, reject) => {
-      if (serviceWorkerMessage({ type: "morrow_disconnect" }, {}, resolve) !== true) reject(new Error("the worker never answered morrow_disconnect"));
+      if (serviceWorkerMessage({ type: "morrow_disconnect" }, { id: extensionId, url: `chrome-extension://${extensionId}/popup/popup.html` }, resolve) !== true) reject(new Error("the worker never answered morrow_disconnect"));
     });
     return { answer, local };
   } finally {

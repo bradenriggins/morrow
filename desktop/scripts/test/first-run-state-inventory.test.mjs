@@ -112,6 +112,7 @@ const INSTALLER_STATES = new Map([
   ["preview-completed", installer({ ...COURSE_READY, firstPreview: { available: true, completed: true } })],
   ["move-required", installer({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] })],
   ["assistant-repoint", installer({ assistantsNeedRepoint: true, assistants: [{ ...CHATGPT, detected: true, selected: true }], selectedAssistantId: "codex" })],
+  ["assistant-earlier-config", installer({ ...COURSE_READY, assistants: [{ ...CHATGPT, detected: true, configured: true, connected: false, routeReady: false, selected: true }], firstPreview: { available: true, completed: true } })],
   ["assistant-restart", installer({
     ...COURSE_READY,
     assistants: [{ ...CHATGPT, detected: true, configured: true, connected: false, selected: true }],
@@ -184,8 +185,11 @@ const POPUP_STATES = new Map([
   ["paired-not-connected", { status: { ...connection, paired: true } }],
   ["runtime-mismatch", { status: { ...connection, paired: true, versionMismatch: true }, sourceNeedle: "The Morrow app and Morrow Bridge versions do not match. ${VERSION_MISMATCH_RECOVERY}" }],
   ["authentication-failed", { status: { ...connection, ...healthyPopup, authenticationFailed: true } }],
+  ["other-profile", { status: { ...connection, paired: true, otherProfileOwnsConnection: true } }],
+  ["account-ready", { status: { ...connection, ...healthyPopup, courseAccessMode: "account", siteAnchors: [anchor()], bindings: [binding()], bindingCount: 1 }, sourceNeedle: "Your assistant can work across" }],
+  ["account-no-courses", { status: { ...connection, ...healthyPopup, courseAccessMode: "account", siteAnchors: [anchor()] } }],
   ["connected-no-site", { status: { ...connection, ...healthyPopup } }],
-  ["detected-platform", { status: { ...connection, ...healthyPopup }, detectedProvider: "moodle", sourceNeedle: "Morrow Bridge detected" }],
+  ["detected-platform", { status: { ...connection, ...healthyPopup }, detectedProvider: "moodle", sourceNeedle: "Pair your signed-in ${platform}" }],
   ["site-ready-no-course", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor()] } }],
   ["site-stale", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor({ runtimeVerified: false })] }, sourceNeedle: "The saved ${platform" }],
   ["course-ready", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor()], bindings: [binding()], bindingCount: 1 }, sourceNeedle: "This selected course is connected. Keep" }],
@@ -241,6 +245,7 @@ const GUIDE_STATES = new Map([
   ["read-failed", null],
   ["not-paired", { ...connection }],
   ["authentication-failed", { ...connection, paired: true, authenticationFailed: true }],
+  ["other-profile", { ...connection, paired: true, otherProfileOwnsConnection: true }],
   ["connecting", { ...connection, paired: true, connecting: true }],
   ["paired-not-connected", { ...connection, paired: true }],
   ["runtime-mismatch", { ...connection, paired: true, versionMismatch: true }],
@@ -253,7 +258,7 @@ const GUIDE_STATES = new Map([
 const GUIDE_SECTION = "5. Morrow Bridge setup guide";
 const GUIDE_SOURCE_NEEDLES = new Map([
   ["site-saved-not-verified", "or open the saved ${platform"],
-  // The version recovery is one sentence the popup and the Connect Morrow error share.
+  // The version recovery is one sentence the popup and the Pair Morrow error share.
   ["runtime-mismatch", "Morrow and Morrow Bridge report different versions. ${VERSION_MISMATCH_RECOVERY}"],
 ]);
 

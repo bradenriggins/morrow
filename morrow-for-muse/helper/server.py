@@ -31,9 +31,14 @@ ${TREE_STATE_DIR}/helper_token (0600), and exports HELPER_AUTH_TOKEN
 into this process. Every POST/PUT/DELETE/PATCH endpoint and
 GET /screenshot require the X-Helper-Token header (else 403
 {"error":"forbidden"}). Open without a token: GET /status, GET / (the
-sign-in UI, which gets the token injected server-side), GET /logo.png.
-The token stops blind/off-origin API use and port-forward exposure; it
-does not stop a party that can already read the locally served page.
+sign-in UI shell, served WITHOUT the token), GET /logo.png. The live
+token reaches a browser only through the single-use bootstrap exchange
+(M4M-F2): the token holder mints a page code with POST /page-code and
+shows the educator a one-time link /?code=<code>; the first load burns
+the code and gets the token injected, any other reader gets an empty
+token and a notice. The token stops blind/off-origin API use and
+port-forward exposure; a party that can already read the served page
+learns no token without a page code.
 
 Usage:
   CANVAS_BASE=https://myschool.instructure.com python3 helper/server.py
@@ -45,7 +50,13 @@ There is no default tenant: the helper refuses to start without one.
 
 Endpoints (all on 127.0.0.1):
   GET  /                 -> the helper UI (index.html); the server injects
-                           the auth token into a __HELPER_TOKEN__ placeholder
+                           the auth token into a __HELPER_TOKEN__
+                           placeholder ONLY when the request carries a
+                           valid single-use page code (?code=, minted via
+                           POST /page-code); otherwise the placeholder is
+                           served empty with a notice
+  POST /page-code        -> authenticated (X-Helper-Token): mints one
+                           single-use sign-in page code (10 min TTL)
   GET  /logo.png         -> the Morrow logo for the UI
   GET  /status           -> open: {"url", "logged_in", "chromium_alive",
                                "starting", "profile_dir",
@@ -64,7 +75,11 @@ Endpoints (all on 127.0.0.1):
                            (can capture password entry; requires the token)
   POST /input/key        -> PROTECTED: {"kind":"down"|"up","key","code","keyCode"}
   POST /input/mouse      -> PROTECTED: {"kind":"pressed"|"released"|"moved",
-                             "x","y","button"}
+                             "x","y","button"}  x/y: finite page CSS px
+                           inside the browser window, else 400
+  POST /input/wheel      -> PROTECTED: {"x","y","deltaX","deltaY"}  one
+                           scroll step at a page point; |delta| <= 5000,
+                           else 400
   POST /navigate         -> PROTECTED: {"url"}  switch tenant / re-navigate
                            (HTTPS targets only, W4-P2-8)
   POST /cdp/tabs         -> PROTECTED: {}  list live targets
@@ -111,6 +126,7 @@ Endpoints (all on 127.0.0.1):
   POST /input/key        -> {"kind":"down"|"up","key","code","keyCode"}
   POST /input/mouse      -> {"kind":"pressed"|"released"|"moved",
                              "x","y","button"}
+  POST /input/wheel      -> {"x","y","deltaX","deltaY"}
   POST /navigate         -> {"url"}  switch tenant / re-navigate
 
 Hardening (W3-P2-7): per-IP token-bucket rate limiting (429 JSON past
@@ -363,6 +379,22 @@ def _load_helper_token():
         return secret_bytes(raw.encode("utf-8"))
     path = os.environ.get("HELPER_AUTH_TOKEN_FILE", "").strip()
     if path:
+        # M4M-F6 (2026-09-26): the token is minted 0600 but a later
+        # chmod, umask accident, or backup restore can loosen it. Honor
+        # the file only while it is still owner-only: stat before
+        # reading and fail closed when group/other can read it, or a
+        # loosened file silently leaks browser control beyond the owner.
+        try:
+            st = os.stat(path)
+        except OSError as exc:
+            _fatal_token("cannot stat HELPER_AUTH_TOKEN_FILE=%r (%s); "
+                         "refusing to launch unauthenticated"
+                         % (path, exc))
+        if st.st_mode & 0o077:
+            _fatal_token("token file %r is readable by group/other "
+                         "(mode %o); refusing to serve a leaked token "
+                         "(tighten to 0600 and relaunch)"
+                         % (path, st.st_mode & 0o777))
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 file_token = fh.read().strip()
@@ -413,6 +445,18 @@ def _load_helper_token_prev():
     path = os.environ.get("HELPER_AUTH_TOKEN_PREV_FILE", "").strip()
     if not path:
         return None, 0
+    # M4M-F6 (2026-09-26): same owner-only discipline as the live token
+    # file. A loosened prev file is ignored (fail closed to
+    # current-token-only, never fatal: rotation bookkeeping must not
+    # wedge the server), with a loud warning so the leak is fixed.
+    try:
+        if os.stat(path).st_mode & 0o077:
+            print("WARNING: ignoring pre-rotation token file %r: readable "
+                  "by group/other (tighten to 0600)" % path,
+                  file=sys.stderr)
+            return None, 0
+    except OSError:
+        return None, 0
     try:
         with open(path, "r", encoding="utf-8") as fh:
             raw = fh.read().strip()
@@ -431,6 +475,54 @@ def _load_helper_token_prev():
 HELPER_TOKEN_PREV, HELPER_TOKEN_PREV_REPLACED_AT = _load_helper_token_prev()
 HELPER_TOKEN_PREV_GRACE_SECONDS = _int_env(
     "HELPER_TOKEN_PREV_GRACE_SECONDS", 300)
+
+
+# M4M-F2 (2026-09-26): single-use bootstrap exchange for the sign-in UI.
+# A bare GET / used to carry the live token to any loopback reader. Now
+# the page is served WITHOUT the token unless the request presents a
+# page code: a 128-bit secret minted via authenticated POST /page-code,
+# shown to the educator as a one-time link, burned on first page load
+# (10 minute TTL, at most 32 outstanding). Loopback readers, rebound
+# pages, and port-forward parties without a code get an empty token and
+# a notice; the educator with the link gets the full UI. Codes are
+# never logged (see _redacted_page_path).
+_PAGE_CODE_TTL_SECONDS = 600
+_PAGE_CODE_MAX_OUTSTANDING = 32
+_PAGE_CODES = {}
+_PAGE_CODES_LOCK = threading.Lock()
+
+
+def _mint_page_code():
+    import secrets as _secrets
+    code = _secrets.token_hex(16)
+    now = time.time()
+    with _PAGE_CODES_LOCK:
+        for old, exp in [item for item in _PAGE_CODES.items()
+                         if item[1] <= now]:
+            _PAGE_CODES.pop(old, None)
+        while len(_PAGE_CODES) >= _PAGE_CODE_MAX_OUTSTANDING:
+            _PAGE_CODES.pop(next(iter(_PAGE_CODES)))
+        _PAGE_CODES[code] = now + _PAGE_CODE_TTL_SECONDS
+    return code
+
+
+def _redeem_page_code(code):
+    if not isinstance(code, str) or not code:
+        return False
+    with _PAGE_CODES_LOCK:
+        exp = _PAGE_CODES.pop(code.strip(), None)
+        if exp is None:
+            return False
+        return exp > time.time()
+
+
+def _redacted_page_path(path):
+    """The request path safe for logs: page routes carry ?code= secrets,
+    so only the route (never the query) is logged for them."""
+    base = path.split("?", 1)[0]
+    if base in ("/", "/index.html"):
+        return base
+    return path
 
 
 def _token_ok(presented):
@@ -512,20 +604,50 @@ if os.environ.get("LOGIN_HELPER_BIND_PUBLIC") == "1" \
           file=sys.stderr, flush=True)
 
 # W5-P0-1: DNS-rebinding defense. The Host header must name this
-# listener: a loopback literal, or the configured BIND. A hostile page
+# listener: a loopback literal, the configured BIND, or (M4M-F7) one of
+# the server's own LAN names when BIND is a wildcard. A hostile page
 # running in the helper's own Chromium can rebind its DNS to 127.0.0.1
 # and become same-origin with the helper; without this gate it could
-# fetch the open GET / page, steal the injected X-Helper-Token, and
-# drive the full browser API with it. The gate runs before rate
-# limiting, routing, and auth on every method, and its 403 body
-# carries no token material. Legitimate clients (the sign-in UI, the
-# transport's _helper_request) all address the helper as 127.0.0.1,
-# so the allowlist is exactly the loopback literals plus BIND (which
-# covers the public-bind opt-in's LAN address/hostname).
+# fetch the served page and drive the full browser API with a stolen
+# credential (M4M-F2: the live token is only injected for a valid
+# single-use page code now, so a code-less rebound fetch learns
+# nothing). The gate runs before rate limiting, routing, and auth on
+# every method, and its 403 body carries no token material. Legitimate
+# clients (the sign-in UI, the transport's _helper_request) all address
+# the helper as 127.0.0.1, so the allowlist is exactly the loopback
+# literals plus BIND (which covers the public-bind opt-in's LAN
+# address/hostname) plus the enumerated LAN names on a wildcard bind.
+# M4M-F7 (2026-09-26): the server's own LAN names, enumerated once at
+# startup. A wildcard BIND (0.0.0.0/::) names no Host header, so adding
+# it verbatim rejects the bind's own LAN clients. Best effort, stdlib
+# only, no packets sent; empty on failure (the wildcard bind is then
+# loopback-only until the operator pins an explicit LAN IP).
+def _local_lan_names():
+    names = set()
+    try:
+        host = socket.gethostname()
+        if host and host.strip():
+            names.add(host.strip().lower())
+        for (_fam, _typ, _proto, _canon, sockaddr) in socket.getaddrinfo(
+                host, None):
+            ip = (sockaddr[0] or "").strip().lower()
+            if ip:
+                names.add(ip.split("%", 1)[0])
+    except OSError:
+        pass
+    return names
+
+
 def _allowed_host_names():
     names = {"127.0.0.1", "localhost", "::1"}
     bind = (BIND or "").strip().lower()
-    if bind:
+    if bind in ("0.0.0.0", "::"):
+        # Wildcard binds cannot name a Host, so accept the server's own
+        # LAN names instead. Still an exact startup-enumerated set: the
+        # DNS-rebinding gate stays exact-match, foreign Hosts still 403.
+        # (A wildcard BIND already requires LOGIN_HELPER_BIND_PUBLIC=1.)
+        names.update(_local_lan_names())
+    elif bind:
         names.add(bind)
     return names
 
@@ -570,6 +692,37 @@ def _steady_now():
     wall0, mono0 = _clock_anchor
     return wall0 + (time.monotonic() - mono0)
 
+# M4M-F1 (2026-09-26): the production ports are the tree's DEPLOYED
+# ports, never literals. helper/env pins LOGIN_HELPER_PORT=8902 and
+# LOGIN_HELPER_CDP_PORT=19224 for this tree while the code defaults stay
+# 8901/19223 (the standalone helper's ports); a guard hardcoded to the
+# defaults lets a bare launch squat the real 8902/19224 helper. Read the
+# pins from the tree env file itself (MORROW_HELPER_ENV_FILE seam
+# honored), never os.environ: an explicit shell export of a scratch port
+# is intent, not production. The union of defaults and pins is guarded.
+def _tree_production_ports():
+    http = {8901}
+    cdp = {19223}
+    try:
+        from config.tree_config import parse_env_file as _parse_env
+        env_path = os.environ.get("MORROW_HELPER_ENV_FILE") \
+            or os.path.join(_HERE, "env")
+        data = _parse_env(env_path)
+        for key, into in (("LOGIN_HELPER_PORT", http),
+                          ("LOGIN_HELPER_CDP_PORT", cdp)):
+            raw = (data.get(key) or "").strip()
+            if raw:
+                try:
+                    into.add(int(raw))
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return http, cdp
+
+
+_PROD_HTTP_PORTS, _PROD_CDP_PORTS = _tree_production_ports()
+
 # P0-1/P0-4 (W2-P1-17 regression 2026-09-21: a rework narrowed this guard to
 # fire only when the profile IS the live profile, letting a bare launch
 # with any other profile squat the production ports. The wave-1 mandate
@@ -577,7 +730,7 @@ def _steady_now():
 # keepalive.sh always exports LOGIN_HELPER_PROFILE_DIR, so this only stops
 # misconfigured bare launches. LOGIN_HELPER_PRODUCTION=1 is the explicit
 # escape hatch.
-if (PORT == 8901 or CDP_PORT == 19223) \
+if (PORT in _PROD_HTTP_PORTS or CDP_PORT in _PROD_CDP_PORTS) \
         and "LOGIN_HELPER_PROFILE_DIR" not in os.environ \
         and os.environ.get("LOGIN_HELPER_PRODUCTION") != "1":
     print("FATAL: refusing production ports without LOGIN_HELPER_PROFILE_DIR "
@@ -595,7 +748,7 @@ if (PORT == 8901 or CDP_PORT == 19223) \
 # that genuinely mean the default profile:
 # LOGIN_HELPER_ALLOW_TEST_ON_LIVE_PROFILE=1.
 if (os.path.realpath(PROFILE_DIR) == os.path.realpath(DEFAULT_PROFILE)
-        and not (PORT == 8901 and CDP_PORT == 19223)
+        and not (PORT in _PROD_HTTP_PORTS and CDP_PORT in _PROD_CDP_PORTS)
         and "LOGIN_HELPER_PROFILE_DIR" not in os.environ
         and os.environ.get("LOGIN_HELPER_ALLOW_TEST_ON_LIVE_PROFILE") != "1"):
     print("FATAL: refusing to run with the tree's live profile "
@@ -700,8 +853,8 @@ def _validate_ca_pem_env():
 # Event counters. We log counts and types ONLY. Never key values, text,
 # coordinates are not logged either (positions on a form are treated as
 # uninteresting, but we keep the logs minimal anyway).
-_counters = {"key": 0, "mouse": 0, "screenshot": 0, "status": 0,
-             "navigate": 0, "cdp": 0}
+_counters = {"key": 0, "mouse": 0, "wheel": 0, "screenshot": 0,
+             "status": 0, "navigate": 0, "cdp": 0}
 _counters_lock = threading.Lock()
 
 
@@ -1299,16 +1452,16 @@ class HelperBrowser:
         data = (res or {}).get("data", "")
         return base64.b64decode(data)
 
-    def key(self, kind, key, code, key_code):
+    def key(self, kind, key, code, key_code, modifiers=0):
         """Forward one key event. Values are forwarded to CDP only and are
         never logged, stored, or returned."""
         cdp_type = "keyDown" if kind == "down" else "keyUp"
-        params = {"type": cdp_type}
+        params = {"type": cdp_type, "modifiers": modifiers}
         if isinstance(key, str) and key:
             params["key"] = key[:32]
             # Printable single characters: include text so the char lands
             # in the focused field (covers password inputs too).
-            if kind == "down" and len(key) == 1:
+            if kind == "down" and len(key) == 1 and not modifiers & 7:
                 params["text"] = key
         if isinstance(code, str) and code:
             params["code"] = code[:32]
@@ -1320,6 +1473,14 @@ class HelperBrowser:
         # Keep the key lane independent from screenshots. CDP.call owns its
         # connection, so this can be dispatched immediately and concurrently.
         self.cdp.call(self.tab, "Input.dispatchKeyEvent", params, timeout=10)
+
+    def wheel(self, x, y, delta_x, delta_y):
+        """Forward one scroll step at page point (x, y)."""
+        params = {"type": "mouseWheel", "x": float(x), "y": float(y),
+                  "deltaX": float(delta_x), "deltaY": float(delta_y)}
+        with self._lock:
+            self.cdp.call(self.tab, "Input.dispatchMouseEvent", params,
+                          timeout=10)
 
     def mouse(self, kind, x, y, button="left"):
         """Forward one mouse event. kind: pressed | released | moved."""
@@ -1513,6 +1674,34 @@ class _HttpError(Exception):
         self.message = message
 
 
+# Pointer input is in page CSS pixels inside the browser window, and one
+# scroll step moves at most this far. The UI clamps to the screenshot and
+# coalesces wheel and swipe motion; anything outside these bounds did not
+# come from it and is refused before CDP sees it.
+_MAX_WHEEL_DELTA = 5000
+
+
+def _input_number(body, key, low, high, include_high=False):
+    """body[key] as a finite float in [low, high) (or [low, high] with
+    include_high), else a 400 _HttpError.
+    JSON booleans and strings are refused; Python's JSON parser accepts
+    NaN and Infinity literals, so finiteness is checked explicitly."""
+    value = body.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _HttpError(400, "%s must be a number" % key)
+    value = float(value)
+    if value != value or value in (float("inf"), float("-inf")) \
+            or not (low <= value <= high if include_high
+                    else low <= value < high):
+        raise _HttpError(400, "%s is out of range" % key)
+    return value
+
+
+def _input_point(body):
+    return (_input_number(body, "x", 0, VIEWPORT[0]),
+            _input_number(body, "y", 0, VIEWPORT[1]))
+
+
 # W3-P2-9: known paths and their allowed methods. A request to a known
 # path with any other method gets 405 JSON (not 404); an unknown path
 # gets 404 JSON.
@@ -1522,8 +1711,10 @@ _ROUTES = {
     "/logo.png": ("GET",),
     "/status": ("GET",),
     "/screenshot": ("GET",),
+    "/page-code": ("POST",),
     "/input/key": ("POST",),
     "/input/mouse": ("POST",),
+    "/input/wheel": ("POST",),
     "/navigate": ("POST",),
     "/cdp/tabs": ("POST",),
     "/cdp/new-tab": ("POST",),
@@ -1676,7 +1867,7 @@ class Handler(BaseHTTPRequestHandler):
             return False, False
         return method in _ROUTES[path], True
 
-    def _send_file(self, name, content_type):
+    def _send_file(self, name, content_type, inject_token=False):
         try:
             with open(os.path.join(_HERE, name), "rb") as f:
                 body = f.read()
@@ -1684,15 +1875,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
             return
         if name == "index.html":
-            # W3-P0-7: the sign-in UI is the one page allowed to call the
-            # protected endpoints, so the server injects the token into
-            # the __HELPER_TOKEN__ placeholder when serving it. The token
-            # never appears in a URL, a query string, or the logs.
-            # Documented honestly in helper/README.md: this stops
-            # blind/off-origin API use and port-forward exposure, not a
-            # party that can already read the locally served page.
+            # W3-P0-7 / M4M-F2: the sign-in UI is the one page allowed to
+            # call the protected endpoints. The live token is injected
+            # into the __HELPER_TOKEN__ placeholder ONLY for a request
+            # that presented a valid single-use page code (?code=, burned
+            # on use); every other load gets an empty token plus the
+            # page's notice, so an arbitrary loopback reader learns no
+            # token. The live token never appears in a URL, a query
+            # string, or the logs (page codes are redacted from logs too).
             body = body.replace(b"__HELPER_TOKEN__",
-                                bytes(HELPER_TOKEN))
+                                bytes(HELPER_TOKEN) if inject_token else b"")
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -1749,7 +1941,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
-                self._send_file("index.html", "text/html; charset=utf-8")
+                # M4M-F2: redeem a single-use page code (?code=) for the
+                # token injection. HEAD never redeems (headers only, no
+                # body to inject into); a missing, reused, or expired
+                # code serves the tokenless shell with its notice.
+                inject = False
+                if not head_only and "?" in self.path:
+                    qs = urllib.parse.parse_qs(
+                        self.path.split("?", 1)[1])
+                    presented = (qs.get("code") or [""])[0]
+                    if presented:
+                        inject = _redeem_page_code(presented)
+                self._send_file("index.html", "text/html; charset=utf-8",
+                                inject_token=inject)
             elif path == "/logo.png":
                 self._send_file("logo.png", "image/png")
             elif path == "/status":
@@ -1794,7 +1998,10 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "not found"}, 404)
         except Exception as exc:
-            _log("GET %s failed: %s" % (self.path[:60], type(exc).__name__))
+            # M4M-F2: page URLs carry ?code= secrets; log the route only.
+            _log("GET %s failed: %s"
+                 % (_redacted_page_path(self.path)[:60],
+                    type(exc).__name__))
             self._send_json({"error": "internal"}, 500)
         finally:
             self._head_only = False
@@ -1818,6 +2025,13 @@ class Handler(BaseHTTPRequestHandler):
             if not self._require_auth():
                 return
             path = self.path.split("?", 1)[0]
+            if path == "/page-code":
+                # M4M-F2: authenticated mint of a single-use sign-in page
+                # code (the POST gate above already required the launch
+                # token). Returned to the token holder only, never
+                # logged; the code burns on its first page load.
+                self._send_json({"page_code": _mint_page_code()})
+                return
             if path == "/input/key":
                 body = self._read_json()
                 kind = body.get("kind")
@@ -1825,8 +2039,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": "kind must be down|up"}, 400)
                     return
                 # Values are forwarded to CDP only. We never log them.
+                modifiers = body.get("modifiers", 0)
+                if type(modifiers) is not int or not 0 <= modifiers <= 15:
+                    self._send_json({"error": "invalid key modifiers"}, 400)
+                    return
                 BROWSER.key(kind, body.get("key"), body.get("code"),
-                            body.get("keyCode"))
+                            body.get("keyCode"), modifiers)
                 n = _bump("key")
                 if n % 25 == 0:
                     _log("key events: %d (types only, no values)" % n)
@@ -1838,11 +2056,23 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json(
                         {"error": "kind must be pressed|released|moved"}, 400)
                     return
-                BROWSER.mouse(kind, body.get("x", 0), body.get("y", 0),
-                              body.get("button", "left"))
+                x, y = _input_point(body)
+                BROWSER.mouse(kind, x, y, body.get("button", "left"))
                 n = _bump("mouse")
                 if n % 50 == 0:
                     _log("mouse events: %d (types only)" % n)
+                self._send_json({"ok": True})
+            elif path == "/input/wheel":
+                body = self._read_json()
+                x, y = _input_point(body)
+                delta_x = _input_number(body, "deltaX", -_MAX_WHEEL_DELTA,
+                                        _MAX_WHEEL_DELTA, include_high=True)
+                delta_y = _input_number(body, "deltaY", -_MAX_WHEEL_DELTA,
+                                        _MAX_WHEEL_DELTA, include_high=True)
+                BROWSER.wheel(x, y, delta_x, delta_y)
+                n = _bump("wheel")
+                if n % 50 == 0:
+                    _log("wheel events: %d (types only)" % n)
                 self._send_json({"ok": True})
             elif path == "/navigate":
                 body = self._read_json()

@@ -149,7 +149,7 @@ assert.equal(typeof messageHandler, "function", "the service worker registered n
 /** Sends the worker one of the messages the popup sends, and answers with what it replies. */
 function send(message) {
   return new Promise((resolve, reject) => {
-    const answered = messageHandler(message, {}, resolve);
+    const answered = messageHandler(message, { id: EXTENSION_ID, url: `${CATALOG_PREFIX}popup/popup.html` }, resolve);
     if (answered !== true) reject(new Error(`the service worker did not answer ${message.type}`));
   });
 }
