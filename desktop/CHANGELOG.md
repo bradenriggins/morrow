@@ -2,9 +2,9 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
-## 1.0.8 (2026-09-29)
+## 1.0.8 (2026-09-30)
 
-This candidate includes Morrow Bridge 1.0.127. It is not published. Native platform evidence is recorded separately from source checks.
+This release includes Morrow Bridge 1.0.127 and unsigned installers for Mac with Apple silicon and Windows x64.
 
 - Pair Canvas or Moodle accounts once. Choose Selected courses to restrict access to courses you allow, or Account access to work across available courses. Switching modes keeps the pairing. Site-wide actions require Account access. New courses start in Plan; Edit permission stays separate.
 - Give your assistant course names, course IDs, or course links. Neither mode has a course-count limit. Account access refreshes courses automatically, saves progress for large scans, and sends large inventories in bounded parts.
