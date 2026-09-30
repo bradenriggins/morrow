@@ -224,7 +224,7 @@ export function detailText(status, detectedProvider = null) {
           ? `Finding available courses… ${status.discoveredCourseCount || 0} found. Your previous course scope stays active until the scan is complete. You can close this popup; discovery continues automatically.`
         : binding?.runtimeVerified === true
           ? status.courseAccessMode === "account"
-            ? `Your assistant can work across ${status.bindingCount || status.bindings?.length || 1} courses together. Give it a course name, course ID, or course link. Keep one signed-in ${platform || "learning platform"} tab open for this account.`
+            ? `Your assistant can work across ${plural(status.bindingCount || status.bindings?.length || 1, "course")} together. Give it a course name, course ID, or course link. Keep one signed-in ${platform || "learning platform"} tab open for this account.`
             : `This selected course is connected. Keep one signed-in ${courseTabName(platform)} tab open while you work in Morrow.`
           : binding
             ? closedBindingDetail(platform, savedPlatform)
