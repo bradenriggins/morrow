@@ -13,6 +13,10 @@ This candidate includes Morrow Bridge 1.0.127. It is not published. Native platf
 - Bound Bridge messages and privacy roster continuations. Keep learner protection failures distinct from processing failures, and keep active result pages available.
 - Improve narrow setup screens, connection guidance, and setting feedback. Keep credentialed Item Bank execution isolated from page scripts.
 
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+
 ## 1.0.7 (2026-09-25)
 
 This Mac release includes the unsigned `Morrow-1.0.7-mac-arm64.dmg` and `Morrow-1.0.7-mac-arm64.zip`, with Morrow Bridge 1.0.126. Windows remains on the published 1.0.5 installer; there is no Windows 1.0.7 installer or native Windows 1.0.7 smoke receipt.
