@@ -191,7 +191,7 @@ function codexTable(workspaceRoot, route = null) {
   return [
     "[mcp_servers.morrow]",
     "command = \"node\"",
-    `cwd = "${workspaceRoot}"`,
+    `cwd = ${JSON.stringify(workspaceRoot)}`,
     `env = { MORROW_UPSTREAMS_FILE = "/Morrow/State/morrow.upstreams.json"${route ? `, MORROW_ROUTE_ID = "${route.id}", MORROW_ROUTE_GENERATION = "${route.generation}"` : ""} }`,
     ""
   ].join("\n");
