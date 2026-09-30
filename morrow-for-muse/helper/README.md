@@ -295,3 +295,33 @@ Keystrokes go straight into the Canvas page via CDP. The server logs event
 counts and types only: never key values, text, coordinates, cookies, or
 tokens. The profile directory holds the session and is never part of the
 download.
+
+
+## Ordered private input
+
+`POST /input/batch` requires the helper launch token and the existing Host,
+origin, rate, body-size, and request-budget gates. `/status` supplies
+`input_epoch`, a non-secret helper process identity. The payload has exactly
+`epoch`, `stream_id` (32 random lowercase hex), `sequence` (starts at 1), and
+`operations` (1–32). Each operation is either `{"type":"text","text":"..."}`
+or `{"type":"key","key":"Tab","code":"Tab","keyCode":9,"modifiers":0}`.
+Text is bounded to 4096 characters per operation and 8192 UTF-8 bytes total.
+Control key codes are 0–65535 and modifiers 0–15. Validation completes before
+any input. The browser applies text with `Input.insertText` and control keys
+as ordered down/up pairs, under a 10-second batch deadline.
+
+Success returns `{"ok":true,"sequence":1,"replayed":false}`. An identical
+retry of the last acknowledged sequence returns `replayed:true` without
+applying input again. Changed payloads, stale sequences, gaps, and an old
+helper epoch refuse with 409. A partial browser error blocks that stream;
+the outcome is unknown. Clear pending input, fetch a new frame, and let the
+user deliberately resume. Never automatically retype uncertain input.
+
+One card document uses one stream and one ordered queue. Keep the same body,
+sequence, and epoch for a transport retry. Advance only after acknowledgement.
+Coalesce text briefly and flush before pointer/control-key focus changes.
+Never route a password through agent chat, storage, logs, or plaintext local
+echo. Replay guards retain only hashes and last acknowledgements, with at most
+32 streams per helper lifetime. At capacity, new streams refuse with 429;
+no guard is evicted. Existing streams still work. A helper restart creates a
+new epoch. This endpoint does not widen the generic CDP allowlist.

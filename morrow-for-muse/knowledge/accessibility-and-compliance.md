@@ -22,6 +22,37 @@ Do not invent alt text from filenames. Decorative images should not burden
 screen readers. Complex diagrams need an equivalent explanation of their
 instructional meaning. Captions need accuracy review, not just existence.
 
+## Use the shipped Canvas checker first
+
+The package includes [catalog/a11y](../catalog/a11y/README.md). Its Canvas
+parity detector ports the 13 rules of Instructure's `tinymce-a11y-checker`,
+pinned at `1c9f0bb8013ed69c4f2efe11fd483025469b7e6c`. Use those signals as the
+baseline for Canvas content. Report the separate Morrow extended-rule findings
+as additional checks. Do not mix their rule counts or present them as Canvas
+checker results.
+
+For a supported item, run `bin/morrow audit --target-kind canvas_page
+--course-id COURSE_ID --target-ids '{"page_url":"PAGE_URL"}' --format human`
+with actual identifiers from a fresh read. The read-only runner is wired for
+Canvas pages, assignment descriptions, New Quiz instructions, and New Quiz
+item content. Use `python3 catalog/a11y/runner.py list-targets` for the current
+inventory. Metadata for other target types does not make them callable.
+Moodle, rubric, discussion, classic quiz, syllabus, and file audits are not
+wired into this runner and must not be promised.
+
+Record source coverage and each detector's availability. Contrast checks use
+inline styles and approximations; they do not measure a rendered page's full
+computed styles. Python HTML parsing and string-length handling can differ
+from the browser checker. Muse cannot supply the runner's Bridge render
+evidence. These findings are limited HTML signals, not exact browser parity
+or a conformance result. Follow with saved-page rendering, keyboard review,
+and relevant manual checks.
+
+Image-alt planners create plans and stop. They do not authorize or execute a
+repair. The package's repair execution entry list is empty. Do not claim
+“fixed” from a plan, change text that depends on the image's meaning without
+evidence, or promise automatic bulk repairs.
+
 ## Student privacy
 
 FERPA guidance concerns disclosure and use of education records; installing a

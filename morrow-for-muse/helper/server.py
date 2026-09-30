@@ -73,6 +73,8 @@ Endpoints (all on 127.0.0.1):
     dies. Cookie values and names never leave this endpoint.
   GET  /screenshot       -> PROTECTED: PNG bytes of the current page
                            (can capture password entry; requires the token)
+  POST /input/batch      -> PROTECTED: ordered text/control-key operations,
+                           helper epoch, stream_id and sequence retry guards
   POST /input/key        -> PROTECTED: {"kind":"down"|"up","key","code","keyCode"}
   POST /input/mouse      -> PROTECTED: {"kind":"pressed"|"released"|"moved",
                              "x","y","button"}  x/y: finite page CSS px
@@ -1408,6 +1410,7 @@ class HelperBrowser:
                 "chromium_alive": chromium_alive,
                 "starting": starting,
                 "profile_dir": _display_profile_dir(PROFILE_DIR),
+                "input_epoch": INPUT_BATCHES.epoch,
                 "profile_has_cookies": _profile_has_cookies(),
                 # W4-P2-3: session-cookie expiry horizon, metadata only
                 # (whole days, never cookie names/values). keepalive.sh
@@ -1452,7 +1455,7 @@ class HelperBrowser:
         data = (res or {}).get("data", "")
         return base64.b64decode(data)
 
-    def key(self, kind, key, code, key_code, modifiers=0):
+    def key(self, kind, key, code, key_code, modifiers=0, timeout=10):
         """Forward one key event. Values are forwarded to CDP only and are
         never logged, stored, or returned."""
         cdp_type = "keyDown" if kind == "down" else "keyUp"
@@ -1472,7 +1475,26 @@ class HelperBrowser:
             pass
         # Keep the key lane independent from screenshots. CDP.call owns its
         # connection, so this can be dispatched immediately and concurrently.
-        self.cdp.call(self.tab, "Input.dispatchKeyEvent", params, timeout=10)
+        self.cdp.call(self.tab, "Input.dispatchKeyEvent", params, timeout=timeout)
+
+    def input_batch(self, operations):
+        """Apply already validated input in order, without a round trip per char."""
+        deadline = time.monotonic() + 10
+        def remaining():
+            budget = deadline - time.monotonic()
+            if budget <= 0:
+                raise TimeoutError("input deadline exceeded")
+            return budget
+        with self._lock:
+            for operation in operations:
+                if operation["type"] == "text":
+                    self.cdp.call(self.tab, "Input.insertText",
+                                  {"text": operation["text"]}, timeout=remaining())
+                else:
+                    for kind in ("down", "up"):
+                        self.key(kind, operation["key"], operation["code"],
+                                 operation["keyCode"], operation["modifiers"],
+                                 timeout=remaining())
 
     def wheel(self, x, y, delta_x, delta_y):
         """Forward one scroll step at page point (x, y)."""
@@ -1674,6 +1696,87 @@ class _HttpError(Exception):
         self.message = message
 
 
+class InputBatches:
+    """Bounded sequence guards retain hashes and acknowledgements, never text.
+
+    Old acknowledgements and partial failures are refused instead of replayed.
+    Streams are not evicted: eviction could type a delayed retry twice.
+    """
+    def __init__(self):
+        self.epoch = os.urandom(16).hex()
+        self.streams = {}
+        self.lock = threading.Lock()
+
+    def run(self, body, apply):
+        if not isinstance(body, dict) or set(body) != {
+                "epoch", "stream_id", "sequence", "operations"}:
+            raise _HttpError(400, "invalid input batch")
+        stream, sequence = body["stream_id"], body["sequence"]
+        if (not isinstance(stream, str) or len(stream) != 32
+                or any(c not in "0123456789abcdef" for c in stream)
+                or type(sequence) is not int or not 1 <= sequence <= 2**53 - 1):
+            raise _HttpError(400, "invalid input sequence")
+        operations = body["operations"]
+        if not isinstance(operations, list) or not 1 <= len(operations) <= 32:
+            raise _HttpError(400, "invalid input operations")
+        text_bytes = 0
+        for operation in operations:
+            if not isinstance(operation, dict):
+                raise _HttpError(400, "invalid input operation")
+            if operation.get("type") == "text":
+                text = operation.get("text")
+                if (set(operation) != {"type", "text"}
+                        or not isinstance(text, str) or not 1 <= len(text) <= 4096):
+                    raise _HttpError(400, "invalid input text")
+                try:
+                    text_bytes += len(text.encode("utf-8"))
+                except UnicodeError:
+                    raise _HttpError(400, "invalid input text") from None
+            elif operation.get("type") == "key":
+                if (set(operation) != {"type", "key", "code", "keyCode", "modifiers"}
+                        or not isinstance(operation["key"], str)
+                        or not 1 <= len(operation["key"]) <= 32
+                        or not isinstance(operation["code"], str)
+                        or len(operation["code"]) > 32
+                        or type(operation["keyCode"]) is not int
+                        or not 0 <= operation["keyCode"] <= 65535
+                        or type(operation["modifiers"]) is not int
+                        or not 0 <= operation["modifiers"] <= 15):
+                    raise _HttpError(400, "invalid input key")
+            else:
+                raise _HttpError(400, "invalid input operation")
+        if text_bytes > 8192:
+            raise _HttpError(413, "input text too large")
+        digest = hashlib.sha256(json.dumps(operations, sort_keys=True,
+                                separators=(",", ":")).encode("utf-8")).digest()
+        with self.lock:
+            if body["epoch"] != self.epoch:
+                raise _HttpError(409, "helper restarted; refresh before typing again")
+            previous = self.streams.get(stream)
+            if previous is not None:
+                last, previous_digest, failed = previous
+                if failed:
+                    raise _HttpError(409, "input outcome unknown; refresh before typing again")
+                if sequence == last and digest == previous_digest:
+                    return {"ok": True, "sequence": sequence, "replayed": True}
+                if sequence != last + 1:
+                    raise _HttpError(409, "input sequence conflict; refresh before typing again")
+            elif sequence != 1:
+                raise _HttpError(409, "input sequence must start at 1")
+            elif len(self.streams) >= 32:
+                raise _HttpError(429, "input session capacity reached; restart helper")
+            self.streams[stream] = (sequence, digest, True)
+            try:
+                apply(operations)
+            except Exception:
+                raise _HttpError(409, "input outcome unknown; refresh before typing again") from None
+            self.streams[stream] = (sequence, digest, False)
+            return {"ok": True, "sequence": sequence, "replayed": False}
+
+
+INPUT_BATCHES = InputBatches()
+
+
 # Pointer input is in page CSS pixels inside the browser window, and one
 # scroll step moves at most this far. The UI clamps to the screenshot and
 # coalesces wheel and swipe motion; anything outside these bounds did not
@@ -1713,6 +1816,7 @@ _ROUTES = {
     "/screenshot": ("GET",),
     "/page-code": ("POST",),
     "/input/key": ("POST",),
+    "/input/batch": ("POST",),
     "/input/mouse": ("POST",),
     "/input/wheel": ("POST",),
     "/navigate": ("POST",),
@@ -2032,7 +2136,9 @@ class Handler(BaseHTTPRequestHandler):
                 # logged; the code burns on its first page load.
                 self._send_json({"page_code": _mint_page_code()})
                 return
-            if path == "/input/key":
+            if path == "/input/batch":
+                self._send_json(INPUT_BATCHES.run(self._read_json(), BROWSER.input_batch))
+            elif path == "/input/key":
                 body = self._read_json()
                 kind = body.get("kind")
                 if kind not in ("down", "up"):

@@ -13,8 +13,7 @@ not be claimed as product behavior.
 ## The default: preserve, don't redesign
 
 Ported to: agent behavior only (this file). The a11y repair
-manifests under `catalog/a11y/` (source tree only; not shipped in the
-distribution) encode the same discipline for
+manifests shipped under `catalog/a11y/` encode the same discipline for
 repairs (one selected fix at a time, all other item state
 preserved, judged against the current state Canvas holds).
 
@@ -72,8 +71,8 @@ automatically; file verification against saved bytes).
 
 Ported to: the Morrow plan manifests under `catalog/a11y/` (repair
 manifests for course pages, assignments, discussions, classic quiz
-descriptions, classic quiz questions, and New Quiz items; source
-tree only, not shipped in the distribution), which
+descriptions, classic quiz questions, and New Quiz items; shipped
+planning artifacts), which
 encode this discipline: repair one selected missing `alt` at a time,
 preserve all other item state, judge an edit against the current
 state Canvas holds (refuse only for a media problem the change would
@@ -81,10 +80,12 @@ add), and verify with saved-state readback. Repairing one image is
 never refused because a different image still needs work; adding a
 second copy of an undescribed image is still refused.
 
-These manifests are plan artifacts, not live-proven v1 operations:
-they describe a repair workflow, they do not authorize dispatching
-one. Dispatch only through the governed executor with the educator's
-approval.
+These manifests produce plans; they do not apply repairs. Only the wired
+Canvas targets in [the runner](../catalog/a11y/README.md) can be read and
+planned. An unwired target refuses. The package has no admitted accessibility
+repair execution entries. Do not claim an automatic repair or treat a plan
+as a completed change. Use the governed executor only for an actually
+admitted write, with the current Plan/Edit and deletion-confirmation rules.
 
 ## What is NOT ported
 
