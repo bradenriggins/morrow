@@ -19,6 +19,7 @@ import {
   normalizeBridgePrivateAttachments,
   normalizeBridgePrivateConversation,
   normalizeBridgeUiState,
+  normalizeBridgeOuterGrant,
   parseBridgeClientMessage,
   parseBridgeAuthenticate,
   parseBridgeHello,
@@ -52,6 +53,7 @@ const DEFAULT_AUTH_TIMEOUT_MS = 5_000;
 const DEFAULT_CALL_TIMEOUT_MS = 45_000;
 const DEFAULT_HEARTBEAT_MS = 20_000;
 const DEFAULT_SHUTDOWN_GRACE_MS = 250;
+const DEFAULT_BINDING_RECOVERY_TIMEOUT_MS = 30_000;
 const MAX_PAIRING_REQUESTS = 32;
 // The Bridge confirms a pairing right after it asks for one, in the same Connect Morrow step.
 const PAIRING_TTL_MS = 2 * 60_000;
@@ -125,6 +127,11 @@ export interface LoopbackBridgeOptions {
    * the owner resends that state here.
    */
   readonly onActivated?: () => void;
+  /**
+   * How long a request for a closed course waits while the Bridge proves that course again,
+   * including opening its site. Default 30000, which covers the Bridge's own 20-second page load.
+   */
+  readonly bindingRecoveryTimeoutMs?: number;
 }
 
 export interface BridgePairingSecret {
@@ -192,11 +199,13 @@ interface PendingRequest {
 interface ActiveClient {
   readonly socket: WebSocket;
   readonly extensionId: string;
+  readonly instanceId: string | undefined;
   readonly runtimeRevision: string;
   readonly catalogDigest: string;
   readonly generation: number;
   readonly connectedAt: number;
   bindings: readonly BridgeBinding[];
+  bindingSync?: { readonly id: string; nextPart: number; lastSeenAt: number; readonly bindings: Map<string, BridgeBinding> };
   lastSeenAt: number;
 }
 
@@ -414,6 +423,9 @@ export class LoopbackBridgeServer {
   private active: ActiveClient | null = null;
   private generation = 0;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private readonly bindingRecoveryTimeoutMs: number;
+  /** One recovery per course connection at a time, so requests that arrive together open one tab. */
+  private readonly recoveries = new Map<string, Promise<boolean>>();
   private listeningPort: number | null = null;
   private started = false;
   private portInUse = false;
@@ -438,6 +450,7 @@ export class LoopbackBridgeServer {
     this.callTimeoutMs = exactTimeout(options.callTimeoutMs, DEFAULT_CALL_TIMEOUT_MS, "callTimeoutMs");
     this.heartbeatMs = exactTimeout(options.heartbeatMs, DEFAULT_HEARTBEAT_MS, "heartbeatMs");
     this.shutdownGraceMs = exactTimeout(options.shutdownGraceMs, DEFAULT_SHUTDOWN_GRACE_MS, "shutdownGraceMs");
+    this.bindingRecoveryTimeoutMs = exactTimeout(options.bindingRecoveryTimeoutMs, DEFAULT_BINDING_RECOVERY_TIMEOUT_MS, "bindingRecoveryTimeoutMs");
     this.writeReceiptCapacity = exactCapacity(options.writeReceiptCapacity);
     this.allowMissingOriginForTests = options.allowMissingOriginForTests === true;
     this.pairingEnabled = options.pairingEnabled === true;
@@ -783,14 +796,25 @@ export class LoopbackBridgeServer {
 
   private activate(socket: WebSocket, hello: BridgeHello): void {
     if (this.active && this.active.socket !== socket) {
-      this.active.socket.close(4409, "superseded_by_new_connection");
-      this.disconnectActive("The extension bridge connection was replaced.");
+      // One Chrome profile holds the connection. Its own worker may reconnect over a socket this
+      // server has not seen close yet. Another profile never replaces it by reconnecting; only the
+      // person's explicit takeover in that profile does, and the replaced profile is told so.
+      const owner = this.active;
+      const ownerOpen = owner.socket.readyState === WebSocket.OPEN;
+      const sameProfile = owner.instanceId !== undefined && owner.instanceId === hello.instanceId;
+      if (ownerOpen && !sameProfile && hello.takeover !== true) {
+        socket.close(4409, "bridge_owned_by_other_profile");
+        return;
+      }
+      owner.socket.close(4409, sameProfile ? "superseded_by_new_connection" : "superseded_by_other_profile");
+      this.disconnectActive(sameProfile ? "The extension bridge connection was replaced." : "Another Chrome profile took over the Morrow Bridge connection.");
     }
     const generation = ++this.generation;
     const connectedAt = Date.now();
     this.active = {
       socket,
       extensionId: hello.extensionId,
+      instanceId: hello.instanceId,
       runtimeRevision: hello.runtimeRevision,
       catalogDigest: hello.catalogDigest,
       generation,
@@ -829,7 +853,30 @@ export class LoopbackBridgeServer {
     if (message.schema === BRIDGE_SCHEMAS.bindings) {
       if (message.generation !== active.generation) return;
       active.lastSeenAt = Date.now();
-      active.bindings = normalizeBridgeBindings(message.bindings);
+      if (message.syncId === undefined) {
+        active.bindingSync = undefined;
+        active.bindings = message.bindings;
+        return;
+      }
+      if (message.part === 0) active.bindingSync = { id: message.syncId, nextPart: 0, lastSeenAt: Date.now(), bindings: new Map() };
+      const transfer = active.bindingSync;
+      if (!transfer || transfer.id !== message.syncId || transfer.nextPart !== message.part || Date.now() - transfer.lastSeenAt > 30_000) {
+        socket.close(4400, "invalid_bindings_transfer");
+        return;
+      }
+      for (const binding of message.bindings) {
+        if (transfer.bindings.has(binding.sourceBindingId)) {
+          socket.close(4400, "duplicate_binding");
+          return;
+        }
+        transfer.bindings.set(binding.sourceBindingId, binding);
+      }
+      transfer.nextPart += 1;
+      transfer.lastSeenAt = Date.now();
+      if (message.complete === true) {
+        active.bindings = [...transfer.bindings.values()].sort((left, right) => left.sourceBindingId < right.sourceBindingId ? -1 : left.sourceBindingId > right.sourceBindingId ? 1 : 0);
+        active.bindingSync = undefined;
+      }
       return;
     }
     if (message.schema === BRIDGE_SCHEMAS.pong) {
@@ -893,8 +940,47 @@ export class LoopbackBridgeServer {
     }
   }
 
+  /**
+   * Asks the Bridge to prove one saved course connection again, and answers whether the binding it
+   * then publishes is runtime-verified. The Bridge reattaches to an open tab of that course or, when
+   * the person allows it, opens the course, and checks the signed-in account there. This reads
+   * nothing from the course and admits nothing by itself: every command still passes the ordinary
+   * runtime-verified admission afterwards.
+   */
+  async recoverBinding(sourceBindingId: string, options: { readonly signal?: AbortSignal } = {}): Promise<boolean> {
+    const active = this.active;
+    if (!active || active.socket.readyState !== WebSocket.OPEN) return false;
+    const listed = active.bindings.find((binding) => binding.sourceBindingId === sourceBindingId);
+    if (!listed) return false;
+    if (listed.runtimeVerified === true) return true;
+    options.signal?.throwIfAborted();
+    let recovery = this.recoveries.get(sourceBindingId);
+    if (!recovery) {
+      // The shared attempt carries no caller's signal: one caller that gives up must not end the
+      // proof the others wait for. Its own timeout bounds it.
+      recovery = this.invoke({
+        kind: "binding_recover",
+        sourceBindingId,
+        operationId: `binding-recover:${randomUUID()}`,
+        timeoutMs: this.bindingRecoveryTimeoutMs,
+      }).then(
+        () => this.active?.bindings.find((binding) => binding.sourceBindingId === sourceBindingId)?.runtimeVerified === true,
+        () => false,
+      ).finally(() => this.recoveries.delete(sourceBindingId));
+      this.recoveries.set(sourceBindingId, recovery);
+    }
+    if (!options.signal) return await recovery;
+    const signal = options.signal;
+    return await new Promise<boolean>((resolve, reject) => {
+      const onAbort = () => reject(signal.reason ?? new Error("The request was cancelled."));
+      signal.addEventListener("abort", onAbort, { once: true });
+      recovery!.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+  }
+
   async invoke(invocation: BridgeInvocation): Promise<BridgeResult> {
     invocation.signal?.throwIfAborted();
+    if (invocation.outerGrant !== undefined) normalizeBridgeOuterGrant(invocation.outerGrant);
     const active = this.active;
     if (!active || active.socket.readyState !== WebSocket.OPEN) throw this.unavailable();
     if (invocation.arguments && (Object.hasOwn(invocation.arguments, "privateAttachment") || Object.hasOwn(invocation.arguments, "privateAttachments") || Object.hasOwn(invocation.arguments, "privateConversation"))) {
@@ -909,15 +995,12 @@ export class LoopbackBridgeServer {
     const uiState = invocation.kind === "ui_state"
       ? normalizeBridgeUiState(invocation.uiState)
       : undefined;
-    const requiresKnownBinding = ["invoke_read", "invoke_write", "edit_policy_options_get"].includes(invocation.kind);
+    const requiresKnownBinding = ["invoke_read", "invoke_write", "edit_policy_options_get", "binding_recover"].includes(invocation.kind);
     const requiresCurrentBinding = ["invoke_read", "invoke_write"].includes(invocation.kind);
-    const selectedBinding = invocation.sourceBindingId
+    let selectedBinding = invocation.sourceBindingId
       ? active.bindings.find((binding) => binding.sourceBindingId === invocation.sourceBindingId)
       : requiresKnownBinding && active.bindings.length === 1 ? active.bindings[0] : undefined;
     if (requiresKnownBinding && !selectedBinding) {
-      throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh plan from a current binding.");
-    }
-    if (requiresCurrentBinding && selectedBinding?.runtimeVerified !== true) {
       throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh plan from a current binding.");
     }
     if (editPolicySet) {
@@ -1033,8 +1116,19 @@ export class LoopbackBridgeServer {
     if (invocation.kind === "edit_policy_options_get" && !invocation.sourceBindingId) {
       throw new TypeError("edit_policy_options_get requires one exact sourceBindingId");
     }
+    if (invocation.kind === "binding_recover" && (!invocation.sourceBindingId || invocation.toolName || invocation.operationKey || invocation.arguments)) {
+      throw new TypeError("binding_recover names one exact sourceBindingId and nothing else");
+    }
     if (invocation.kind === "invoke_write" && !invocation.outerGrant) {
       throw new TypeError("invoke_write requires a gateway outer grant");
+    }
+    if (requiresCurrentBinding && selectedBinding?.runtimeVerified !== true) {
+      await this.recoverBinding(selectedBinding!.sourceBindingId, invocation.signal ? { signal: invocation.signal } : {});
+      if (this.active !== active) throw this.unavailable();
+      selectedBinding = active.bindings.find((binding) => binding.sourceBindingId === selectedBinding!.sourceBindingId);
+      if (selectedBinding?.runtimeVerified !== true) {
+        throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh plan from a current binding.");
+      }
     }
     if (invocation.kind === "invoke_write" && invocation.outerGrant!.authorization?.kind === "edit_scope") {
       const authorization = invocation.outerGrant!.authorization;

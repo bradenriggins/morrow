@@ -369,9 +369,9 @@ note "ok: ${PY_VER}"
 # Morrow refuses student data (fail closed), and student names in
 # course content are hidden without labels, so this warns instead of
 # failing, here and again in the closing summary.
-VAULT_PROBLEM="$(cd / && python3 -c "
-import sys
-sys.path.insert(0, '${TREE}')
+VAULT_PROBLEM="$(cd / && MORROW_TREE="${TREE}" python3 -c "
+import os, sys
+sys.path.insert(0, os.environ['MORROW_TREE'])
 from privacy.core import learner_vault_problem
 print(learner_vault_problem() or '')
 " 2>&1)" || VAULT_PROBLEM="the learner vault check could not run: $(printf '%s' "${VAULT_PROBLEM}" | tail -1)"
@@ -697,9 +697,9 @@ step "3/10 chromium locate"
 # P0-14: run with cwd OUTSIDE the tree and an absolute sys.path entry,
 # so CPython never writes transport/__pycache__/ into the tree. (The
 # exported PYTHONDONTWRITEBYTECODE=1 above is the second layer.)
-CHROME_BIN="$(cd / && python3 -c "
-import sys
-sys.path.insert(0, '${TREE}/transport')
+CHROME_BIN="$(cd / && MORROW_TREE="${TREE}" python3 -c "
+import os, sys
+sys.path.insert(0, os.environ['MORROW_TREE'] + '/transport')
 import local_chromium as lc
 try:
     print(lc.default_binary())
@@ -714,9 +714,9 @@ note "ok: ${CHROME_BIN}"
 
 # -- 4. egress probe ------------------------------------------------------
 step "4/10 egress probe"
-EGRESS="$(cd / && python3 -c "
-import sys
-sys.path.insert(0, '${TREE}/transport')
+EGRESS="$(cd / && MORROW_TREE="${TREE}" python3 -c "
+import os, sys
+sys.path.insert(0, os.environ['MORROW_TREE'] + '/transport')
 import egress
 p = egress.probe_egress()
 print(p['mode'])
@@ -1116,9 +1116,12 @@ else
   # containing ''' used to close the triple-quoted string early and
   # execute injected Python (inject_proof.py under the final-sweep
   # scratchpad).
-  _TENANT_CHECK="$(cd / && CANVAS_BASE="${CANVAS_BASE}" python3 -c "
+  _TENANT_CHECK="$(cd / && CANVAS_BASE="${CANVAS_BASE}" \
+    CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED="${CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED:-}" \
+    CANVAS_BASE_ALLOW_HTTP="${CANVAS_BASE_ALLOW_HTTP:-}" \
+    MORROW_TREE="${TREE}" python3 -c "
 import os, sys
-sys.path.insert(0, '${TREE}')
+sys.path.insert(0, os.environ['MORROW_TREE'])
 from config.tree_config import normalize_tenant_base
 try:
     normalize_tenant_base(os.environ['CANVAS_BASE'])
@@ -1234,9 +1237,10 @@ else:
           "================================================================" \
           "SIGN-IN NEEDED (this notice repeats until you are signed in)" \
           "" \
-          "The helper is running. Open the helper page your agent points" \
-          "you to (it reaches http://127.0.0.1:${HELPER_PORT}/) and sign" \
-          "in to Canvas yourself, SSO and MFA included." \
+          "The helper is running. Ask your agent for a one-time sign-in" \
+          "link and open THAT (it reaches http://127.0.0.1:${HELPER_PORT}/;" \
+          "the bare address loads no token, each link works once), then" \
+          "sign in to Canvas yourself, SSO and MFA included." \
           "" \
           "Leave Canvas's \"Stay signed in\" (or \"Remember me\") ON: that" \
           "is what keeps your session alive across helper and machine" \

@@ -13,6 +13,7 @@ import {
   type ProcessLifetimeMatcher,
 } from "@morrow/gateway-core";
 import { RuntimeStateLease } from "./state-lease.js";
+import { installedClientRoute, type InstalledClientRoute } from "./client-route.js";
 
 export {
   processMatchesRecordedLifetime,
@@ -147,6 +148,13 @@ interface LocalOwnerEndpoint {
 
 export type LocalOwnerMaintenanceClientInput =
   | {
+    readonly action: "routes";
+    readonly journalPath: string;
+    readonly holderPid: number;
+    readonly workspaceRoot: string;
+    readonly signal?: AbortSignal;
+  }
+  | {
     readonly action: "acquire";
     readonly journalPath: string;
     readonly holderPid: number;
@@ -193,6 +201,11 @@ export type LocalOwnerMaintenanceClientInput =
   };
 
 export type LocalOwnerMaintenanceClientResult =
+  | {
+    readonly schema: typeof LOCAL_OWNER_MAINTENANCE_SCHEMA;
+    readonly status: "routes";
+    readonly routes: readonly InstalledClientRoute[];
+  }
   | {
     readonly schema: typeof LOCAL_OWNER_MAINTENANCE_SCHEMA;
     readonly status: "held";
@@ -677,13 +690,14 @@ export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard(
 
 function exactClientInput(input: LocalOwnerMaintenanceClientInput): LocalOwnerMaintenanceClientInput | null {
   if (!input || typeof input !== "object"
-    || !["acquire", "release", "commit", "recover", "bridge"].includes(input.action)
+    || !["acquire", "release", "commit", "recover", "bridge", "routes"].includes(input.action)
     || exactPid(input.holderPid) === null
     || canonicalWorkspace(input.workspaceRoot) === null
     || typeof input.journalPath !== "string" || !isAbsolute(input.journalPath)
     || (input.signal !== undefined && !(input.signal instanceof AbortSignal))) return null;
   if (input.action === "recover") return uuid(input.leaseId) && token(input.leaseToken) ? input : null;
   if (input.action === "acquire") return input;
+  if (input.action === "routes") return input;
   if (input.action === "bridge") {
     const control = normalizeLocalOwnerBridgeMaintenanceControl(input.control);
     if (!control) return null;
@@ -785,6 +799,19 @@ function exactClientResult(value: unknown, action: LocalOwnerMaintenanceClientIn
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const source = value as Record<string, unknown>;
   if (source.schema !== LOCAL_OWNER_MAINTENANCE_SCHEMA || typeof source.status !== "string") return null;
+  if (action === "routes") {
+    if (source.status !== "routes" || Object.keys(source).sort().join(",") !== "routes,schema,status"
+      || !Array.isArray(source.routes) || source.routes.length > 32) return null;
+    const routes: InstalledClientRoute[] = [];
+    for (const value of source.routes) {
+      if (!value || typeof value !== "object" || Array.isArray(value)
+        || Object.keys(value).sort().join(",") !== "generation,id") return null;
+      const route = installedClientRoute(value.id, value.generation);
+      if (!route || routes.some((entry) => entry.id === route.id && entry.generation === route.generation)) return null;
+      routes.push(route);
+    }
+    return { schema: LOCAL_OWNER_MAINTENANCE_SCHEMA, status: "routes", routes };
+  }
   if (action === "bridge") {
     if (source.status !== "bridge" || !source.result || typeof source.result !== "object" || Array.isArray(source.result)
       || Object.keys(source).some((key) => !["schema", "status", "result"].includes(key))) return null;
@@ -847,7 +874,9 @@ export async function requestLocalOwnerMaintenance(
   if (!endpoint || processMatchesRecordedLifetime(endpoint.pid, endpoint.startedAt) !== true) {
     throw new LocalOwnerMaintenanceClientError("local_owner_unavailable");
   }
-  const body = exact.action === "acquire"
+  const body = exact.action === "routes"
+    ? { schema: LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA, action: exact.action, holderPid: exact.holderPid }
+    : exact.action === "acquire"
     ? {
       schema: LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA,
       action: exact.action,

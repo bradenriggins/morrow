@@ -30,21 +30,27 @@ export const BROWSER_HARNESS_SCHEMA = "morrow.browser-harness-receipt.v2";
 export const BROWSER_HARNESS_RECEIPT_PATH = "output/browser-harness/receipt.json";
 export const BROWSER_HARNESS_IDS = Object.freeze([
   "canvas_connector_browser",
+  "account_access_browser",
+  "bridge_recovery_first_use",
   "bridge_maintenance_cft",
   "installer_renderer_layout",
+  "desktop_first_use",
   "canvas_file_optional_permission",
   "desktop_windows_smoke",
 ]);
 /**
  * The harnesses a release candidate cannot be promoted without. `desktop_windows_smoke` is not one
- * of them: it runs on native Windows through the `windows-2022` job in
- * `.github/workflows/desktop-release.yml`, and this receipt only has to record what happened to it
- * here. It still blocks if it is recorded as run and did not pass.
+ * of them: it runs separately on a native Windows host with the exact installer and package
+ * receipt. This receipt records what happened on the current host. It still blocks if it is
+ * recorded as run and did not pass. GitHub Actions is disabled for this repository.
  */
 export const REQUIRED_BROWSER_HARNESS_PASSES = Object.freeze([
   "canvas_connector_browser",
+  "account_access_browser",
+  "bridge_recovery_first_use",
   "bridge_maintenance_cft",
   "installer_renderer_layout",
+  "desktop_first_use",
   "canvas_file_optional_permission",
 ]);
 /** A harness that ran keeps its log; a harness that did not run keeps a reason. */

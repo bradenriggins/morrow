@@ -24,10 +24,13 @@ holds the browser contract, which is not implemented.
 
 ## What has to exist before Morrow can call Blackboard
 
-1. **An administrator-installed REST application.** A Blackboard administrator
-   registers Morrow's REST application on the Anthology developer portal and
-   installs it on the Learn site against its Application ID and a named Learn
-   user. Anthology states that the integration acts as that Learn user, and that
+1. **An administrator-installed REST application.** Morrow's developer supplies
+   the production REST Application ID and the required Learn privileges. A
+   Blackboard administrator installs that application on the Learn site against
+   its Application ID and a named Learn user. An institution must not create a
+   developer-portal App ID on the vendor's behalf. The production App ID and a
+   tenant-verified privilege list are not present in this checkout; obtain them
+   before institution setup. Anthology states that the integration acts as that Learn user, and that
    with End User Access set to No it always does, whichever person asked for the
    change. Morrow cannot see which user the administrator chose, so it checks the
    account itself (below). The administrator also maps the endpoint entitlements
@@ -276,9 +279,10 @@ the day a tenant exists, and the record it has to leave behind.
 
 **Before the run**
 
-1. A Learn administrator registers the application, notes its Application ID,
-   and installs it on the target site against a named Learn user. Record that
-   user and whether End User Access is on.
+1. Obtain the developer-supplied Application ID and privilege list. A Learn
+   administrator installs that application on the target site against a named
+   Learn user. Record that user and whether End User Access is on. Do not ask
+   the administrator to register a new vendor application in the developer portal.
 2. Export the site's Swagger. For every route in the inventory above, record the
    endpoint entitlement it needs and grant exactly those to that user's system
    role. Replace `unknown` in this document with what the Swagger says. Do not

@@ -96,7 +96,7 @@ export function runtimeNeedsReload(status) {
 }
 
 export function canChooseCourses(status, binding = currentBinding(status), anchor = currentSiteAnchor(status)) {
-  return status?.runtimeHealthy === true && !binding && anchor?.runtimeVerified === true;
+  return status?.courseAccessMode !== "account" && status?.runtimeHealthy === true && !binding && anchor?.runtimeVerified === true;
 }
 
 // A null status means the status read failed. Every view below states that instead of leaving the
@@ -105,13 +105,15 @@ export function statusValue(status) {
   if (!status) return NOT_CHECKED;
   if (runtimeNeedsReload(status)) return "Reload needed";
   if (status.authenticationFailed === true) return "Reconnect needed";
+  if (status.otherProfileOwnsConnection === true) return "In another Chrome profile";
   return status.connected ? "Connected" : status.connecting ? "Connecting…" : status.paired ? "Not available" : "Not connected";
 }
 
 export function courseValue(status) {
   if (!status) return NOT_CHECKED;
   if (runtimeNeedsReload(status)) return "Not available";
-  if (status.authenticationFailed === true) return currentBinding(status) || currentSiteAnchor(status) ? "Saved" : "Not connected";
+  if (status.authenticationFailed === true || status.otherProfileOwnsConnection === true) return currentBinding(status) || currentSiteAnchor(status) ? "Saved" : "Not connected";
+  if (status.accountCoursesLoading === true) return "Finding courses";
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   const platform = currentPlatform(status);
@@ -172,11 +174,14 @@ export function primaryAction(status, detectedProvider = null) {
   if (!status) return { id: "retry", label: "Try again" };
   if (runtimeNeedsReload(status)) return { id: "open_setup", label: "Open setup guide" };
   if (status.authenticationFailed === true) return { id: "pair", label: "Reconnect Morrow" };
-  if (!status.paired) return { id: "pair", label: "Connect Morrow" };
+  if (status.otherProfileOwnsConnection === true) return { id: "takeover", label: "Use Morrow in this profile" };
+  if (!status.paired) return { id: "pair", label: "Pair Morrow" };
   if (status.connecting && !status.connected) return { id: "wait", label: "Waiting for your assistant" };
   if (!status.connected) return { id: "retry", label: "Check connection" };
   if (canChooseCourses(status)) return { id: "choose_courses", label: "Choose courses" };
-  return currentPlatform(status, detectedProvider) ? { id: "connect_course", label: "Connect this course" } : { id: "none", label: "" };
+  if (status.courseAccessMode === "account" && currentSiteAnchor(status)?.runtimeVerified === true && !currentBinding(status)) return { id: "refresh_account", label: "Refresh courses" };
+  const platform = currentPlatform(status, detectedProvider);
+  return platform ? { id: "connect_course", label: `Pair ${platform} account` } : { id: "none", label: "" };
 }
 
 export function primaryLabel(status, detectedProvider = null) {
@@ -207,28 +212,36 @@ export function detailText(status, detectedProvider = null) {
   const savedPlatform = currentPlatform(status);
   return status.authenticationFailed === true
     ? "Morrow refused the connection Morrow Bridge saved. Select Reconnect Morrow to connect again. Your selected courses stay saved."
+    : status.otherProfileOwnsConnection === true
+      ? "Morrow is working with Morrow Bridge in another Chrome profile. Only one profile connects at a time, so this profile waits and connects on its own when that profile closes. Select Use Morrow in this profile to move the connection here now."
     : !status.paired
-      ? "Add Morrow to your assistant, then open it. Select Connect Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses."
+      ? "Add Morrow to your assistant, then open it. Select Pair Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses."
       : status.connecting
         ? "Connecting to Morrow. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Keep this popup open or return in a moment."
         : !status.connected
         ? "Open the Morrow app, then select Check connection to retry now. Morrow Bridge also retries within 30 seconds while active and checks about once a minute after Chrome idles."
+        : status.accountCoursesLoading
+          ? `Finding available courses… ${status.discoveredCourseCount || 0} found. Your previous course scope stays active until the scan is complete. You can close this popup; discovery continues automatically.`
         : binding?.runtimeVerified === true
-          ? `This selected course is connected. Keep one signed-in ${courseTabName(platform)} tab open while you work in Morrow.`
+          ? status.courseAccessMode === "account"
+            ? `Your assistant can work across ${plural(status.bindingCount || status.bindings?.length || 1, "course")} together. Give it a course name, course ID, or course link. Keep one signed-in ${platform || "learning platform"} tab open for this account.`
+            : `This selected course is connected. Keep one signed-in ${courseTabName(platform)} tab open while you work in Morrow.`
           : binding
             ? closedBindingDetail(platform, savedPlatform)
             : anchor?.runtimeVerified === true
-              ? "Choose courses in Plan and Edit settings. Plan keeps changes ready for your review."
+              ? status.courseAccessMode === "account"
+                ? "No courses are available from this account yet. Select Refresh courses to check again."
+                : "Choose courses in Plan and Edit settings. Plan keeps changes ready for your review."
               : anchor
                 ? staleAnchorDetail(platform)
                 : platform
-                  ? `Morrow Bridge detected ${platform}. Select Connect this course to allow access to this signed-in course.`
-                  : "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge will detect the platform and show Connect this course.";
+                  ? `Pair your signed-in ${platform} account with Morrow. Select Pair ${platform} account and allow access to the site Chrome shows. This is a one-time setup for this account.`
+                  : "Sign in to Canvas or Moodle in Chrome and open any course. Morrow Bridge uses that tab to pair your account. You can work across many courses after setup.";
 }
 
 export function controlState(status, { actionInFlight = false, detectedProvider = null } = {}) {
   if (!status) return { primaryDisabled: actionInFlight, primaryBusy: actionInFlight, secondaryDisabled: true };
-  const waiting = Boolean(status.authenticationFailed !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && status.connecting === true && !status.connected);
+  const waiting = Boolean(status.authenticationFailed !== true && status.otherProfileOwnsConnection !== true && !runtimeNeedsReload(status) && !canChooseCourses(status) && status.paired && status.connecting === true && !status.connected);
   const needsDetectedCourse = status.paired === true && status.connected === true
     && !canChooseCourses(status) && currentBinding(status)?.runtimeVerified !== true;
   return {

@@ -1,5 +1,14 @@
 export const MAX_FILE_TEXT_BYTES = 1024 * 1024;
 
+export function canvasCourseFileDownloadUrl(value, canvasOrigin, fileId) {
+  if (typeof value !== "string" || !value || value.length > 8_192 || !/^[1-9][0-9]*$/.test(String(fileId))) return null;
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== "https:" || url.origin !== canvasOrigin || url.username || url.password || url.hash
+    || url.pathname !== `/files/${fileId}/download` || url.searchParams.getAll("verifier").length > 1) return null;
+  return url.href;
+}
+
 function normalizedContentType(value) {
   return typeof value === "string" ? value.split(";", 1)[0].trim().toLowerCase() : "";
 }

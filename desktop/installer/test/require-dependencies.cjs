@@ -13,7 +13,7 @@ if (missing.length > 0) {
   process.stderr.write([
     `The desktop installer suites need dependencies that are not installed: ${missing.join(", ")}.`,
     "The installer is outside the pnpm workspace and installs on its own.",
-    "Run: pnpm --dir installer --ignore-workspace install",
+    "Run: pnpm --dir installer install",
     ""
   ].join("\n"));
   process.exit(1);

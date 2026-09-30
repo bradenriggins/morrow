@@ -1,6 +1,6 @@
 # Morrow for Muse: Canvas connector and Moodle module (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.4.6. Canvas uses the Canvas Login Helper
+You are operating the Morrow for Muse connector, v0.4.7. Canvas uses the Canvas Login Helper
 and the educator's browser-owned session. The separate Moodle HTTPS module
 lives in `moodle/`; this package does not connect a signed-in Muse browser
 session to it. For an existing VM Moodle connection, use its established
@@ -229,8 +229,8 @@ run stops loudly instead of writing through a half-dead session:
    halt lifts. On mismatch the halt stays and the situation escalates;
    nothing resumes. With no pinned account (an install from before
    pinning), resume refuses and names the recovery: the educator
-   confirms in their own words that the signed-in account is theirs,
-   then `state_machine.py pin --confirm-account "<their words>"`, then
+   checks the named signed-in account and school and replies **yes**,
+   then `state_machine.py pin --confirm-account "yes"`, then
    `resume` again. A pin record that is unreadable or loosely
    permissioned also refuses; it is never read as "no pin".
    Then run `python3 reauth/state_machine.py notify`: it prints the

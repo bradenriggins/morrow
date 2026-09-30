@@ -182,6 +182,17 @@ async function turnOnEdit(test: Owner, requested: JsonObject): Promise<JsonObjec
 }
 
 describe("Edit asked for in a conversation", () => {
+  it("accepts an Edit review request for more than 500 course connections", async () => {
+    const test = await owner();
+    try {
+      const selections = Array.from({ length: 501 }, (_, index) => ({ source_binding_id: `canvas-course-${index}`, enabled_categories: ["assignment_due_at"] }));
+      const requested = await requestEdit(test, { mode: "edit", selections });
+      expect(requested).toMatchObject({ state: "awaiting_approval" });
+      expect(test.prepare.mock.calls[0]?.[1]).toHaveLength(501);
+      expect(test.apply).not.toHaveBeenCalled();
+    } finally { await test.close(); }
+  });
+
   it("opens a review page and turns nothing on, even for a client that answers every form itself", async () => {
     const test = await owner();
     try {

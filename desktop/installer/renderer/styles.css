@@ -178,6 +178,8 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
 .blocked-box { border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border)); background: color-mix(in srgb, var(--warning) 7%, var(--surface)); }
 .info-box strong, .blocked-box strong { display: block; color: var(--text); font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
 .info-box p, .blocked-box p { margin-top: 3px; }
+.info-box .instructions { margin-top: var(--space-3); }
+.info-box .instructions strong { display: inline; font-size: inherit; line-height: inherit; }
 .instructions { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; counter-reset: instruction; }
 .instructions li { position: relative; min-height: 23px; padding-left: var(--space-6); color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; counter-increment: instruction; }
 .instructions li::before { position: absolute; top: 0; left: 0; display: grid; width: 22px; height: 22px; place-items: center; border-radius: var(--radius-pill); background: var(--surface-sunken); color: var(--text-secondary); content: counter(instruction); font-size: 0.8125rem; font-weight: 700; line-height: 1; }
@@ -185,9 +187,13 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
 /* The request wraps inside its own column, so every row keeps its Copy button at the same right edge. */
 .prompt { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-sunken); color: var(--text); font-size: 0.875rem; font-weight: 600; line-height: 1.45; }
 .home-status { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
-.home-status-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); min-height: 44px; padding: var(--space-1) var(--space-1) var(--space-1) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); }
-.home-status-label { color: var(--text); font-size: 0.875rem; font-weight: 700; line-height: 1.4; }
-.home-status-word { color: var(--success); font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
+/* A row wraps rather than shrinking a cell under its own text: when the label, the state word, and the
+   button do not fit on one line, the button moves to a line of its own at the same right edge. */
+.home-status-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-3); min-height: 44px; padding: var(--space-1) var(--space-1) var(--space-1) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); }
+.home-status-label { flex: 1 1 auto; padding-block: var(--space-2); color: var(--text); font-size: 0.875rem; font-weight: 700; line-height: 1.4; overflow-wrap: break-word; }
+.home-status-word { padding-block: var(--space-2); color: var(--success); font-size: 0.8125rem; font-weight: 700; line-height: 1.4; }
+.home-status-word-pending { color: var(--warning); }
+.home-status-row .secondary-button { margin-left: auto; }
 #setup-management-panel { grid-column: 2; }
 #setup-management-body { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
 .materials-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); }
@@ -289,6 +295,9 @@ h3 { margin: 0; font-size: 0.875rem; font-weight: 700; letter-spacing: -.015em; 
   .assistant-list { grid-template-columns: 1fr; }
   .support-list li { grid-template-columns: minmax(0, 1fr); }
   .prompt { grid-template-columns: minmax(0, 1fr); }
+  /* Every status line puts its button under its label and state word, as the example requests do. */
+  .home-status-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: var(--space-1) var(--space-3) var(--space-3) var(--space-4); }
+  .home-status-row .secondary-button { grid-column: 1 / -1; justify-self: end; margin-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

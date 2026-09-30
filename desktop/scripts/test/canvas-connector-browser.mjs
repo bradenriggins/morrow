@@ -20,6 +20,8 @@ const ROOT = resolve(import.meta.dirname, "../..");
 const EXTENSION = resolve(ROOT, "connector/extension");
 const OUTPUT = resolve(ROOT, "output/playwright/canvas-connector");
 const LONG_COURSE_NAME = "Synthetic Course 501: Advanced Human Biology: Molecular Foundations, Clinical Connections, and Evidence-Based Practice";
+// Plan and Edit settings names each course action after its course, so the row a person acts on is announced.
+const COURSE_501_ACTION = (action, suffix = "") => `${action} Canvas course ${LONG_COURSE_NAME} (course ID 501)${suffix}`;
 const FILE_TEXT = "\uFEFFbounded Canvas file bytes";
 const FILE_TRANSFER_BYTES = Buffer.from("reviewed Canvas course file bytes\n", "utf8");
 const RUBRIC_CSV_BYTES = Buffer.from("Rubric Name,Criteria Name,Criteria Description,Rating Name,Rating Points\nLab report,Method,Clear steps,Complete,5\n", "utf8");
@@ -265,10 +267,11 @@ function startCanvas(directory) {
     ["701", { id: "701", context_codes: ["course_42"], sub_context_codes: [], title: "Office hours", location_name: "Room 2", workflow_state: "active" }],
     ["702", { id: "702", context_codes: ["course_42", "course_43"], sub_context_codes: [], title: "Shared office hours", location_name: "Room 3", workflow_state: "active" }],
   ]);
-  const courses = Array.from({ length: 501 }, (_, index) => ({ id: String(index + 1), name: `Synthetic Course ${index + 1}` }));
+  const courses = Array.from({ length: process.argv.includes("--unlimited-account-access") ? 12_001 : 501 }, (_, index) => ({ id: String(index + 1), name: index > 500 ? `Synthetic Course ${index + 1}`.padEnd(500, "x") : `Synthetic Course ${index + 1}` }));
   courses[41] = { id: "42", name: "Introduction to Human Biology" };
   courses[42] = { id: "43", name: "Synthetic Human Anatomy" };
   courses[500] = { id: "501", name: LONG_COURSE_NAME };
+  let discoveryCourses = courses;
   const server = createHttpsServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
     const url = new URL(request.url || "/", "https://127.0.0.1");
     requests.push(`${request.method} ${url.pathname}`);
@@ -667,11 +670,11 @@ function startCanvas(directory) {
         assert.deepEqual([...url.searchParams.keys()], ["enrollment_state", "include[]", "include[]", "per_page", "page"]);
       }
       const start = (page - 1) * 100;
-      const nextPage = start + 100 < courses.length ? page + 1 : null;
+      const nextPage = start + 100 < discoveryCourses.length ? page + 1 : null;
       const nextUrl = nextPage === 3
         ? `https://${request.headers.host}/api/v1/courses?enrollment_state=active&include[]=term&include[]=favorites&per_page=100&page=3`
         : `https://${request.headers.host}/api/v1/courses?bookmark=course-page-${nextPage}&signature=synthetic-signature-${nextPage}`;
-      return json(200, courses.slice(start, start + 100), nextPage === null ? {} : {
+      return json(200, discoveryCourses.slice(start, start + 100), nextPage === null ? {} : {
         Link: `<${nextUrl}>; rel="next"`,
       });
     }
@@ -984,6 +987,7 @@ function startCanvas(directory) {
     changeAssignment: () => { assignment.description += "<p>Another edit.</p>"; },
     changeDiscussion: () => { discussion.message += "<p>Another edit.</p>"; },
     setPrincipalId: (value) => { principalId = String(value); },
+    setDiscoveryCourseIds: (ids) => { discoveryCourses = ids ? ids.map(id => courses.find(course => course.id === String(id))) : courses; },
     courseDiscoveryUrls: () => [...courseDiscoveryUrls],
     setExternalFileDownloadUrl: (value) => { externalFileDownloadUrl = String(value); },
     addDocumentFile: (value) => { documentFiles.set(value.id, value); },
@@ -1144,7 +1148,12 @@ const connectorConfig = {
 let runtime = await CanvasConnectorRuntime.start(connectorConfig);
 connectorConfig.port = runtime.bridge.health().port;
 const testWorkerPath = join(extensionCopy, "src/service-worker.js");
-writeFileSync(testWorkerPath, readFileSync(testWorkerPath, "utf8").replace("const PORT = 32147;", `const PORT = ${connectorConfig.port};`));
+const queueAdmission = "    outcome = await queueBindingWrite(context.binding.sourceBindingId, () => handleQueuedWrite(command));";
+const testWorkerSource = readFileSync(testWorkerPath, "utf8");
+assert.equal(testWorkerSource.split(queueAdmission).length, 2, "queued-write admission seam changed");
+writeFileSync(testWorkerPath, testWorkerSource
+  .replace("const PORT = 32147;", `const PORT = ${connectorConfig.port};`)
+  .replace(queueAdmission, `    (globalThis.__morrowTestQueuedEffectReceipts ||= []).push(command.outerGrant?.effectReceiptId);\n${queueAdmission}`));
 
 const approvalSnapshot = {
   schema: "morrow.operation.v1",
@@ -1294,10 +1303,12 @@ const launchBrowser = () => launchManagedChromiumPersistentContext(chromium, pro
     "--ignore-certificate-errors",
     "--no-first-run",
     "--no-default-browser-check",
+    "--remote-debugging-port=0",
   ],
 });
 
 let context;
+let accountInspector;
 try {
   process.stderr.write("[browser-test] starting temporary Chrome for Testing\n");
   context = await launchBrowser();
@@ -1329,7 +1340,7 @@ try {
   await captureSetupGuide(firstInstallSetupGuide, "setup-guide-first-install");
   await firstInstallSetupGuide.getByRole("button", { name: "Setup overview", exact: true }).click();
   await firstInstallSetupGuide.getByRole("heading", { name: "Three setup stages", exact: true }).waitFor();
-  for (const step of ["Choose your assistant in Morrow", "Finish Morrow Bridge setup", "Open and connect your course"]) {
+  for (const step of ["Choose your assistant in Morrow", "Finish Morrow Bridge setup", "Pair your learning account"]) {
     await firstInstallSetupGuide.locator(".setup-steps strong", { hasText: step }).waitFor();
   }
   assert.doesNotMatch(await firstInstallSetupGuide.locator("main").textContent(), /(?:Terminal|command|Developer Mode|unpacked|\/path\/to|CLI)/i);
@@ -1345,13 +1356,13 @@ try {
 
   let popup = await context.newPage();
   await popup.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
-  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).waitFor();
+  await popup.getByRole("button", { name: "Pair Morrow", exact: true }).waitFor();
   await captureThemes(popup, "popup-unpaired", 360);
   const pagesBeforePairing = context.pages().length;
   const pairingApprovedAt = performance.now();
-  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
+  await popup.getByRole("button", { name: "Pair Morrow", exact: true }).click();
   await popup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 5_000 });
-  assert.equal(context.pages().length, pagesBeforePairing, "Connect Morrow pairs in the popup and opens no page");
+  assert.equal(context.pages().length, pagesBeforePairing, "Pair Morrow pairs in the popup and opens no page");
   assert.equal(await popup.locator("#canvas-value").innerText(), "Not connected");
   assert.equal(runtime.bridge.health().connected, true);
   const pairingReadyMs = Math.round(performance.now() - pairingApprovedAt);
@@ -1563,11 +1574,73 @@ try {
   process.stderr.write("[browser-test] learner names show in the Chrome review tab only; plain local HTTP reads labels\n");
   process.stderr.write("[browser-test] operation approval UI ready\n");
 
-  canvasPage = context.pages()[0] || await context.newPage();
+  canvasPage = context.pages().find(page => page.url().startsWith(new URL(canvasUrl).origin + "/")) || await context.newPage();
   await canvasPage.goto(canvasUrl, { waitUntil: "domcontentloaded" });
   popup = await context.newPage();
   await popup.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
 
+  if (process.argv.includes("--account-access-only")) {
+    const large = process.argv.includes("--unlimited-account-access");
+    const count = large ? 12_001 : 30;
+    const ids = large ? Array.from({ length: count }, (_, i) => String(i + 1)) : ["42", ...Array.from({ length: 29 }, (_, i) => String(i + 1))];
+    canvas.setDiscoveryCourseIds(ids);
+    const before = await replacementWorker.evaluate(async () => (await chrome.storage.local.get("token")).token);
+    await popup.close();
+    await canvasPage.bringToFront();
+    await replacementWorker.evaluate(() => chrome.action.openPopup());
+    const debuggingPort = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
+    accountInspector = await chromium.connectOverCDP(`http://127.0.0.1:${debuggingPort}`);
+    popup = await waitFor(() => accountInspector.contexts().flatMap(c => c.pages()).find(p => p.url() === `chrome-extension://${EXTENSION_ID}/popup/popup.html`), "real toolbar popup did not open");
+    await popup.locator("#course-access-mode").selectOption("account");
+    await waitFor(async () => await replacementWorker.evaluate(async () => { const saved = await chrome.storage.local.get(["courseAccessMode", "accountCourseDiscovery"]); return saved.courseAccessMode === "account" || Boolean(saved.accountCourseDiscovery); }), "account mode was not saved or scheduled");
+    const pagesBeforeAccountPair = context.pages().length;
+    await popup.getByRole("button", { name: "Pair Canvas account", exact: true }).click();
+    if (large) {
+      await popup.locator("#detail").filter({ hasText: "Finding available courses…" }).waitFor();
+      assert.equal(await popup.locator("#canvas-value").innerText(), "Finding courses");
+      await popup.screenshot({ path: join(OUTPUT, "popup-account-discovery-progress.png") });
+      for (let step = 0; step < 10; step += 1) {
+        const resumed = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "morrow_course_access_set", mode: "account" }));
+        assert.equal(resumed.ok, true, JSON.stringify(resumed));
+        if (!resumed.result.pending) break;
+      }
+    }
+    await waitFor(() => runtime.bridge.listBindings().length === count, "one paired account did not expose every course");
+    const accountBindings = runtime.bridge.listBindings();
+    assert.equal(new Set(accountBindings.map(b => b.origin)).size, 1);
+    const sampled = large ? [...accountBindings.slice(0, 30), accountBindings.find(b => b.courseId === "12001")] : accountBindings;
+    const values = await Promise.all(sampled.map(b => runtime.call("canvas_get_single_course_courses", { id: b.courseId, _morrow: { source_binding_id: b.sourceBindingId } })));
+    for (let i = 0; i < values.length; i += 1) {
+      assert.equal(values[i].ok, true, JSON.stringify(values[i]));
+      assert.equal(values[i].result.data.id, sampled[i].courseId);
+    }
+    await popup.reload();
+    await popup.getByText(`Your assistant can work across ${count} courses together.`, { exact: false }).waitFor();
+    assert.equal(context.pages().length, pagesBeforeAccountPair, "Account access must not open a course selector");
+    assert.equal(await popup.locator("#courses").isHidden(), true);
+    const after = await replacementWorker.evaluate(async () => await chrome.storage.local.get(["token", "editPolicies"]));
+    assert.equal(after.token, before);
+    assert.equal(Object.keys(after.editPolicies || {}).length, 0);
+    const storageBytes = await replacementWorker.evaluate(() => chrome.storage.local.getBytesInUse(null));
+    if (large) assert.ok(storageBytes > 10 * 1024 * 1024, `large inventory used only ${storageBytes} bytes`);
+    assert.equal(await popup.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await popup.screenshot({ path: join(OUTPUT, "popup-account-access-native.png") });
+    const accountPreview = await context.newPage();
+    await accountPreview.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
+    await accountPreview.getByText(`Your assistant can work across ${count} courses together.`, { exact: false }).waitFor();
+    await captureThemes(accountPreview, "popup-account-access-320", 320);
+    await accountPreview.locator("#course-access-mode").selectOption("selected");
+    await waitFor(() => runtime.bridge.listBindings().length === 0, "Selected courses did not restore the original empty scope");
+    await accountPreview.getByRole("button", { name: "Choose courses", exact: true }).waitFor();
+    assert.equal((await replacementWorker.evaluate(async () => (await chrome.storage.local.get("token")).token)), before);
+    const receipt = { ok: true, mode: "account", coursesAvailable: count, coursesRead: values.length, storageBytes, selectedScopeRestored: true, pairingUnchanged: true, editGrants: 0, courseSelectorOpened: false,
+      browserVersion: accountInspector.version(),
+      workerSha256: createHash("sha256").update(readFileSync(join(EXTENSION, "src/service-worker.js"))).digest("hex"),
+      screenshots: ["popup-account-access-native.png", "popup-account-access-320-light.png", "popup-account-access-320-dark.png"].map(name => ({ name, sha256: createHash("sha256").update(readFileSync(join(OUTPUT, name))).digest("hex") })) };
+    writeFileSync(join(OUTPUT, "account-access-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(receipt)}\n`);
+    await accountPreview.close();
+  } else {
   const subpathCanvasPage = await context.newPage();
   await subpathCanvasPage.goto(subpathCanvasUrl, { waitUntil: "domcontentloaded" });
   const subpathCanvasTabId = await replacementWorker.evaluate(async (expectedUrl) => {
@@ -1772,20 +1845,20 @@ try {
     await chrome.storage.session.set({
       courseDiscoveries: { [discoveryReceiptId]: {
         ...structuredClone(receipt), pageNumber: 100, visited,
-        next: { kind: "canvas_url", value: `${receipt.origin}/api/v1/courses?cursor=bounded-101` },
+        next: { kind: "canvas_url", value: `${receipt.origin}/api/v1/courses?enrollment_state=active&include[]=term&include[]=favorites&per_page=100&page=101` },
       } },
     });
-    const pageLimit = (await requestMore()).code;
+    const afterHundredPages = (await requestMore()).ok;
     await restore();
-    return { codes, repeated, pageLimit };
+    return { codes, repeated, afterHundredPages };
   });
   assert.deepEqual(cursorBoundary, {
     codes: Array(6).fill("course_discovery_failed"),
     repeated: "course_discovery_failed",
-    pageLimit: "course_discovery_failed",
+    afterHundredPages: true,
   });
-  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks, "invalid stored cursors must be refused before another provider request");
-  process.stderr.write("[browser-test] Canvas discovery refuses foreign, malformed, credentialed, fragmented, oversized, repeated, and over-limit cursors before provider access\n");
+  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks + 1, "only the valid continuation after page 100 can reach the provider");
+  process.stderr.write("[browser-test] Canvas discovery refuses foreign, malformed, credentialed, fragmented, oversized and repeated cursors, and continues beyond page 100\n");
   const courseSelectionName = (name, courseId) => `Select Canvas course ${name} (course ID ${courseId})`;
   const connectAvailableCourse = async (name, filter) => {
     await settings.locator("#course-filter").fill(filter);
@@ -1797,7 +1870,7 @@ try {
   // Each available course connects by itself, in Plan, from the list the site already returned.
   await connectAvailableCourse("Introduction to Human Biology", "Introduction to Human Biology");
   await connectAvailableCourse("Synthetic Human Anatomy", "Synthetic Human Anatomy");
-  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks, "connecting from a current list must not read the list again");
+  assert.equal(canvas.courseDiscoveryUrls().length, discoveryUrlsBeforeCursorChecks + 1, "connecting from a current list must not read the list again");
   await settings.locator(".listhead", { hasText: "Connected · 2" }).waitFor();
   const readDiscoveryPage = async () => await settings.evaluate(async () => {
     const saved = await chrome.storage.session.get("courseDiscoveries");
@@ -1830,17 +1903,17 @@ try {
   const course501Row = settings.locator('[data-toggle-course$=":c501"]');
   await course501Row.click();
   assert.equal(await course501Row.getAttribute("aria-expanded"), "true");
-  await settings.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await settings.getByRole("button", { name: COURSE_501_ACTION("Disconnect"), exact: true }).click();
   const disconnectConfirmation = settings.getByRole("group", { name: `Confirm disconnecting ${LONG_COURSE_NAME}` });
   await disconnectConfirmation.waitFor();
-  assert.equal(await settings.getByRole("button", { name: "Keep course", exact: true }).evaluate((button) => button === document.activeElement), true);
+  assert.equal(await settings.getByRole("button", { name: COURSE_501_ACTION("Keep", " connected"), exact: true }).evaluate((button) => button === document.activeElement), true);
   await captureThemes(settings, "bridge-settings-disconnect-confirm", 900);
   await settings.setViewportSize({ width: 900, height: 760 });
-  await settings.getByRole("button", { name: "Keep course", exact: true }).click();
+  await settings.getByRole("button", { name: COURSE_501_ACTION("Keep", " connected"), exact: true }).click();
   await disconnectConfirmation.waitFor({ state: "detached" });
   assert.equal(runtime.bridge.listBindings().length, 3, "Keep course must leave the course connected");
-  await settings.getByRole("button", { name: "Disconnect", exact: true }).click();
-  await settings.getByRole("button", { name: "Disconnect this course", exact: true }).click();
+  await settings.getByRole("button", { name: COURSE_501_ACTION("Disconnect"), exact: true }).click();
+  await settings.getByRole("button", { name: COURSE_501_ACTION("Confirm disconnect"), exact: true }).click();
   await settings.locator("#notice").filter({ hasText: `${LONG_COURSE_NAME} is disconnected. Its Edit access was removed.` }).waitFor();
   await waitFor(() => runtime.bridge.listBindings().length === 2 && !runtime.bridge.listBindings().some((entry) => entry.courseId === "501"), "Disconnect this course did not remove only course 501");
   const disconnectedState = await settings.evaluate(async () => {
@@ -2773,6 +2846,15 @@ try {
 
   // Who is in a group is a site request: it goes to Canvas through the bound tab as the signed-in
   // person, with no course ownership reading, and Canvas decides it.
+  const refusedMembership = await groupCall("canvas_create_membership", { group_id: "88", user_id: "99" }, "group-membership-selected");
+  assert.equal(refusedMembership.ok, false);
+  assert.equal(refusedMembership.resultState, "not_sent");
+  assert.equal(refusedMembership.problem.code, "course_access_account_required");
+  assert.equal(canvas.requests().some((entry) => entry === "POST /api/v1/groups/88/memberships"), false);
+  canvas.setDiscoveryCourseIds(["42", "43", "501"]);
+  const accountAccess = await settings.evaluate(() => chrome.runtime.sendMessage({ type: "morrow_course_access_set", mode: "account" }));
+  assert.equal(accountAccess.ok, true, JSON.stringify(accountAccess));
+  await waitFor(() => runtime.bridge.listBindings().length === 3, "Account access did not keep the three available courses");
   const groupMembership = await groupCall("canvas_create_membership", { group_id: "88", user_id: "99" }, "group-membership");
   assert.doesNotMatch(JSON.stringify(groupMembership), /canvas_semantic_target_course_mismatch|course_scope_required/);
   assert.equal(canvas.requests().some((entry) => entry === "POST /api/v1/groups/88/memberships"), true);
@@ -3079,7 +3161,9 @@ try {
       outer_grant: { ...grant, effect_receipt_id: "effect:page-edit-cancelled-before-send", authorization: editAuthorization },
     },
   }, queuedWriteAbort.signal);
-  await delay(100);
+  await waitFor(async () => await replacementWorker.evaluate(() =>
+    globalThis.__morrowTestQueuedEffectReceipts?.includes("effect:page-edit-cancelled-before-send")),
+  "the cancelled write never reached the per-course queue");
   queuedWriteAbort.abort();
   const cancelledQueuedResult = await cancelledQueuedWrite;
   assert.equal(cancelledQueuedResult.ok, false, JSON.stringify(cancelledQueuedResult));
@@ -3093,7 +3177,9 @@ try {
       outer_grant: { ...grant, effect_receipt_id: "effect:page-edit-revoked", authorization: editAuthorization },
     },
   });
-  await delay(100);
+  await waitFor(async () => await replacementWorker.evaluate(() =>
+    globalThis.__morrowTestQueuedEffectReceipts?.includes("effect:page-edit-revoked")),
+  "the revoked write never reached the per-course queue");
   await settings.getByRole("button", { name: "Return 1 selected course to Plan" }).click();
   await settings.getByText(/1 course returned to Plan/).first().waitFor();
   await captureThemes(settings, "bridge-settings-returned-plan", 900);
@@ -3787,7 +3873,10 @@ try {
   canvas.setPrincipalId("7");
   await canvasPage.goto(canvasUrl, { waitUntil: "domcontentloaded" });
   await waitFor(() => runtime.bridge.listBindings().length === 3 && runtime.bridge.listBindings().every((entry) => entry.runtimeVerified === true), "restored anchor did not reverify its selected courses");
+  const remainingSitePages = context.pages().filter(page => page !== canvasPage && page.url().startsWith(new URL(canvasUrl).origin + "/"));
   await canvasPage.close();
+  for (const page of remainingSitePages) await page.close();
+  assert.equal(context.pages().filter(page => page.url().startsWith(new URL(canvasUrl).origin + "/")).length, 0, "closed-site case requires every site tab closed");
   await waitFor(() => runtime.bridge.listBindings().length === 3 && runtime.bridge.listBindings().every((entry) => entry.runtimeVerified === false), "closing the shared site anchor did not invalidate every selected course");
 
   // The closed course site tab reads as one state with one next action in both places a person
@@ -3795,7 +3884,7 @@ try {
   await popup.bringToFront();
   await waitFor(async () => (await popup.locator("#canvas-value").innerText()) === "Canvas is closed", "the popup did not name the closed Canvas tab");
   assert.equal(await popup.locator("#detail").innerText(), "This selected course is connected, but its Canvas tab is no longer open. Select Open Canvas to reopen it.");
-  assert.equal(await popup.getByRole("button", { name: "Connect this course", exact: true }).isVisible(), false);
+  assert.equal(await popup.getByRole("button", { name: "Pair Canvas account", exact: true }).isVisible(), false);
   const reconnectControl = popup.getByRole("button", { name: "Open Canvas", exact: true });
   assert.equal(await reconnectControl.isVisible(), true);
   assert.equal(await reconnectControl.isEnabled(), true);
@@ -3825,6 +3914,53 @@ try {
   await captureThemes(popup, "popup-reconnect", 360);
   await popup.getByRole("button", { name: "Reconnect Morrow", exact: true }).click();
   await popup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 5_000 });
+
+  // A second Chrome profile with its own paired Morrow Bridge waits instead of taking the
+  // connection, says so, and moves the connection only when the person asks. When that profile
+  // closes, the first profile connects again on its own.
+  const ownerGeneration = runtime.bridge.health().generation;
+  const secondContext = await launchManagedChromiumPersistentContext(chromium, join(temporary, "chrome-profile-second"), {
+    headless: false,
+    ignoreHTTPSErrors: true,
+    args: [`--disable-extensions-except=${extensionCopy}`, `--load-extension=${extensionCopy}`, "--allow-insecure-localhost", "--ignore-certificate-errors", "--no-first-run", "--no-default-browser-check"],
+  });
+  try {
+    const secondGuide = await waitFor(
+      () => secondContext.pages().find((page) => page.url() === `chrome-extension://${EXTENSION_ID}/onboarding/onboarding.html`) || null,
+      "the second profile did not open Morrow setup",
+    );
+    await secondGuide.getByRole("button", { name: "Agree and continue", exact: true }).click();
+    const secondPopup = await secondContext.newPage();
+    await secondPopup.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
+    await secondPopup.getByRole("button", { name: "Pair Morrow", exact: true }).click();
+    await secondPopup.locator("#status-value").filter({ hasText: /^In another Chrome profile$/ }).waitFor({ timeout: 10_000 });
+    assert.equal(await secondPopup.locator("#detail").innerText(), "Morrow is working with Morrow Bridge in another Chrome profile. Only one profile connects at a time, so this profile waits and connects on its own when that profile closes. Select Use Morrow in this profile to move the connection here now.");
+    await secondPopup.waitForTimeout(6_000);
+    assert.equal(runtime.bridge.health().generation, ownerGeneration, "the waiting profile must not replace the connected one");
+    assert.equal(await popup.locator("#status-value").innerText(), "Connected");
+    await captureThemes(secondPopup, "popup-other-profile", 360);
+    await secondGuide.reload();
+    await secondGuide.getByRole("heading", { name: "Use Morrow in this profile", exact: true }).waitFor();
+    await secondGuide.getByText("Morrow Bridge in another Chrome profile is connected to Morrow", { exact: true }).waitFor();
+    await captureSetupGuide(secondGuide, "setup-guide-other-profile");
+    await secondPopup.bringToFront();
+    await secondPopup.getByRole("button", { name: "Use Morrow in this profile", exact: true }).click();
+    await secondPopup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 10_000 });
+    assert.equal(runtime.bridge.health().generation, ownerGeneration + 1);
+    await popup.bringToFront();
+    await popup.reload();
+    await popup.locator("#status-value").filter({ hasText: /^In another Chrome profile$/ }).waitFor({ timeout: 10_000 });
+    await popup.getByRole("button", { name: "Use Morrow in this profile", exact: true }).waitFor();
+    await popup.waitForTimeout(6_000);
+    assert.equal(runtime.bridge.health().generation, ownerGeneration + 1, "the replaced profile must wait instead of taking the connection back");
+    await captureThemes(popup, "popup-other-profile-after-takeover", 360);
+  } finally {
+    await secondContext.close();
+  }
+  await waitFor(async () => runtime.bridge.health().connected && runtime.bridge.health().generation === ownerGeneration + 2, "the first profile did not connect again after the second profile closed", 45_000);
+  await popup.reload();
+  await popup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 10_000 });
+  process.stderr.write("[browser-test] a second Chrome profile waits without replacing the connected one, moves it only on an explicit takeover, and hands it back when it closes\n");
   await popup.getByRole("button", { name: "Disconnect Morrow", exact: true }).click();
   await popup.locator("#status-value").filter({ hasText: /^Not connected$/ }).waitFor();
   await waitFor(() => !runtime.bridge.health().connected, "connector did not disconnect");
@@ -3835,7 +3971,9 @@ try {
   assert.deepEqual(revoked, { token: null, bindingCount: 0 });
 
   process.stdout.write(`${JSON.stringify({ ok: true, pairingReadyMs, extensionId: EXTENSION_ID, sharedAnchor: true, selectedCourseIds: [binding.courseId, binding43.courseId, binding501.courseId], course501DiscoveredWithoutTab: true, wrongCourseRefused: true, queuedEditRevoked: true, anchorInvalidation: true, newQuiz: "New Quiz 77", newQuizItemWrites: canvas.quizItemWrites(), disconnectClearedPairing: true })}\n`);
+  }
 } finally {
+  await accountInspector?.close().catch(() => undefined);
   await context?.close().catch(() => undefined);
   await new Promise((resolveClose) => canvas.server.close(resolveClose));
   await new Promise((resolveClose) => externalFileStore.server.close(resolveClose));

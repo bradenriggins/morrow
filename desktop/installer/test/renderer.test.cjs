@@ -371,7 +371,7 @@ test("a first load that returns no state stops claiming progress and offers a re
   answer = () => ok(state());
   await dom.element("#action-body").dispatch("click", { target: retry });
   await settle();
-  assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.");
+  assert.equal(dom.element("#action-title").textContent, "Pair Morrow Bridge.");
   assert.equal(dom.element("#loading").hidden, true);
   assert.equal(dom.element("#problem").hidden, true);
 });
@@ -434,7 +434,7 @@ test("setup asks again on its own while the runtime is still uncertain", async (
   t.mock.timers.tick(750);
   await settle();
   assert.equal(calls.length, 2, "setup asked again without the person doing anything");
-  assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.");
+  assert.equal(dom.element("#action-title").textContent, "Pair Morrow Bridge.");
 
   // A settled runtime stops the asking.
   t.mock.timers.tick(60_000);
@@ -458,7 +458,7 @@ test("the Bridge folder hint refreshes the observed connection before suggesting
   t.mock.timers.tick(90_000);
   await settle();
   assert.equal(calls.length, 2, "the hint refreshes the observed Bridge state");
-  assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.");
+  assert.equal(dom.element("#action-title").textContent, "Pair Morrow Bridge.");
   assert.doesNotMatch(dom.element("#action-body").innerHTML, /Bridge connection not confirmed/);
 });
 
@@ -484,7 +484,7 @@ test("a step that leaves the runtime uncertain settles without the person asking
   t.mock.timers.tick(750);
   await settle();
   assert.deepEqual(methods, ["installer:get-state", "installer:repair", "installer:get-state"]);
-  assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.");
+  assert.equal(dom.element("#action-title").textContent, "Pair Morrow Bridge.");
 });
 
 test("setup keeps asking through a slow runtime start, then stops at its window", async (t) => {
@@ -507,7 +507,7 @@ test("setup keeps asking through a slow runtime start, then stops at its window"
   answer = () => ok(state());
   t.mock.timers.tick(5_000);
   await settle();
-  assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.", "a runtime ready after 40 seconds appears without the person asking");
+  assert.equal(dom.element("#action-title").textContent, "Pair Morrow Bridge.", "a runtime ready after 40 seconds appears without the person asking");
 });
 
 test("setup stops asking once the runtime start window has passed", async (t) => {
@@ -1012,7 +1012,7 @@ test("copying an example request sends its exact text through the clipboard chan
     return ok(current);
   });
 
-  assert.equal(dom.element("#action-title").textContent, "Your course is connected.");
+  assert.equal(dom.element("#action-title").textContent, "Morrow is ready.");
   const copyButtons = dom.element("#action-body").querySelectorAll("[data-action]")
     .filter((element) => element.dataset.action === "copy-example-prompt");
   assert.equal(copyButtons.length, 3);

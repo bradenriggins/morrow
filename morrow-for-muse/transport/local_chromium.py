@@ -278,9 +278,20 @@ def helper_token():
     ephemeral token (server.py prints it to the console at startup);
     callers that need a protected endpoint must supply the token another
     way. The token value is never logged here.
+
+    M4M-F6 (2026-09-26): the same owner-only discipline server.py
+    enforces. A token file readable by group/other is refused ("" plus
+    a loud warning, never the value): operating with a leaked file
+    would normalize the leak the server now fails closed on.
     """
+    path = helper_token_path()
     try:
-        with open(helper_token_path(), "r", encoding="utf-8") as fh:
+        if os.stat(path).st_mode & 0o077:
+            sys.stderr.write(
+                "local_chromium: refusing to use helper token file %r: "
+                "readable by group/other (tighten to 0600)\n" % path)
+            return ""
+        with open(path, "r", encoding="utf-8") as fh:
             return fh.read().strip()
     except OSError:
         return ""

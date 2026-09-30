@@ -176,3 +176,19 @@ test("a real Windows cmd shim is started through its JavaScript entry with no sh
   assert.deepEqual(JSON.parse(run.stdout), ["install", "a path with spaces"]);
   assert.equal(readFileSync(join(bin, "pnpm.cmd"), "utf8"), NPM_SHIM);
 });
+
+
+test("pnpm 12 native command shims start the exact executable without Node or a shell", () => {
+  const bin = "C:\\pnpm-home\\bin";
+  for (const name of ["pnpm", "pnpm.exe"]) {
+    const entry = `C:\\pnpm-home\\tools\\${name}`;
+    const shim = `@ECHO off\r\nSET dp0=%~dp0\r\n"%dp0%\\..\\tools\\${name}" %*\r\n`;
+    assert.deepEqual(lookup({ PATH: bin }, { [`${bin}\\pnpm.cmd`]: shim, [entry]: "" }), { command: entry, args: [] });
+  }
+});
+
+test("a native pnpm shim refuses missing and ambiguous targets", () => {
+  const bin = "C:\\pnpm-home\\bin";
+  assert.throws(() => lookup({ PATH: bin }, { [`${bin}\\pnpm.cmd`]: '"%~dp0\\..\\tools\\pnpm" %*' }), /not a pnpm program/);
+  assert.throws(() => lookup({ PATH: bin }, { [`${bin}\\pnpm.cmd`]: '"%~dp0\\a\\pnpm" "%~dp0\\b\\pnpm.cjs"' }), /does not name one pnpm program/);
+});

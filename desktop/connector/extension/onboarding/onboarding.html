@@ -25,6 +25,11 @@
     <p id="error" role="alert" hidden></p>
 
     <div id="setup-content" hidden>
+      <section class="keep-control" aria-labelledby="course-access-title">
+        <label id="course-access-title" for="course-access-mode">Course access</label>
+        <select id="course-access-mode"><option value="selected">Selected courses</option><option value="account">Account access</option></select>
+        <p id="course-access-help">Morrow can use only the courses you allow. Choose them once in Plan and Edit settings.</p>
+      </section>
       <div class="mode-switch" role="group" aria-label="Setup guide mode">
         <button id="guide-mode" class="mode-button" type="button" aria-pressed="true">Guide me</button>
         <button id="quick-mode" class="mode-button" type="button" aria-pressed="false">Setup overview</button>
@@ -46,6 +51,7 @@
         <h2 id="next-title">Open Morrow</h2>
         <p id="next-detail">Open Morrow, choose your assistant, then return to Morrow Bridge.</p>
         <button id="reconnect-morrow" class="secondary" type="button" hidden>Reconnect Morrow</button>
+        <button id="take-over-morrow" class="secondary" type="button" hidden>Use Morrow in this profile</button>
         <button id="open-settings" class="secondary" type="button" hidden>Open Plan and Edit settings</button>
       </section>
 
@@ -59,11 +65,12 @@
           </li>
           <li>
             <strong>Finish Morrow Bridge setup</strong>
-            <p>Follow the Bridge actions in the Morrow app. Then open Morrow Bridge, review and accept the course data disclosure, and select <b>Connect Morrow</b>.</p>
+            <p>Follow the Bridge actions in the Morrow app. Then open Morrow Bridge, review and accept the course data disclosure, and select <b>Pair Morrow</b>.</p>
           </li>
           <li>
-            <strong>Open and connect your course</strong>
-            <p>Open a signed-in Canvas or Moodle course in Chrome. The Morrow Bridge popup then shows <b>Connect this course</b>. Select it, select <b>Connect</b> on each course you want in Plan and Edit settings, then complete the first read that Morrow shows.</p>
+            <strong>Pair your learning account</strong>
+            <p>Sign in to Canvas or Moodle in Chrome and open any course. In Morrow Bridge, select <b>Pair Canvas account</b> or <b>Pair Moodle account</b> and allow access to the site Chrome shows. You pair each account once.</p>
+            <p>Choose <b>Selected courses</b> to limit Morrow to courses you allow in Plan and Edit settings. Choose <b>Account access</b> to work across your account's courses without selecting each course in Bridge. Give your assistant course names, course IDs, or course links.</p>
           </li>
         </ol>
         <button id="quick-open-settings" class="secondary" type="button">Open Plan and Edit settings</button>

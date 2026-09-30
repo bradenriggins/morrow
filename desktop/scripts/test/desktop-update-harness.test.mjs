@@ -51,7 +51,7 @@ if (!existsSync(join(root, "installer/node_modules/electron-updater/package.json
   throw new Error([
     "The desktop update harness needs the installer dependency electron-updater, which is not installed.",
     "The installer is outside the pnpm workspace and installs on its own.",
-    "Run: pnpm --dir installer --ignore-workspace install"
+    "Run: pnpm --dir installer install"
   ].join("\n"));
 }
 

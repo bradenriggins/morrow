@@ -322,11 +322,14 @@ test("the README names the desktop artifacts the build configuration actually pr
   assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
 });
 
-test("the Mac 1.0.7 release source keeps published Windows on 1.0.5", () => {
+test("the unpublished candidate keeps published Mac on 1.0.7 and Windows on 1.0.5", () => {
   assert.match(flat("README.md"), /Morrow Desktop 1\.0\.7 is for Mac with Apple silicon/);
   assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.7` runs on Mac with Apple silicon/);
   assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.7 \(2026-09-25\).*## 1\.0\.6 \(2026-09-25\)/);
-  assert.match(flat("README.md"), /This checkout contains Mac 1\.0\.7 with Morrow Bridge 1\.0\.126/);
+  const version = JSON.parse(read("package.json")).version;
+  const bridgeVersion = JSON.parse(read("connector/extension/manifest.json")).version;
+  assert.ok(flat("README.md").includes(`This checkout contains the unpublished Desktop ${version} candidate with Morrow Bridge ${bridgeVersion}`));
+  assert.match(flat("README.md"), /Published downloads remain Mac 1\.0\.7 and Windows 1\.0\.5/);
   assert.doesNotMatch(flat("CHANGELOG.md").split("## 1.0.6")[0], /prepared but has not been published|Mac download remains on published 1\.0\.6/);
   assert.match(flat("installer\/WINDOWS-DEPLOYMENT.md"), /No Windows 1\.0\.6 or 1\.0\.7 installer is published/);
 });

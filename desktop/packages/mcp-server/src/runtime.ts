@@ -54,6 +54,7 @@ import {
   LearnerVault,
   canonicalMorrowResult,
   canvasPrivacyRoster,
+  collectCanvasPrivacyCollection,
   decodeExactUtf8,
   moodleSourceHistoryAvailable,
   mergeCatalog,
@@ -471,6 +472,9 @@ const LEARNER_PRIVACY_REFUSAL_TEXT = "Morrow did not return this result because 
 
 /** The fixed person-facing sentence for a privacy-boundary refusal. */
 export function privacyProblemText(code: string): string {
+  if (code === "morrow_result_processing_failed") {
+    return "Morrow could not prepare this result. Check the operation status before another change.";
+  }
   if (code === "privacy_browser_binding_unverified") {
     return "Open this course in Chrome and sign in, then select Connect this course in Morrow Bridge. Its signed-in Canvas or Moodle tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
   }
@@ -3964,8 +3968,8 @@ export class GatewayRuntime {
     mode: BrowserEditAccessPrepared["mode"],
     inputs: readonly BrowserEditAccessSelectionInput[],
   ): Promise<BrowserEditAccessPrepared> {
-    if ((mode !== "edit" && mode !== "plan") || inputs.length === 0 || inputs.length > 500) {
-      throw new Error("Select one to 500 exact browser course connections.");
+    if ((mode !== "edit" && mode !== "plan") || inputs.length === 0) {
+      throw new Error("Select at least one exact browser course connection.");
     }
     const ids = inputs.map((input) => input.sourceBindingId);
     if (ids.some((id) => !/^[A-Za-z0-9_.:@-]{1,160}$/.test(id)) || new Set(ids).size !== ids.length) {
@@ -7226,17 +7230,25 @@ export class GatewayRuntime {
     });
   }
 
-  private completeCanvasCollection(result: JsonObject): readonly unknown[] {
-    const content = isJsonObject(result.structuredContent) ? result.structuredContent : null;
-    const browser = content && content.schema === "morrow.canvas-connector.result.v1" && isJsonObject(content.result)
-      ? content.result
-      : null;
-    if (!browser || content!.ok !== true || content!.commandKind !== "invoke_read"
-      || browser.ok !== true || browser.sent !== true || browser.truncated !== false) {
-      throw new Error("learner_roster_result_incomplete");
-    }
-    if (!Array.isArray(browser.data)) throw new Error("learner_roster_result_invalid");
-    return browser.data;
+  private canvasPrivacyCollection(
+    tool: CatalogTool,
+    args: JsonObject,
+    sourceBindingId: string,
+    options: { readonly signal?: AbortSignal },
+  ): Promise<readonly unknown[]> {
+    return collectCanvasPrivacyCollection(async (nextPage) => {
+      const result = await this.callSourceOwned(tool.publicName, {
+        ...args,
+        morrow_max_pages: 50,
+        _morrow: { source_binding_id: sourceBindingId, list_resume: nextPage ? { next_page: nextPage } : {} },
+      }, options);
+      const content = isJsonObject(result.structuredContent) ? result.structuredContent : null;
+      if (result.isError === true || !content || content.schema !== "morrow.canvas-connector.result.v1"
+        || content.ok !== true || content.commandKind !== "invoke_read" || !isJsonObject(content.result)) {
+        throw new Error("learner_roster_result_incomplete");
+      }
+      return content.result;
+    }, "learner_roster_result_incomplete");
   }
 
   private completeMoodleRoster(result: JsonObject, binding: JsonObject): readonly LearnerIdentity[] {
@@ -7324,30 +7336,25 @@ export class GatewayRuntime {
       if (!existing.learnerRoster.isReady(scope)) throw new Error("learner_roster_scope_unavailable");
       return existing;
     }
-    const roster = await this.callSourceOwned(rosterTool.publicName, {
+    const roster = await this.canvasPrivacyCollection(rosterTool, {
       course_id: scope.course,
       include: ["enrollments", "uuid"],
       enrollment_type: ["student"],
       enrollment_state: ["active", "invited", "rejected", "completed", "inactive"],
-      morrow_max_pages: 50,
-      _morrow: { source_binding_id: sourceBindingId },
-    }, options);
-    if (roster.isError === true) throw new Error("learner_roster_result_incomplete");
+    }, sourceBindingId, options);
     const historyTools = this.catalog.tools.filter((candidate) => candidate.upstreamId === mapping.upstreamId
       && candidate.upstreamName === "canvas_list_enrollments_courses" && candidate.annotations?.readOnlyHint === true
       && candidate.capability?.route.backend === "canvas-connector");
     if (historyTools.length !== 1) throw new Error("learner_roster_source_unavailable");
-    const history = await this.callSourceOwned(historyTools[0]!.publicName, {
-      course_id: scope.course, type: ["StudentEnrollment"], state: ["deleted"], morrow_max_pages: 50,
-      _morrow: { source_binding_id: sourceBindingId },
-    }, options);
-    if (history.isError === true) throw new Error("learner_roster_result_incomplete");
+    const history = await this.canvasPrivacyCollection(historyTools[0]!, {
+      course_id: scope.course, type: ["StudentEnrollment"], state: ["deleted"], include: ["uuid"],
+    }, sourceBindingId, options);
     const currentBinding = await this.verifiedBrowserBinding(mapping, { course_id: scope.course, _morrow: { source_binding_id: sourceBindingId } }, options, "canvas");
     if (JSON.stringify(this.canvasBindingScope(currentBinding, sourceBindingId, scope.course)) !== JSON.stringify(scope)) {
       throw new Error("learner_roster_binding_unavailable");
     }
     const learnerRoster = new LearnerRoster();
-    learnerRoster.register(scope, canvasPrivacyRoster(this.completeCanvasCollection(roster), this.completeCanvasCollection(history), scope.course));
+    learnerRoster.register(scope, canvasPrivacyRoster(roster, history, scope.course));
     const context = {
       learnerRoster,
       learnerVault: this.learnerVault,
@@ -7493,9 +7500,10 @@ export class GatewayRuntime {
   }
 
   private privacyFailure(error: unknown): JsonObject {
-    const code = error instanceof Error && /^[a-z0-9_]{1,160}$/u.test(error.message) && (/^canvas_course_not_connected$|^learner_roster_|^learner_token_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_|^moodle_site_inventory_|^moodle_role_definitions_|^moodle_courses_/u.test(error.message))
+    const code = error instanceof Error && /^[a-z0-9_]{1,160}$/u.test(error.message) && (
+      canvasCourseSummaryRoute(error.message.replace(/_(?:request_invalid|result_invalid|invalid)$/u, "")) !== null || /^canvas_course_not_connected$|^learner_roster_|^learner_token_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_|^moodle_site_inventory_|^moodle_role_definitions_|^moodle_courses_/u.test(error.message))
       ? error.message
-      : "privacy_output_refused";
+      : "morrow_result_processing_failed";
     return {
       content: [{ type: "text", text: privacyProblemText(code) }],
       isError: true,
@@ -8253,7 +8261,7 @@ export class GatewayRuntime {
   }
 
   private historicalOperationPrivacyFailure(): JsonObject {
-    return this.privacyFailure(new Error("historical operation egress unavailable"));
+    return this.privacyFailure(new Error("privacy_historical_operation_egress_unavailable"));
   }
 
   /** Rebuild the one fixed local cancellation failure without its input payload. */

@@ -219,6 +219,8 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
   let startupTimeoutSeconds: number | undefined;
   let toolTimeoutSeconds: number | undefined;
   let geminiTimeoutMilliseconds: number | undefined;
+  let routeId: string | undefined;
+  let routeGeneration: string | undefined;
   let force = false;
   let replaceGenerated = false;
   let json = false;
@@ -256,8 +258,14 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
       case "--startup-timeout": startupTimeoutSeconds = positiveInteger(value, flag); break;
       case "--tool-timeout": toolTimeoutSeconds = positiveInteger(value, flag); break;
       case "--gemini-timeout": geminiTimeoutMilliseconds = positiveInteger(value, flag); break;
+      case "--route-id": routeId = value; break;
+      case "--route-generation": routeGeneration = value; break;
       default: throw new Error(`Unknown option ${flag}`);
     }
+  }
+
+  if ((routeId === undefined) !== (routeGeneration === undefined)) {
+    throw new Error("--route-id and --route-generation must be supplied together");
   }
 
   return {
@@ -274,6 +282,7 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
       ...(startupTimeoutSeconds !== undefined ? { startupTimeoutSeconds } : {}),
       ...(toolTimeoutSeconds !== undefined ? { toolTimeoutSeconds } : {}),
       ...(geminiTimeoutMilliseconds !== undefined ? { geminiTimeoutMilliseconds } : {}),
+      ...(routeId !== undefined && routeGeneration !== undefined ? { route: { id: routeId, generation: routeGeneration } } : {}),
       force,
       replaceGenerated,
     },

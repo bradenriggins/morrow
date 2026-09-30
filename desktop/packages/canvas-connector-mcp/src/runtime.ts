@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { BridgeOutcomeUnknownError, BridgePortInUseError, BridgeRequestCancelledError, BridgeUnavailableError, LoopbackBridgeServer, bridgeFailureResult } from "@morrow/bridge-loopback";
 import {
+  BRIDGE_BINDING_ID_PATTERN,
   normalizeBridgeEditOptionsResult,
   normalizeBridgeEditPolicySet,
   normalizeBridgeMaintenanceControl,
@@ -31,7 +32,7 @@ import {
   type MoodleBrowserCatalog,
   type MoodleBrowserOperation,
 } from "./browser-catalog.js";
-import { canvasPrivacyRoster, moodleSourceHistoryAvailable, sourcePrivacyRoster, type SourcePrivacyBinding, type LearnerIdentity } from "@morrow/gateway-core";
+import { canvasPrivacyRoster, collectCanvasPrivacyCollection, moodleSourceHistoryAvailable, sourcePrivacyRoster, type SourcePrivacyBinding, type LearnerIdentity } from "@morrow/gateway-core";
 import type { CanvasConnectorConfig } from "./config.js";
 
 function resultObject(value: unknown): JsonObject {
@@ -332,7 +333,7 @@ function failedProblem(
     || (providerFailure?.sent === false ? "not_sent" as const : undefined)
     || (["canvas_request_not_sent", "canvas_binding_required", "canvas_content_guard_unavailable", "moodle_binding_required", "moodle_expected_digest_required", "moodle_binding_course_mismatch", "course_binding_required", "course_binding_course_mismatch", "course_binding_mismatch", "course_scope_required",
       "canvas_semantic_target_course_mismatch", "canvas_semantic_target_input_refused", "canvas_semantic_target_resolution_stale",
-      "multi_context_object_not_supported", "stale_bridge_command", "operation_catalog_mismatch",
+      "multi_context_object_not_supported", "stale_bridge_command", "operation_catalog_mismatch", "course_access_account_required",
       "edit_policy_authorization_invalid", "edit_policy_stale", "edit_policy_guard_ambiguous", "edit_policy_rule_refused", "edit_policy_page_missing",
       "edit_policy_canvas_content_guard_required", "edit_policy_canvas_content_guard_refused", "edit_policy_page_guard_required",
       "edit_policy_item_bank_guard_required", "edit_policy_fields_refused", "new_quiz_settings_review_required", "new_quiz_lifecycle_review_required", "new_quiz_effect_review_required",
@@ -451,6 +452,16 @@ export class CanvasConnectorRuntime {
     };
   }
 
+  /**
+   * The binding a reviewed private route checks before it sends anything. A saved course whose tab
+   * is closed is proved again once first, the way every other command is, so these routes admit
+   * only a binding the Bridge has just published as runtime-verified.
+   */
+  private async currentBinding(sourceBindingId: string | undefined, signal?: AbortSignal): Promise<BridgeBinding | undefined> {
+    if (sourceBindingId) await this.bridge.recoverBinding(sourceBindingId, signal ? { signal } : {});
+    return this.bindings().find((entry) => entry.sourceBindingId === sourceBindingId);
+  }
+
   bindings(): readonly BridgeBinding[] {
     return this.bridge.listBindings();
   }
@@ -460,7 +471,7 @@ export class CanvasConnectorRuntime {
   }
 
   async editOptions(sourceBindingId: string): Promise<JsonObject> {
-    if (typeof sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(sourceBindingId)) {
+    if (typeof sourceBindingId !== "string" || !BRIDGE_BINDING_ID_PATTERN.test(sourceBindingId)) {
       throw new TypeError("source_binding_id must identify one saved browser binding");
     }
     const response = await this.bridge.invoke({
@@ -741,7 +752,7 @@ export class CanvasConnectorRuntime {
       });
     }
     const courseId = exactCourseId(split.arguments.course_id);
-    const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
+    const binding = await this.currentBinding(split.options.sourceBindingId, signal);
     if (!courseId || binding?.provider !== "canvas" || binding.courseId !== courseId || binding.runtimeVerified !== true) {
       return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
@@ -837,7 +848,7 @@ export class CanvasConnectorRuntime {
       });
     }
     const courseId = exactCourseId(split.arguments.course_id);
-    const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
+    const binding = await this.currentBinding(split.options.sourceBindingId, signal);
     if (!courseId || binding?.provider !== "canvas" || binding.courseId !== courseId || binding.runtimeVerified !== true) {
       return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
@@ -930,7 +941,7 @@ export class CanvasConnectorRuntime {
         recoverable: false,
       });
     }
-    const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
+    const binding = await this.currentBinding(split.options.sourceBindingId, signal);
     if (binding?.provider !== "canvas" || binding.courseId !== separated.privateConversation.courseId || binding.runtimeVerified !== true) {
       return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
@@ -1010,7 +1021,7 @@ export class CanvasConnectorRuntime {
         recoverable: true,
       }, "moodle");
     }
-    const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
+    const binding = await this.currentBinding(split.options.sourceBindingId, signal);
     if (binding?.provider !== "moodle" || binding.courseId !== parsed.courseId || binding.runtimeVerified !== true) {
       return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
@@ -1088,7 +1099,12 @@ export class CanvasConnectorRuntime {
       return await this.callPrivateCanvasConversation(rawArguments, signal);
     }
     const operation = this.operations.get(toolName);
-    if (!operation) throw new Error(`Canvas connector has no operation named ${toolName}`);
+    if (!operation) return failedBeforeSend({
+      schema: "morrow.bridge.problem.v1",
+      code: "operation_unavailable",
+      message: "This operation is not available in the installed Morrow connector. Refresh the tool list and select an available operation.",
+      recoverable: true,
+    });
     const provider = operationProvider(operation);
     let separated: ReturnType<typeof splitPrivateAttachment>;
     try {
@@ -1347,6 +1363,22 @@ export class CanvasConnectorRuntime {
   }
 
   async privacyRoster(binding: SourcePrivacyBinding): Promise<readonly LearnerIdentity[]> {
+    if (binding.provider === "canvas") {
+      const collect = async (tool: string, args: JsonObject, failure: string) => collectCanvasPrivacyCollection(async (nextPage) => {
+        const result = await this.call(tool, { ...args, course_id: binding.courseId, morrow_max_pages: 50,
+          _morrow: { source_binding_id: binding.sourceBindingId, list_resume: nextPage ? { next_page: nextPage } : {} } });
+        if (result.ok !== true || result.commandKind !== "invoke_read" || !isJsonObject(result.result)) throw new Error(failure);
+        return result.result;
+      }, failure);
+      const current = await collect("canvas_list_users_in_course_users", {
+        include: ["enrollments", "uuid"], enrollment_type: ["student"],
+        enrollment_state: ["active", "invited", "rejected", "completed", "inactive"],
+      }, "privacy_roster_incomplete");
+      const deleted = await collect("canvas_list_enrollments_courses", {
+        type: ["StudentEnrollment"], state: ["deleted"], include: ["uuid"],
+      }, "privacy_roster_history_incomplete");
+      return canvasPrivacyRoster(current, deleted, String(binding.courseId));
+    }
     const result = await this.call(binding.provider === "moodle" ? "moodle_get_course_participant_roster" : "canvas_list_users_in_course_users", {
       course_id: binding.courseId,
       ...(binding.provider === "moodle" ? {} : {
@@ -1365,15 +1397,7 @@ export class CanvasConnectorRuntime {
           .some((field) => roster[field] !== (binding as unknown as JsonObject)[field])) throw new Error("privacy_roster_mismatch");
       return sourcePrivacyRoster(roster.identities);
     }
-    const history = await this.call("canvas_list_enrollments_courses", {
-      course_id: binding.courseId,
-      type: ["StudentEnrollment"], state: ["deleted"], include: ["uuid"], morrow_max_pages: 50,
-      _morrow: { source_binding_id: binding.sourceBindingId },
-    });
-    const deleted = isJsonObject(history.result) ? history.result : undefined;
-    if (history.ok !== true || history.commandKind !== "invoke_read" || !deleted || deleted.ok !== true
-      || deleted.sent !== true || deleted.truncated !== false) throw new Error("privacy_roster_history_incomplete");
-    return canvasPrivacyRoster(browser.data, deleted.data, String(binding.courseId));
+    throw new Error("privacy_roster_provider_unavailable");
   }
 
   async close(): Promise<void> {

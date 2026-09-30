@@ -3,7 +3,8 @@
  * Reads the installer window's real layout in Chromium: the Home view's
  * action panel and progress rail, where the Updates and Blackboard panels
  * sit against each other on the Settings view, from 1180px down to the 320px
- * window minimum, how large the step labels stay, which managed-device note
+ * window minimum, how large the step labels stay, whether each Home status
+ * line keeps its label, state word, and button text apart, which managed-device note
  * renders, and what the busy treatment draws. It needs Playwright's Chromium, so `pnpm --dir installer
  * test` leaves it out; run it with `pnpm --dir installer test:layout`.
  *
@@ -14,7 +15,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -80,6 +81,21 @@ const LONG_MATERIALS = installerState({ ...BASE, materialsFolder: LONG_FOLDER.re
 const COURSE_CONNECTED = installerState({
   ...BASE,
   lifecycle: "ready",
+  bridgePaired: true,
+  courseSite: true,
+  runtimeVerifiedCourseCount: 1,
+  selectedCourseName: "BIO 101",
+  firstPreviewCourseName: "BIO 101",
+  firstPreview: { available: true, completed: true }
+});
+// Neither configured assistant has confirmed its current route yet.
+const TWO_UNCONFIRMED = installerState({
+  ...BASE,
+  lifecycle: "ready",
+  assistants: [
+    { ...BASE.assistants[0], connected: false },
+    { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, detected: true, configured: true, connected: false, needsWorkspace: true, projectFolder: LONG_FOLDER.replace(/Bridge$/, "Course project") }
+  ],
   bridgePaired: true,
   courseSite: true,
   runtimeVerifiedCourseCount: 1,
@@ -352,6 +368,75 @@ try {
     }
     for (const row of rows) assert.equal(row.textInside, true, `an example request stays inside its row at ${width}px`);
     console.log(`${String(width).padStart(4)}px  examples Copy ${below[0] ? "under" : "beside"} every request`);
+  }
+
+  // Each status line keeps its label, its state word, and its button text
+  // apart and inside the row, down to the 320px window minimum. This reads
+  // the rendered text itself, not the boxes around it: a grid cell can shrink
+  // to nothing while its text paints over the next cell.
+  const unconfirmed = await openSetup(browser, "darwin", TWO_UNCONFIRMED);
+  const evidence = path.resolve(ROOT, "../output/installer-layout");
+  await mkdir(evidence, { recursive: true });
+  for (const width of WIDTHS) {
+    await unconfirmed.setViewportSize({ width, height: 900 });
+    assert.equal(await unconfirmed.getByRole("heading", { name: "Quit and reopen your assistant.", exact: true }).isVisible(), true);
+    assert.equal(await unconfirmed.getByRole("button", { name: "Check ChatGPT", exact: true }).isVisible(), true);
+    assert.equal(await unconfirmed.locator(".home-status-row").count(), 0, "an unconfirmed assistant cannot show the ready status panel");
+    assert.equal(await unconfirmed.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `unconfirmed setup fits at ${width}px`);
+    if (width === 320) await unconfirmed.screenshot({ path: path.join(evidence, "unconfirmed-assistants-320.png"), fullPage: true });
+  }
+  console.log("restart two unconfirmed assistants require the current assistant's connection check");
+
+  for (const [name, snapshot, word] of [["all confirmed", COURSE_CONNECTED, "Ready"]]) {
+    const statusPage = await openSetup(browser, "darwin", snapshot);
+    for (const width of [...WIDTHS, 390]) {
+      await statusPage.setViewportSize({ width, height: 900 });
+      const rows = await statusPage.evaluate(() => {
+        const textRects = (element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0)
+            .map(({ left, right, top, bottom, width }) => ({ left, right, top, bottom, width }));
+        };
+        return [...document.querySelectorAll(".home-status-row")].map((row) => {
+          const label = row.querySelector(".home-status-label");
+          const stateWord = row.querySelector(".home-status-word");
+          const button = row.querySelector("button");
+          const box = row.getBoundingClientRect();
+          return {
+            label: label.textContent,
+            word: stateWord.textContent,
+            row: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+            texts: { label: textRects(label), word: textRects(stateWord), button: textRects(button) },
+            labelFits: label.scrollWidth <= label.clientWidth + 0.5,
+            wordFits: stateWord.scrollWidth <= stateWord.clientWidth + 0.5
+          };
+        });
+      });
+      const overlaps = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+      assert.deepEqual(rows.map((row) => row.label), ["Assistant", "Morrow Bridge", "Courses"], `${name}: three status lines at ${width}px`);
+      assert.equal(rows[0].word, word, `${name}: the Assistant line says ${word} at ${width}px`);
+      for (const row of rows) {
+        const where = `${name}: the ${row.label} line at ${width}px`;
+        for (const [part, rects] of Object.entries(row.texts)) {
+          assert.ok(rects.length > 0, `${where} paints its ${part} text`);
+          for (const rect of rects) {
+            assert.ok(rect.left >= row.row.left - 0.5 && rect.right <= row.row.right + 0.5, `${where} keeps its ${part} text inside the row`);
+            assert.ok(rect.top >= row.row.top - 0.5 && rect.bottom <= row.row.bottom + 0.5, `${where} keeps its ${part} text inside the row height`);
+          }
+        }
+        for (const [first, second] of [["label", "word"], ["label", "button"], ["word", "button"]]) {
+          for (const a of row.texts[first]) {
+            for (const b of row.texts[second]) assert.equal(overlaps(a, b), false, `${where}: the ${first} and ${second} text overlap`);
+          }
+        }
+        assert.equal(row.labelFits, true, `${where}: the label is wider than its box`);
+        assert.equal(row.wordFits, true, `${where}: the state word is wider than its box`);
+      }
+      assert.equal(await statusPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `${name}: status lines must not scroll sideways at ${width}px`);
+      const narrowest = Math.min(...rows.flatMap((row) => row.texts.label.map((rect) => rect.width)));
+      console.log(`${String(width).padStart(4)}px  status   ${name}: label, word, and button text apart; narrowest label text ${narrowest.toFixed(1)}px`);
+    }
   }
 
   // A Copy button says Copied for about 2 seconds, and a screen reader hears it once.

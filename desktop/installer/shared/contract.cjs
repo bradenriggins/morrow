@@ -230,6 +230,8 @@ function installerState(input) {
     tier: assistant.tier,
     detected: assistant.detected === true,
     configured: assistant.configured === true,
+    routeReady: assistant.routeReady !== false,
+    statusUnavailable: assistant.statusUnavailable === true,
     pending: assistant.pending === true,
     // Claude Desktop connected, and Morrow is still confirming the Claude app
     // that started it. The launcher keeps asking until it can say.
@@ -331,13 +333,13 @@ function blackboardSnapshot(value) {
     let baseUrl;
     try { baseUrl = new URL(tenant.baseUrl); } catch { return []; }
     if (baseUrl.protocol !== "https:" || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash || baseUrl.pathname !== "/") return [];
-    const courseBindings = tenant.courseBindings.slice(0, 500).flatMap((binding) => {
+    const courseBindings = tenant.courseBindings.flatMap((binding) => {
       if (!binding || typeof binding !== "object" || Array.isArray(binding)
         || typeof binding.sourceBindingId !== "string" || !sourceBinding.test(binding.sourceBindingId)
         || typeof binding.courseId !== "string" || !blackboardId.test(binding.courseId)) return [];
       return [{ sourceBindingId: binding.sourceBindingId, courseId: binding.courseId }];
     });
-    const availableCourses = Array.isArray(tenant.availableCourses) ? tenant.availableCourses.slice(0, 500).flatMap((course) => {
+    const availableCourses = Array.isArray(tenant.availableCourses) ? tenant.availableCourses.flatMap((course) => {
       if (!course || typeof course !== "object" || Array.isArray(course)
         || typeof course.courseId !== "string" || !blackboardId.test(course.courseId)
         || typeof course.title !== "string" || !course.title.trim() || course.title.trim().length > 500) return [];

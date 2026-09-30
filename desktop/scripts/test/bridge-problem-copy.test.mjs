@@ -169,9 +169,9 @@ test("no code describes Edit access as having a length or an end time", () => {
 });
 
 // Morrow Bridge reconnects by itself with a saved connection once it is reloaded, and the popup
-// shows no Connect Morrow button while one is saved.
-test("a version mismatch sends the educator to the popup after the reload, not to Connect Morrow", () => {
-  assert.doesNotMatch(problemText("bridge_version_mismatch"), /Connect Morrow/);
+// shows no Pair Morrow button while one is saved.
+test("a version mismatch sends the educator to the popup after the reload, not to Pair Morrow", () => {
+  assert.doesNotMatch(problemText("bridge_version_mismatch"), /Pair Morrow/);
   assert.match(problemText("bridge_version_mismatch"), /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
 });
 
@@ -272,7 +272,7 @@ test("an unknown code still shows the code, so a support conversation can start 
 
 test("one code reads as one line for the single region each page shows a problem in", () => {
   const line = problemText("bridge_not_connected");
-  assert.equal(line, "Morrow is not running on this computer. Morrow Bridge asked the Morrow app on this computer to start a connection, and nothing answered. Open the Morrow app, then select Connect Morrow again.");
+  assert.equal(line, "Morrow is not running on this computer. Morrow Bridge asked the Morrow app on this computer to start a connection, and nothing answered. Open the Morrow app, then select Pair Morrow again.");
   assert.doesNotMatch(line, /\s\s|\n/);
 });
 

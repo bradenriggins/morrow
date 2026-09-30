@@ -158,12 +158,12 @@ test("current setup surfaces use three stages and platform-specific course actio
   const app = readFileSync(new URL("installer/shared/setup-view.mjs", root), "utf8");
   assert.match(app, /\["Assistant", "Morrow Bridge", "Course"\]/);
   const popup = readFileSync(new URL("connector/extension/popup/popup-view.js", root), "utf8");
-  assert.match(popup, /"Connect this course"/);
+  assert.match(popup, /`Pair \$\{platform\} account`/);
   assert.match(popup, /"Open Canvas or Moodle"/);
   const popupPage = readFileSync(new URL("connector/extension/popup/popup.html", root), "utf8");
   const help = popupPage.match(/<summary>How to connect<\/summary>\s*<ol>([\s\S]*?)<\/ol>/)?.[1] || "";
   assert.equal((help.match(/<li>/g) || []).length, 3, "popup help must keep the same three setup stages as the app and website");
-  assert.match(help, /Choose your assistant[\s\S]*Finish Morrow Bridge setup[\s\S]*Open and connect your course/);
+  assert.match(help, /Choose your assistant[\s\S]*Finish Morrow Bridge setup[\s\S]*Pair your learning account/);
 });
 
 test("the popup discloses course data use before its connection action", () => {
@@ -250,7 +250,7 @@ test("pairing is a Morrow Bridge popup step with no page of its own", async () =
   assert.match(answer.contentType, /^application\/json/);
   assert.doesNotMatch(answer.body, /<html|Allow connection/i);
   const popup = readFileSync(new URL("../../connector/extension/popup/popup-view.js", import.meta.url), "utf8");
-  assert.match(popup, /Select Connect Morrow to connect this extension to Morrow\. Connecting does not approve changes to your courses\./);
+  assert.match(popup, /Select Pair Morrow to connect this extension to Morrow\. Connecting does not approve changes to your courses\./);
 });
 
 test("the approval result page states the result without a label above it", async () => {

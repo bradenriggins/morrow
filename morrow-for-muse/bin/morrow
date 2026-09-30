@@ -14,6 +14,7 @@ Subcommands:
   query     the failed-students question: not available in this
             version, so it refuses before any read (query/chain.py)
   doctor    read-only health check: helper status, tree sanity
+  page-link mint one single-use helper sign-in link for the educator
   version   read-only: print the tree version and command inventory
   failure   read-only: look up one failure-catalog entry by id or fragment
   mode      show or set Plan/Edit mode (settings/commands.py mode ...)
@@ -66,6 +67,42 @@ def _helper_status_url():
         or "http://127.0.0.1:%d/status" % tree_config.helper_port()
 
 
+def _page_link():
+    """Mint a single-use sign-in page link and print it.
+
+    Reads the launch token from the tree's 0600 token file through the
+    sanctioned transport path (never argv, logs, or output) and mints
+    one page code with POST /page-code. Prints exactly one one-time
+    URL for the educator; the code burns on its first load (10 min
+    TTL). Exit 1 when the helper is unreachable or the mint fails.
+    """
+    from config import tree_config
+    from transport import local_chromium as lc
+    port = tree_config.helper_port()
+    try:
+        scheme = lc._helper_tls_context()[0]
+    except Exception:
+        scheme = "http"
+    try:
+        code, raw = lc._helper_request("POST", "/page-code", port=port,
+                                       timeout=10)
+    except Exception as exc:
+        print("morrow page-link: helper unreachable (%s: %s)"
+              % (type(exc).__name__, exc), file=sys.stderr)
+        return 1
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+        page_code = payload.get("page_code", "")
+    except Exception:
+        page_code = ""
+    if code != 200 or not page_code:
+        print("morrow page-link: mint failed (HTTP %s)" % code,
+              file=sys.stderr)
+        return 1
+    print("%s://127.0.0.1:%d/?code=%s" % (scheme, port, page_code))
+    return 0
+
+
 def _print_help():
     lines = ["usage: bin/morrow <command> [args...]",
              "",
@@ -76,6 +113,8 @@ def _print_help():
         script, blurb = _COMMANDS[name]
         lines.append("  %-10s %s" % (name, blurb))
     lines.append("  %-10s %s" % ("doctor", "read-only health check"))
+    lines.append("  %-10s %s" % ("page-link", "mint a single-use helper "
+                                  "sign-in link for the educator"))
     lines.append("  %-10s %s" % ("version", "read-only: version and command inventory"))
     lines.append("  %-10s %s" % ("failure", "read-only: failure-catalog lookup"))
     lines.append("  %-10s %s" % ("mode", "show or set Plan/Edit mode "
@@ -120,7 +159,8 @@ def _version():
         pass
     commands = sorted(list(_COMMANDS) + ["doctor", "version", "failure",
                                          "mode", "settings", "students",
-                                         "disconnect", "start"])
+                                         "disconnect", "start",
+                                         "page-link"])
     lines = [
         "morrow %s" % version,
         "tree: %s" % DEPLOY_DIR,
@@ -341,6 +381,11 @@ def main(argv=None):
             print("usage: bin/morrow doctor [--json]", file=sys.stderr)
             return 2
         return _doctor(json_mode=(rest == ["--json"]))
+    if name == "page-link":
+        if rest:
+            print("usage: bin/morrow page-link", file=sys.stderr)
+            return 2
+        return _page_link()
     if name == "version":
         if rest:
             print("usage: bin/morrow version", file=sys.stderr)

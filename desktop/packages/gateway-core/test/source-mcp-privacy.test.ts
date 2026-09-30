@@ -108,6 +108,20 @@ describe("source MCP privacy boundary", () => {
     expect(() => sourcePrivacyRoster([{ id: "1", aliases: [17] }])).toThrow();
   });
 
+  it("classifies handler exceptions separately from roster refusal without exposing raw text", async () => {
+    const boundary = setup({ internalSourceCapability: "a".repeat(64) });
+    for (const meta of [undefined, { [INTERNAL_SOURCE_CAPABILITY_META]: "a".repeat(64) }]) {
+      const result = await boundary.invoke("canvas_read", request, meta, async () => { throw new TypeError("Mary Jackson 912345 /private/path"); });
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({ code: "source_operation_failed" });
+      expect(text(result)).not.toMatch(/Mary|912345|private\/path|privacy boundary/);
+      expect(text(result)).toContain("operation status");
+    }
+    const refused = await setup({ loadRoster: async () => { throw new Error("provider failed to read roster Mary Jackson"); } })
+      .invoke("canvas_read", request, undefined, async () => envelope("ok"));
+    expect(refused.structuredContent).toMatchObject({ code: "privacy_source_boundary_refused" });
+  });
+
   it("persists course labels across source restarts without plaintext roster storage", async () => {
     const directory = mkdtempSync(join(tmpdir(), "morrow-source-privacy-"));
     try {

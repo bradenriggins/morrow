@@ -147,13 +147,34 @@ describe("historical course identity boundary", () => {
   const deleted = { course_id: "42", type: "StudentEnrollment", enrollment_state: "deleted", user_id: former.id, user: former };
   const result = (data: unknown, truncated: boolean | undefined = false) => ({ ok: true, commandKind: "invoke_read", result: { ok: true, sent: true, ...(truncated === undefined ? {} : { truncated }), data } });
 
+  it("continues exact current-user and deleted-enrollment lists before constructing the privacy roster", async () => {
+    const runtime = Object.create(CanvasConnectorRuntime.prototype) as CanvasConnectorRuntime;
+    const requests: { name: string; args: any }[] = [];
+    runtime.call = vi.fn(async (name, args) => {
+      requests.push({ name, args });
+      const history = name === "canvas_list_enrollments_courses";
+      const next = (args._morrow as any)?.list_resume?.next_page;
+      const data = history ? next ? [deleted] : [] : next ? [] : [current];
+      return { ...result(data, !next), result: { ...result(data, !next).result,
+        morrow_pages_read: next ? 51 : 50,
+        ...(!next ? { morrow_next_page: history ? "history-page-token" : "current-page-token" } : {}) } };
+    });
+    expect(await runtime.privacyRoster(binding)).toMatchObject([current, { id: former.id, name: former.name }]);
+    expect(requests.map(({ name, args }) => [name, args._morrow])).toEqual([
+      ["canvas_list_users_in_course_users", { source_binding_id: binding.sourceBindingId, list_resume: {} }],
+      ["canvas_list_users_in_course_users", { source_binding_id: binding.sourceBindingId, list_resume: { next_page: "current-page-token" } }],
+      ["canvas_list_enrollments_courses", { source_binding_id: binding.sourceBindingId, list_resume: {} }],
+      ["canvas_list_enrollments_courses", { source_binding_id: binding.sourceBindingId, list_resume: { next_page: "history-page-token" } }],
+    ]);
+  });
+
   it("loads deleted enrollment history with bounded pagination and merges its users", async () => {
     const runtime = Object.create(CanvasConnectorRuntime.prototype) as CanvasConnectorRuntime;
     runtime.call = vi.fn(async (name) => result(name === "canvas_list_enrollments_courses" ? [deleted, { ...deleted, id: "second-section" }] : [current]));
     expect(await runtime.privacyRoster(binding)).toMatchObject([current, { id: former.id, name: former.name, email: former.email, loginId: "aformer" }]);
     expect(runtime.call).toHaveBeenLastCalledWith("canvas_list_enrollments_courses", {
       course_id: "42", type: ["StudentEnrollment"], state: ["deleted"], include: ["uuid"], morrow_max_pages: 50,
-      _morrow: { source_binding_id: "binding-42" },
+      _morrow: { source_binding_id: "binding-42", list_resume: {} },
     });
   });
 

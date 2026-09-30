@@ -48,6 +48,7 @@ async function connect(
     origin: "https://school.instructure.com",
     runtimeVerified: true,
   }],
+  helloExtras: { readonly instanceId?: string; readonly takeover?: true } = {},
 ): Promise<WebSocket> {
   const address = await server.start();
   const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
@@ -84,6 +85,7 @@ async function connect(
     runtimeRevision: revision,
     catalogDigest: digest,
     bindings,
+    ...helloExtras,
     sentAt: Date.now(),
   }));
   await once(socket, "message");
@@ -236,6 +238,36 @@ function commandHandler(socket: WebSocket, handler: (command: BridgeCommand) => 
 }
 
 describe("LoopbackBridgeServer", () => {
+  it("commits a large binding inventory only after the last ordered part", async () => {
+    const server = new LoopbackBridgeServer({ token, expectedRuntimeRevision: revision, expectedCatalogDigest: digest, allowedExtensionIds: [extensionId], port: 0 });
+    servers.push(server);
+    const socket = await connect(server);
+    const generation = server.health().generation;
+    const bindings = Array.from({ length: 12_001 }, (_, index) => ({ sourceBindingId: `canvas-course-${index}`, provider: "canvas", courseId: String(index + 1), courseName: "Course ".padEnd(500, "x"), runtimeVerified: true }));
+    expect(Buffer.byteLength(JSON.stringify(bindings))).toBeGreaterThan(MAX_BRIDGE_MESSAGE_BYTES);
+    for (let index = 0; index < bindings.length; index += 500) {
+      const complete = index + 500 >= bindings.length;
+      const message = JSON.stringify({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation, bindings: bindings.slice(index, index + 500), syncId: "large-inventory-0001", part: index / 500, complete, sentAt: Date.now() });
+      expect(Buffer.byteLength(message)).toBeLessThan(MAX_BRIDGE_MESSAGE_BYTES);
+      socket.send(message);
+      await new Promise(done => setTimeout(done, 10));
+      if (!complete) expect(server.listBindings()).toHaveLength(1);
+    }
+    await vi.waitFor(() => expect(server.listBindings()).toHaveLength(12_001));
+    socket.send(JSON.stringify({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation, bindings: [], syncId: "replacement-0001", part: 0, complete: false, sentAt: Date.now() }));
+    await new Promise(done => setTimeout(done, 10));
+    expect(server.listBindings()).toHaveLength(12_001);
+  });
+
+  it("refuses a missing or duplicate inventory part before it can replace the scope", async () => {
+    const server = new LoopbackBridgeServer({ token, expectedRuntimeRevision: revision, expectedCatalogDigest: digest, allowedExtensionIds: [extensionId], port: 0 });
+    servers.push(server);
+    const socket = await connect(server);
+    const generation = server.health().generation;
+    socket.send(JSON.stringify({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation, bindings: [], syncId: "broken-inventory-01", part: 1, complete: true, sentAt: Date.now() }));
+    const [code] = await once(socket, "close");
+    expect(code).toBe(4400);
+  });
   it("closes mixed authenticated and unauthenticated peers within the shutdown bound", async () => {
     const server = new LoopbackBridgeServer({
       token,
@@ -1579,5 +1611,227 @@ describe("LoopbackBridgeServer", () => {
       toolName: "edit_page",
       operationKey: "PUT /v1/pages/{url}#edit_page",
     })).rejects.toThrow("outer grant");
+  });
+});
+
+/** One authenticated connection attempt that resolves with Morrow's answer: ready, or the close code. */
+async function attempt(
+  server: LoopbackBridgeServer,
+  helloExtras: { readonly instanceId?: string; readonly takeover?: true },
+  bindings: readonly BridgeBinding[] = [],
+): Promise<{ socket: WebSocket; ready?: number; closed?: { code: number; reason: string } }> {
+  const address = await server.start();
+  const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, { origin: `chrome-extension://${extensionId}` });
+  sockets.push(socket);
+  await once(socket, "open");
+  const authentication = {
+    schema: BRIDGE_SCHEMAS.authenticate,
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    clientNonce: randomBytes(32).toString("hex"),
+    extensionId,
+    runtimeRevision: revision,
+    catalogDigest: digest,
+    sentAt: Date.now(),
+  } as const;
+  socket.send(serializeBridgeMessage(authentication));
+  const [challengeRaw] = await once(socket, "message");
+  const challenge = parseBridgeJson(challengeRaw.toString()) as { serverNonce: string };
+  const answer = new Promise<{ ready?: number; closed?: { code: number; reason: string } }>((resolve) => {
+    socket.once("message", (raw) => resolve({ ready: (parseBridgeJson(raw.toString()) as { generation: number }).generation }));
+    socket.once("close", (code, reason) => resolve({ closed: { code, reason: reason.toString() } }));
+  });
+  socket.send(serializeBridgeMessage({
+    schema: BRIDGE_SCHEMAS.hello,
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    clientNonce: authentication.clientNonce,
+    serverNonce: challenge.serverNonce,
+    clientProof: createHmac("sha256", token).update(bridgeAuthenticationProofPayload("client", authentication, challenge.serverNonce), "utf8").digest("hex"),
+    extensionId,
+    runtimeRevision: revision,
+    catalogDigest: digest,
+    bindings,
+    ...helloExtras,
+    sentAt: Date.now(),
+  }));
+  return { socket, ...await answer };
+}
+
+function closedSocket(socket: WebSocket): Promise<{ code: number; reason: string }> {
+  return new Promise((resolve) => socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() })));
+}
+
+const unverifiedCourse: BridgeBinding = {
+  sourceBindingId: "canvas-course-42",
+  provider: "canvas",
+  courseId: "42",
+  courseName: "Course 42",
+  origin: "https://school.instructure.com",
+  runtimeVerified: false,
+};
+
+function answer(socket: WebSocket, command: BridgeCommand, ok: boolean, body: object): void {
+  socket.send(serializeBridgeMessage({
+    schema: BRIDGE_SCHEMAS.result,
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    requestId: command.requestId,
+    operationId: command.operationId,
+    generation: command.generation,
+    ok,
+    ...(ok ? { result: body } : { problem: body }),
+    completedAt: Date.now(),
+  }));
+}
+
+function listen(socket: WebSocket, handler: (command: BridgeCommand) => void): BridgeCommand[] {
+  const seen: BridgeCommand[] = [];
+  socket.on("message", (raw) => {
+    const value = parseBridgeJson(raw.toString()) as { schema?: string };
+    if (value?.schema !== BRIDGE_SCHEMAS.command) return;
+    seen.push(value as BridgeCommand);
+    handler(value as BridgeCommand);
+  });
+  return seen;
+}
+
+const readCourse = {
+  kind: "invoke_read" as const,
+  toolName: "list_pages",
+  operationKey: "GET /v1/courses/{course_id}/pages#list_pages",
+  arguments: { course_id: "42" },
+  sourceBindingId: "canvas-course-42",
+};
+
+describe("one Chrome profile owns the Bridge connection", () => {
+  const options = () => ({ token, expectedRuntimeRevision: revision, expectedCatalogDigest: digest, allowedExtensionIds: [extensionId], port: 0 });
+
+  it("does not treat two older clients without profile IDs as the same profile", async () => {
+    const server = new LoopbackBridgeServer(options());
+    servers.push(server);
+    const owner = await attempt(server, {});
+    const other = await attempt(server, {});
+    expect(other.closed).toEqual({ code: 4409, reason: "bridge_owned_by_other_profile" });
+    expect(owner.socket.readyState).toBe(WebSocket.OPEN);
+    expect(server.health().generation).toBe(1);
+  });
+
+  it("refuses a second profile without replacing the profile that holds the connection", async () => {
+    const server = new LoopbackBridgeServer(options());
+    servers.push(server);
+    const owner = await attempt(server, { instanceId: "profile-owner-0001" });
+    expect(owner.ready).toBe(1);
+    const other = await attempt(server, { instanceId: "profile-other-0002" });
+    expect(other.closed).toEqual({ code: 4409, reason: "bridge_owned_by_other_profile" });
+    expect(owner.socket.readyState).toBe(WebSocket.OPEN);
+    expect(server.health()).toMatchObject({ connected: true, generation: 1 });
+  });
+
+  it("lets the owning profile's own reconnect replace its earlier socket", async () => {
+    const server = new LoopbackBridgeServer(options());
+    servers.push(server);
+    const first = await attempt(server, { instanceId: "profile-owner-0001" });
+    const firstClosed = closedSocket(first.socket);
+    const again = await attempt(server, { instanceId: "profile-owner-0001" });
+    expect(again.ready).toBe(2);
+    expect(await firstClosed).toEqual({ code: 4409, reason: "superseded_by_new_connection" });
+  });
+
+  it("moves the connection only on an explicit takeover, and tells the replaced profile why", async () => {
+    const server = new LoopbackBridgeServer(options());
+    servers.push(server);
+    const owner = await attempt(server, { instanceId: "profile-owner-0001" });
+    const ownerClosed = closedSocket(owner.socket);
+    const taker = await attempt(server, { instanceId: "profile-other-0002", takeover: true });
+    expect(taker.ready).toBe(2);
+    expect(await ownerClosed).toEqual({ code: 4409, reason: "superseded_by_other_profile" });
+    const back = await attempt(server, { instanceId: "profile-owner-0001" });
+    expect(back.closed).toEqual({ code: 4409, reason: "bridge_owned_by_other_profile" });
+    expect(server.health().generation).toBe(2);
+  });
+});
+
+describe("a request for a closed course proves the course again before admission", () => {
+  const options = (bindingRecoveryTimeoutMs?: number) => ({
+    token, expectedRuntimeRevision: revision, expectedCatalogDigest: digest, allowedExtensionIds: [extensionId], port: 0,
+    ...(bindingRecoveryTimeoutMs ? { bindingRecoveryTimeoutMs } : {}),
+  });
+
+  it("refuses malformed requests before any course recovery or other Bridge command", async () => {
+    const server = new LoopbackBridgeServer(options());
+    servers.push(server);
+    const socket = await connect(server, [unverifiedCourse], { instanceId: "profile-owner-0001" });
+    const seen = listen(socket, (command) => answer(socket, command, true, { recovered: false }));
+    for (const request of [
+      { ...readCourse, arguments: { privateAttachment: {} } },
+      { ...readCourse, operationId: "bad id" },
+      { ...readCourse, toolName: "moodle_get_course" },
+      { ...readCourse, kind: "invoke_write" as const },
+      { ...readCourse, kind: "invoke_write" as const, outerGrant: {} as any },
+    ]) {
+      await expect(server.invoke(request)).rejects.toBeInstanceOf(Error);
+      expect(seen).toHaveLength(0);
+    }
+  });
+
+  it("sends one recovery command, then dispatches the read only after the Bridge publishes the course verified", async () => {
+    const server = new LoopbackBridgeServer(options());
+    servers.push(server);
+    const socket = await connect(server, [unverifiedCourse], { instanceId: "profile-owner-0001" });
+    const seen = listen(socket, (command) => {
+      if (command.kind === "binding_recover") {
+        expect(command.sourceBindingId).toBe("canvas-course-42");
+        expect(command.toolName).toBeUndefined();
+        expect(command.arguments).toBeUndefined();
+        socket.send(serializeBridgeMessage({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: command.generation, bindings: [{ ...unverifiedCourse, runtimeVerified: true }], sentAt: Date.now() }));
+        answer(socket, command, true, { recovered: true });
+      } else answer(socket, command, true, { pages: [] });
+    });
+    const result = await server.invoke(readCourse);
+    expect(result.result).toEqual({ pages: [] });
+    expect(seen.map((command) => command.kind)).toEqual(["binding_recover", "invoke_read"]);
+  });
+
+  it("refuses the read unsent when the Bridge cannot prove the course", async () => {
+    const server = new LoopbackBridgeServer(options());
+    servers.push(server);
+    const socket = await connect(server, [unverifiedCourse], { instanceId: "profile-owner-0001" });
+    const seen = listen(socket, (command) => answer(socket, command, true, { recovered: false }));
+    await expect(server.invoke(readCourse)).rejects.toMatchObject({ code: "bridge_unavailable" });
+    expect(seen.map((command) => command.kind)).toEqual(["binding_recover"]);
+  });
+
+  it("ends a recovery the Bridge never answers at its bound", async () => {
+    const server = new LoopbackBridgeServer(options(300));
+    servers.push(server);
+    const socket = await connect(server, [unverifiedCourse], { instanceId: "profile-owner-0001" });
+    const seen = listen(socket, () => undefined);
+    const started = Date.now();
+    await expect(server.invoke(readCourse)).rejects.toMatchObject({ code: "bridge_unavailable" });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(seen.map((command) => command.kind)).toEqual(["binding_recover"]);
+  });
+
+  it("shares one recovery among requests that arrive together for the same closed course", async () => {
+    const server = new LoopbackBridgeServer(options());
+    servers.push(server);
+    const socket = await connect(server, [unverifiedCourse], { instanceId: "profile-owner-0001" });
+    const seen = listen(socket, (command) => {
+      if (command.kind === "binding_recover") {
+        setTimeout(() => {
+          socket.send(serializeBridgeMessage({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: command.generation, bindings: [{ ...unverifiedCourse, runtimeVerified: true }], sentAt: Date.now() }));
+          answer(socket, command, true, { recovered: true });
+        }, 50);
+      } else answer(socket, command, true, { pages: [] });
+    });
+    const results = await Promise.all([server.invoke(readCourse), server.invoke(readCourse), server.invoke(readCourse)]);
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(seen.filter((command) => command.kind === "binding_recover")).toHaveLength(1);
+    expect(seen.filter((command) => command.kind === "invoke_read")).toHaveLength(3);
+  });
+
+  it("refuses to recover a course connection the Bridge never listed", async () => {
+    const server = new LoopbackBridgeServer(options());
+    servers.push(server);
+    await connect(server, [unverifiedCourse], { instanceId: "profile-owner-0001" });
+    await expect(server.recoverBinding("canvas-course-99")).resolves.toBe(false);
   });
 });

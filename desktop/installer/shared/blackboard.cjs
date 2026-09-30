@@ -50,7 +50,7 @@ function deriveBlackboardSourceBindingId(baseUrl, principalId, courseId) {
   return binding;
 }
 function parseCourseBindings(value, baseUrl, principalId) {
-  if (!Array.isArray(value) || value.length > 500) throw new TypeError("Blackboard course bindings are invalid");
+  if (!Array.isArray(value)) throw new TypeError("Blackboard course bindings are invalid");
   const courseIds = new Set();
   return value.map((entry) => {
     if (!object(entry)) throw new TypeError("Blackboard course binding is invalid");
@@ -63,7 +63,7 @@ function parseCourseBindings(value, baseUrl, principalId) {
   });
 }
 function parseAvailableCourses(value) {
-  if (!Array.isArray(value) || value.length > 500) throw new TypeError("Blackboard accessible courses are invalid");
+  if (!Array.isArray(value)) throw new TypeError("Blackboard accessible courses are invalid");
   const ids = new Set();
   return value.map((entry) => {
     if (!object(entry) || Object.keys(entry).length !== 2) throw new TypeError("Blackboard accessible course is invalid");

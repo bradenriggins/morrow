@@ -768,6 +768,9 @@ test("Moodle discovery includes a fresh verified current course without dropping
     await page.evaluate((wwwroot) => { globalThis.M = { cfg: { wwwroot, sesskey: "synthetic-session", userId: 3, courseId: 99 } }; }, origin);
     const discover = (limit, offset = 0) => executeInBrowser(page, { mode: "discover_courses", limit, offset, expiresAt: Date.now() + 60_000 });
 
+    timeline = Array.from({ length: 12_002 }, (_, index) => ({ id: index + 1, fullname: `Course ${index + 1}` }));
+    assert.deepEqual((await discover(3, 12_000)).data, { courses: [{ id: "12001", name: "Course 12001" }, { id: "12002", name: "Course 12002" }], offset: 12_000, limit: 3, next_offset: null, complete: true });
+
     timeline = [];
     stateRequests.length = 0;
     courseViews.length = 0;

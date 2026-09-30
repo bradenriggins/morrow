@@ -12,7 +12,7 @@ import { createBridgeMaintenance } from "../../connector/extension/src/bridge-ma
 /**
  * A Bridge loaded from source pairs the way the desktop app's Bridge does: `pnpm run setup` writes
  * an active-folder marker into `connector/extension` and records the same challenge beside the
- * connector state, so Connect Morrow can prove the folder. These cases run the real marker reader
+ * connector state, so Pair Morrow can prove the folder. These cases run the real marker reader
  * Morrow Bridge uses, the real connector config, and the real loopback server.
  */
 const root = resolve(new URL("../../", import.meta.url).pathname);

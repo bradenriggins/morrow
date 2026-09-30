@@ -12,6 +12,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const test = require("node:test");
 const { createInstallerController, errorDetails, repairRequiredState } = require("../shared/installer-controller.cjs");
 const { envelope } = require("../shared/contract.cjs");
@@ -74,6 +75,7 @@ async function temporaryRoot() {
   const clientConfig = path.join(root, "Payload", "app", "packages", "client-config", "dist");
   await fs.mkdir(clientConfig, { recursive: true });
   await fs.writeFile(path.join(clientConfig, "index.js"), [
+    `export { morrowServerEntryRoute } from ${JSON.stringify(pathToFileURL(path.resolve(__dirname, "../../packages/client-config/dist/index.js")).href)};`,
     "export function restrictToCurrentAccount() {}",
     "export function withoutMorrowCodexTable(content) {",
     "  const lines = content.split('\\n');",
@@ -185,18 +187,18 @@ async function temporaryRoot() {
  * Morrow in. The stand-in command runner below appends exactly this, as
  * `mcp install` does, so a rebind is a real write and a real read back.
  */
-function codexTable(workspaceRoot) {
+function codexTable(workspaceRoot, route = null) {
   return [
     "[mcp_servers.morrow]",
     "command = \"node\"",
-    `cwd = "${workspaceRoot}"`,
-    "env = { MORROW_UPSTREAMS_FILE = \"/Morrow/State/morrow.upstreams.json\" }",
+    `cwd = ${JSON.stringify(workspaceRoot)}`,
+    `env = { MORROW_UPSTREAMS_FILE = "/Morrow/State/morrow.upstreams.json"${route ? `, MORROW_ROUTE_ID = "${route.id}", MORROW_ROUTE_GENERATION = "${route.generation}"` : ""} }`,
     ""
   ].join("\n");
 }
 
-function claudeCodeEntry(workspaceRoot) {
-  return { mcpServers: { morrow: { type: "stdio", command: "node", cwd: workspaceRoot, env: { MORROW_UPSTREAMS_FILE: "/Morrow/State/morrow.upstreams.json" } } } };
+function claudeCodeEntry(workspaceRoot, route = null) {
+  return { mcpServers: { morrow: { type: "stdio", command: "node", cwd: workspaceRoot, env: { MORROW_UPSTREAMS_FILE: "/Morrow/State/morrow.upstreams.json", ...(route ? { MORROW_ROUTE_ID: route.id, MORROW_ROUTE_GENERATION: route.generation } : {}) } } } };
 }
 
 async function writeFile(target, content) {
@@ -286,6 +288,7 @@ function controller(root, overrides = {}) {
       calls.push(args);
       if (args[0] === "mcp" && args[1] === "install") {
         const workspaceRoot = args[args.indexOf("--workspace-root") + 1];
+        const route = { id: args[args.indexOf("--route-id") + 1], generation: args[args.indexOf("--route-generation") + 1] };
         const project = args.includes("--client-project") ? args[args.indexOf("--client-project") + 1] : null;
         // client-config refuses a project folder that is not there, with no refusal line, as the real command does.
         if (project !== null && !await fs.stat(project).then((info) => info.isDirectory(), () => false)) {
@@ -310,16 +313,16 @@ function controller(root, overrides = {}) {
           const start = current.search(/(?:^|\n)\[mcp_servers\.morrow\]\n/);
           if (start === -1) {
             const kept = current.trimEnd();
-            await writeFile(target, `${kept}${kept ? "\n\n" : ""}${codexTable(workspaceRoot)}`);
+            await writeFile(target, `${kept}${kept ? "\n\n" : ""}${codexTable(workspaceRoot, route)}`);
           } else {
             const body = start === 0 ? 0 : start + 1;
             const next = current.slice(body + 1).search(/\n\[/);
             const after = next === -1 ? "" : current.slice(body + 1 + next + 1);
-            await writeFile(target, `${current.slice(0, body)}${codexTable(workspaceRoot)}${after ? `\n${after}` : ""}`);
+            await writeFile(target, `${current.slice(0, body)}${codexTable(workspaceRoot, route)}${after ? `\n${after}` : ""}`);
           }
         } else {
           const document = current.trim() ? JSON.parse(current) : {};
-          document.mcpServers = { ...(document.mcpServers || {}), ...claudeCodeEntry(workspaceRoot).mcpServers };
+          document.mcpServers = { ...(document.mcpServers || {}), ...claudeCodeEntry(workspaceRoot, route).mcpServers };
           await writeFile(target, `${JSON.stringify(document, null, 2)}\n`);
         }
       }
@@ -1190,8 +1193,8 @@ test("changing the materials folder writes the new folder into every configured 
   // Each assistant is written the folder that was chosen, and the settings
   // that were already in its file are still there.
   const codexContent = await fs.readFile(codex, "utf8");
-  assert.equal(codexContent.includes(`cwd = "${canonical}"`), true);
-  assert.equal(codexContent.includes(`cwd = "${first}"`), false, "the old folder is gone from the file");
+  assert.equal(codexContent.includes(`cwd = ${JSON.stringify(canonical)}`), true);
+  assert.equal(codexContent.includes(`cwd = ${JSON.stringify(first)}`), false, "the old folder is gone from the file");
   assert.match(codexContent, /^\[mcp_servers\.other\]\ncommand = "other"\n/);
   assert.equal(codexContent.match(/\[mcp_servers\.morrow\]/g).length, 1, "the entry is written once, not twice");
   assert.equal(JSON.parse(await fs.readFile(claudeCode, "utf8")).mcpServers.morrow.cwd, canonical);
@@ -1265,7 +1268,7 @@ test("changing the materials folder leaves out a project assistant whose project
   assert.deepEqual(calls.map((entry) => entry[2]), ["codex"]);
   const record = await installer.record();
   assert.equal(record.materialsFolder, canonical);
-  assert.equal((await fs.readFile(codex, "utf8")).includes(`cwd = "${canonical}"`), true);
+  assert.equal((await fs.readFile(codex, "utf8")).includes(`cwd = ${JSON.stringify(canonical)}`), true);
   assert.deepEqual(record.configured["claude-code"], configured["claude-code"]);
 });
 
@@ -1475,7 +1478,7 @@ test("an assistant edit made before a folder rebind is kept, and only Morrow's e
 
   const canonical = await fs.realpath(chosen);
   const content = await fs.readFile(codex, "utf8");
-  assert.equal(content, `[mcp_servers.other]\ncommand = "newer"\n\n${codexTable(canonical)}\n[projects."/x"]\ntrust_level = "trusted"\n`);
+  assert.equal(content, `[mcp_servers.other]\ncommand = "newer"\n\n${codexTable(canonical, (await installer.record()).configured.codex.route)}\n[projects."/x"]\ntrust_level = "trusted"\n`);
   assert.equal((await installer.record()).configured.codex.sha256, sha256(Buffer.from(content)));
   assert.equal(calls[0].includes("--replace-morrow-entry"), true);
 });

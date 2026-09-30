@@ -90,13 +90,14 @@ export async function executeMoodleForumReadInPage(rawInput) {
       return null;
     }
   };
+  const ajaxExpired = Symbol("ajaxExpired");
   const ajax = async (methodname, argsValue) => {
     const endpoint = url("/lib/ajax/service.php", { sesskey: cfg.sesskey, info: methodname });
     const signal = requestSignal(input?.expiresAt);
     let response;
     try {
       response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify([{ index: 0, methodname, args: argsValue }]), signal: signal });
-    } catch { return signal.aborted ? { expired: true } : null; }
+    } catch { return signal.aborted ? ajaxExpired : null; }
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext()) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return null; }
     let payload;
     try { payload = JSON.parse(await boundedText(response)); } catch { return null; }
@@ -107,7 +108,7 @@ export async function executeMoodleForumReadInPage(rawInput) {
   // An aborted list is an expired approval window, not a missing forum: the
   // abort timer and the approval check share the same deadline, and the timer
   // can fire in the same millisecond the check still passes.
-  if (!approved() || (object(forums) && forums.expired === true)) return failed("moodle_forum_export_context_changed");
+  if (!approved() || forums === ajaxExpired) return failed("moodle_forum_export_context_changed");
   const candidates = Array.isArray(forums) ? forums.filter((forum) => id(forum?.course) === courseId && id(forum?.cmid) === moduleId && id(forum?.id)) : [];
   if (candidates.length !== 1) return failed("moodle_forum_target_unavailable");
   const forumId = id(candidates[0].id);

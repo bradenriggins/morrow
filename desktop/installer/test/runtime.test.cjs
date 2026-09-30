@@ -10,6 +10,35 @@ function sha256(content) {
   return crypto.createHash("sha256").update(content).digest("hex");
 }
 
+test("assistant backup refuses links and a file swapped while its descriptor opens", async (t) => {
+  const { captureConfiguration } = require("../shared/runtime.cjs");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-backup-boundary-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "settings.json");
+  const unrelated = path.join(root, "unrelated.json");
+  const backups = path.join(root, "backups");
+  await fs.writeFile(unrelated, "private unrelated content");
+  await fs.symlink(unrelated, file);
+  assert.equal((await captureConfiguration(file, backups)).present, false);
+  await fs.unlink(file);
+  await fs.writeFile(file, "assistant settings");
+  const originalOpen = fs.open;
+  let swapped = false;
+  fs.open = async (target, ...args) => {
+    if (target === file && !swapped) {
+      swapped = true;
+      await fs.unlink(file);
+      await fs.symlink(unrelated, file);
+    }
+    return originalOpen(target, ...args);
+  };
+  try { await assert.rejects(() => captureConfiguration(file, backups)); }
+  finally { fs.open = originalOpen; }
+  assert.equal(swapped, true);
+  assert.equal((await fs.readdir(backups).catch(() => [])).length, 0);
+  assert.equal(await fs.readFile(unrelated, "utf8"), "private unrelated content");
+});
+
 async function writeMcpRuntimeFixture(root) {
   const app = path.join(root, "app");
   const gatewayFiles = [

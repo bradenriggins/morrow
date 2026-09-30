@@ -14,7 +14,6 @@ export async function executeMoodleInPage(input) {
   // same transport limit. Native course and area limits can be lower and are checked as well.
   const MAX_STAGED_FILE_BYTES = 1024 * 1024;
   const MAX_STAGED_FILES = 8;
-  const MAX_DISCOVERY_OFFSET = 10_000;
   const PROVIDER = "moodle";
   const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   const id = (value) => {
@@ -585,7 +584,7 @@ export async function executeMoodleInPage(input) {
     if (definition.kind === "list-courses") {
       if (!only(value, ["limit", "offset"])
         || (value.limit !== undefined && (!Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > MAX_ITEMS))
-        || (value.offset !== undefined && (!Number.isSafeInteger(value.offset) || value.offset < 0 || value.offset > MAX_DISCOVERY_OFFSET))) return { error: "moodle_arguments_invalid" };
+        || (value.offset !== undefined && (!Number.isSafeInteger(value.offset) || value.offset < 0))) return { error: "moodle_arguments_invalid" };
       return { value: { limit: value.limit || 50, offset: value.offset || 0 } };
     }
     if (courseKinds.has(definition.kind)) {
@@ -4859,7 +4858,7 @@ export async function executeMoodleInPage(input) {
     const limit = input.limit === undefined ? 50 : input.limit;
     const offset = input.offset === undefined ? 0 : input.offset;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ITEMS
-      || !Number.isSafeInteger(offset) || offset < 0 || offset > MAX_DISCOVERY_OFFSET) return error("moodle_arguments_invalid");
+      || !Number.isSafeInteger(offset) || offset < 0) return error("moodle_arguments_invalid");
     try {
       // Read one item beyond the visible page. A full page alone cannot prove
       // that another page exists when the total is an exact multiple of limit.

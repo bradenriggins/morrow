@@ -93,6 +93,7 @@ if _TREE_ROOT not in sys.path:
     sys.path.insert(0, _TREE_ROOT)
 from config.identity import USER_ID_RULE, is_valid_user_id  # noqa: E402
 from config.paths import morrow_home  # noqa: E402
+from config.consent import explicit_nonapproval  # noqa: E402
 from modes.errors import (  # noqa: E402
     ModeSelfGrantRefused,
     ModeSettingsTamper,
@@ -370,6 +371,8 @@ def _require_educator_confirmation(educator_confirmation):
             "edit mode requires the educator's verbatim reply (any "
             "non-empty reply); inferred or standing approvals are not "
             "accepted")
+    if explicit_nonapproval(auth):
+        raise ModeSelfGrantRefused("edit mode refuses an explicit denial or uncertain reply")
     channel = conf.get("channel", "driver")
     if channel not in ("educator-chat", "driver"):
         raise ModeSelfGrantRefused(

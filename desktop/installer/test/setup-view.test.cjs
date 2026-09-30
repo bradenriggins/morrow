@@ -93,13 +93,13 @@ const CASES = [
     name: "Chrome has the Bridge loaded but it is not paired",
     state: state({ ...CONFIGURED, bridgeLoadedInChrome: true, bridgeFolderReady: true }),
     current: "Morrow Bridge",
-    title: "Connect Morrow Bridge."
+    title: "Pair Morrow Bridge."
   },
   {
     name: "the Bridge is paired without a course",
     state: state(PAIRED),
     current: "Course",
-    title: "Open your course in Chrome."
+    title: "Pair your learning account."
   },
   {
     name: "a course is verified and the first read is not ready",
@@ -117,7 +117,7 @@ const CASES = [
     name: "the first read is complete",
     state: state({ ...PAIRED, runtimeVerifiedCourseCount: 1, selectedCourseName: "BIOL 101", firstPreview: { available: true, completed: true } }),
     current: null,
-    title: "Your course is connected."
+    title: "Morrow is ready."
   },
   {
     name: "Morrow needs repair",

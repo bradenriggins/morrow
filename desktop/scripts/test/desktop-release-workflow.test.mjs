@@ -198,7 +198,7 @@ test("the Windows job runs bounded tests and packages through one retained relea
   const commands = [...job.matchAll(/^\s+run: (?!\|)(.+)$/gm)].map((match) => match[1].trim());
   const ordered = [
     "pnpm install --frozen-lockfile",
-    "pnpm --dir installer --ignore-workspace install --frozen-lockfile",
+    "pnpm --dir installer install --frozen-lockfile",
     "pnpm build",
     "pnpm --dir installer --ignore-workspace test:bounded:files",
     "pnpm --dir installer --ignore-workspace test:bounded:suite",
@@ -328,7 +328,7 @@ test("the macOS job installs, builds, tests the built runtime, and keeps the art
   const commands = [...job.matchAll(/^\s+run: (?!\|)(.+)$/gm)].map((match) => match[1].trim());
   const ordered = [
     "pnpm install --frozen-lockfile",
-    "pnpm --dir installer --ignore-workspace install --frozen-lockfile",
+    "pnpm --dir installer install --frozen-lockfile",
     "pnpm build",
     "pnpm --dir installer --ignore-workspace test"
   ];
@@ -483,11 +483,23 @@ test("each release job preflights the signed release configuration and reports i
     const step = new RegExp(`- name: Preflight the signed release configuration\\n(?: {8}.*\\n)*? {8}run: node installer/signed-release-preflight\\.cjs --target ${target} --summary`);
     assert.match(job, step, `${id} must preflight the signed configuration for ${target}`);
     const commands = [...job.matchAll(/^\s+run: (?!\|)(.+)$/gm)].map((match) => match[1].trim());
-    assert.ok(commands.indexOf(`node installer/signed-release-preflight.cjs --target ${target} --summary`) > commands.indexOf("pnpm --dir installer --ignore-workspace install --frozen-lockfile"));
+    assert.ok(commands.indexOf(`node installer/signed-release-preflight.cjs --target ${target} --summary`) > commands.indexOf("pnpm --dir installer install --frozen-lockfile"));
     for (const name of target.startsWith("darwin")
       ? ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID", "GH_TOKEN"]
       : ["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD", "GH_TOKEN"]) {
       assert.match(job, new RegExp(`^ {10}${name}: \\$\\{\\{ secrets\\.MORROW_${name} \\}\\}$`, "m"), `${id} preflight reads ${name}`);
     }
+  }
+});
+
+
+test("CI and installer QA bootstrap the pinned package manager directly", () => {
+  const pinned = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager.split("@")[1];
+  for (const path of [releasePath, ".github/workflows/ci.yml"]) {
+    const workflow = readFileSync(join(repositoryRoot, path), "utf8");
+    const versions = [...workflow.matchAll(/^ +version: ([0-9.]+)$/gm)].map((match) => match[1]);
+    assert.ok(versions.length > 0);
+    assert.ok(versions.every((version) => version === pinned), `${path} must bootstrap pnpm ${pinned}`);
+    assert.doesNotMatch(workflow, /--ignore-workspace install/);
   }
 });

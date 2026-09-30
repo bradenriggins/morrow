@@ -59,10 +59,14 @@ function configuredEntry(assistantId, value, options) {
       receiptPath: value.receiptPath,
     };
   }
-  if (!exactObject(value, ["target", "sha256"])
+  const hasRoute = plainObject(value) && Object.hasOwn(value, "route");
+  if (!exactObject(value, hasRoute ? ["target", "sha256", "route"] : ["target", "sha256"])
     || !configuredTarget(assistantId, value.target, options)
-    || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
-  return { target: value.target, sha256: value.sha256 };
+    || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)
+    || (hasRoute && (!exactObject(value.route, ["id", "generation"])
+      || typeof value.route.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.route.id)
+      || typeof value.route.generation !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value.route.generation)))) return null;
+  return { target: value.target, sha256: value.sha256, ...(hasRoute ? { route: { ...value.route } } : {}) };
 }
 
 function invalidRecord(reason = "record_invalid") {

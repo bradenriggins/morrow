@@ -355,7 +355,7 @@ function withdrawConsent(value) {
   value.storageChanged.listeners[0]({ [consentKey]: { oldValue: consentValue, newValue: undefined } }, "local");
 }
 
-async function sendRuntime(value, message, sender = {}) {
+async function sendRuntime(value, message, sender = popupSender()) {
   const handler = value.runtimeMessages.listeners[0];
   return await new Promise((resolve, reject) => {
     if (handler(message, sender, resolve) !== true) reject(new Error(`message refused: ${message.type}`));
@@ -1195,9 +1195,10 @@ async function permissionRemovalPublicationScenario() {
   const value = fixture({ initialLocal: initial });
   await importWorker("permission-removal-publication");
   const socket = await authenticate(value);
+  const beforeRemoval = socket.sent.length;
   value.granted.delete(coursePermission);
   value.permissionRemoved.listeners[0]({ origins: [coursePermission] });
-  const update = await eventually(() => socket.sent.find((message) => message.schema === "morrow.bridge.bindings.v1"));
+  const update = await eventually(() => socket.sent.slice(beforeRemoval).find((message) => message.schema === "morrow.bridge.bindings.v1" && message.bindings[0]?.runtimeVerified === false));
   assert.equal(update.bindings[0].runtimeVerified, false);
   assert.equal(value.local.values.courseFileStorageAccessEnabled, false);
 }
@@ -1304,6 +1305,7 @@ async function unscopedCanvasReadScenario() {
       return null;
     },
   });
+  value.local.values.courseAccessMode = "account";
   await importWorker("unscoped-canvas-read");
   const socket = await authenticate(value);
   const commands = [
@@ -1365,6 +1367,102 @@ async function courseFileDeadlineScenario() {
   const result = await eventually(() => socket.sent.find((message) => message.requestId === command.requestId));
   assert.equal(result.ok, false);
   assert.equal(value.scriptExecutions.some((injection) => injection.func?.name === "executeCanvasCourseFileTextInPage"), false);
+}
+
+async function itemBankExecutionWorldScenario() {
+  const launchUrl = `${courseOrigin}/courses/42/external_tools/71234`;
+  const ltiOrigin = "https://school.quiz-lti.instructure.com";
+  const apiOrigin = "https://school.quiz-api.instructure.com";
+  const token = "Signature " + "private-bank-token-".repeat(5);
+  const value = fixture({ tabMessage: async ({ message }) => {
+    if (message.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+    if (message.type === "morrow_canvas_item_bank_tabs") return { ok: true, profile: { origin: courseOrigin, id: "7" }, course: { id: "42" },
+      tabs: [{ id: "context_external_tool_71234", type: "external", label: "Item Banks", html_url: launchUrl }] };
+    return null;
+  } });
+  value.granted.add(`${ltiOrigin}/*`);
+  value.granted.add(`${apiOrigin}/*`);
+  globalThis.chrome.tabs.update = async (tabId, { url }) => {
+    assert.equal(url, launchUrl);
+    for (const listener of globalThis.chrome.webRequest.onBeforeSendHeaders.listeners) listener({
+      tabId, frameId: 1, method: "GET", url: `${apiOrigin}/api/banks?course_id=fixture-context-uuid`, documentUrl: `${ltiOrigin}/banks`,
+      requestHeaders: [{ name: "Authorization", value: token }, { name: "AuthType", value: "Signature" }],
+    });
+    return { id: tabId, url };
+  };
+  globalThis.chrome.webNavigation.getAllFrames = async () => [{ frameId: 0, url: launchUrl }, { frameId: 1, url: `${ltiOrigin}/banks` }];
+  globalThis.chrome.scripting.executeScript = async (injection) => {
+    value.scriptExecutions.push(injection);
+    if (injection.func?.name !== "executeItemBankInPage") return [{ result: null }];
+    const input = JSON.parse(injection.args[0]);
+    if (input.contextOnly) {
+      assert.equal(input.credential, undefined);
+      assert.equal(input.arguments, undefined);
+      return [{ result: { matched: true, ok: true, sent: false } }];
+    }
+    assert.equal(input.credential.token, token);
+    assert.equal(injection.world, "ISOLATED", "private execution input entered the page's JavaScript world");
+    return [{ result: { matched: true, ok: true, sent: true, status: 200, data: { banks: [] } } }];
+  };
+  await importWorker("item-bank-execution-world");
+  const socket = await authenticate(value);
+  const command = bridgeCommand({ requestId: "request-item-bank-isolation", operationId: "operation-item-bank-isolation",
+    toolName: "canvas_item_bank_list_banks", operationKey: "ITEM_BANK GET /api/banks#list_banks", arguments: { course_id: "42" } });
+  socket.receive(command);
+  const result = await eventually(() => socket.sent.find((message) => message.requestId === command.requestId));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const execution = value.scriptExecutions.filter((i) => i.func?.name === "executeItemBankInPage");
+  assert.equal(execution.length, 2);
+  assert.deepEqual(execution.map((i) => i.world), ["MAIN", "ISOLATED"]);
+  assert.equal(JSON.stringify(result).includes(token), false);
+  assert.equal(JSON.stringify(value.local.values).includes(token), false);
+  assert.equal(JSON.stringify(value.session.values).includes(token), false);
+  assert.ok(value.removedTabs.includes(71));
+}
+
+async function courseFileDownloadAdmissionScenario() {
+  const downloads = [];
+  const bytes = new TextEncoder().encode("Hello");
+  const value = fixture({ initialLocal: { ...connectedState(), courseFileStorageAccessEnabled: true },
+    loopbackFetch: async (url) => {
+      downloads.push(url);
+      const response = new Response(bytes, { headers: { "content-type": "text/plain" } });
+      Object.defineProperty(response, "url", { value: "https://school.canvas-user-content.com/file" });
+      return response;
+    },
+  });
+  value.granted.add("https://*/*");
+  let downloadUrl = `${courseOrigin}/files/81/download?verifier=fixture-verifier`;
+  const version = { id: "81", size: bytes.byteLength, content_type: "text/plain", updated_at: "2026-09-29T00:00:00Z", modified_at: null };
+  globalThis.chrome.scripting.executeScript = async (injection) => {
+    value.scriptExecutions.push(injection);
+    if (injection.func?.name === "executeCanvasCourseFileTextInPage") {
+      return [{ result: { ok: true, version, file: { id: "81", size: bytes.byteLength, content_type: "text/plain" }, downloadUrl } }];
+    }
+    return [{ result: { ok: false } }];
+  };
+  await importWorker("course-file-download-admission");
+  const socket = await authenticate(value);
+  const urls = ["http://school.instructure.com/files/81/download", "https://outside.example/files/81/download",
+    `${courseOrigin}/files/82/download`, `${courseOrigin}/files/81/download#fragment`,
+    "https://user:password@school.instructure.com/files/81/download", `${courseOrigin}/api/v1/users/self`,
+    `${courseOrigin}/files/81/download?verifier=first&verifier=second`, `${courseOrigin}/files/81/download`];
+  for (let index = 0; index < urls.length; index += 1) {
+    downloadUrl = urls[index];
+    const command = bridgeCommand({ requestId: `request-file-download-${index}`, operationId: `operation-file-download-${index}`,
+      toolName: "canvas_read_course_file_text", operationKey: "CANVAS_COURSE_FILE_TEXT GET /v1/courses/{course_id}/files/{file_id}/text",
+      arguments: { course_id: "42", file_id: "81" } });
+    socket.receive(command);
+    const result = await eventually(() => socket.sent.find((message) => message.requestId === command.requestId));
+    if (index < urls.length - 1) {
+      assert.equal(result.ok, false, downloadUrl);
+      assert.equal(downloads.length, 0, `worker fetched a refused URL: ${downloadUrl}`);
+    } else {
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.deepEqual(downloads, [downloadUrl]);
+      assert.ok(JSON.stringify(result).includes("Hello"));
+    }
+  }
 }
 
 async function settingsDiscoveryConsentScenario() {
@@ -1618,7 +1716,7 @@ function pairingMorrow(requests, { confirm } = {}) {
   };
 }
 
-// Connect Morrow pairs in one step: Morrow sends a challenge, the Bridge signs it with the secret in
+// Pair Morrow pairs in one step: Morrow sends a challenge, the Bridge signs it with the secret in
 // the Bridge folder Morrow set up, and Morrow answers that one proof with the token. No page opens.
 async function pairingProofScenario() {
   const requests = [];
@@ -1739,7 +1837,7 @@ async function pairingConfirmConsentScenario() {
   assert.equal(value.FakeWebSocket.instances.length, 0);
 }
 
-// Connect Morrow before the Morrow app is open: nothing answers at the local address, so the popup
+// Pair Morrow before the Morrow app is open: nothing answers at the local address, so the popup
 // names that state, not a failure with no reason. A Morrow that answers and does not start a
 // connection is its own state.
 async function pairingNotRunningScenario() {
@@ -1987,6 +2085,8 @@ const scenarios = {
   "handshake-backoff": handshakeBackoffScenario,
   "unscoped-canvas-read": unscopedCanvasReadScenario,
   "course-file-deadline": courseFileDeadlineScenario,
+  "course-file-download-admission": courseFileDownloadAdmissionScenario,
+  "item-bank-execution-world": itemBankExecutionWorldScenario,
   "settings-discovery-consent": settingsDiscoveryConsentScenario,
   "discovery-optional-fields": discoveryOptionalFieldsScenario,
   "discovery-unknown-field-refused": discoveryUnknownFieldRefusedScenario,
@@ -2085,6 +2185,14 @@ test("socket closure retains unknown state for a provider write that already sta
 
 test("socket closure fences a provider read still checking its course session", async () => {
   await isolatedScenario("socket-read");
+});
+
+test("the worker keeps captured Item Bank credentials in isolated execution", async () => {
+  await isolatedScenario("item-bank-execution-world");
+});
+
+test("the worker admits only the selected file download URL before fetching bytes", async () => {
+  await isolatedScenario("course-file-download-admission");
 });
 
 test("a ready Canvas listener completes a read when script reinjection is unavailable", async () => {
@@ -2239,7 +2347,7 @@ test("consent withdrawal fences a late pairing confirmation", async () => {
   await isolatedScenario("pairing-confirm-consent");
 });
 
-test("Connect Morrow pairs by signing Morrow's challenge with the Bridge folder secret, and opens no page", async () => {
+test("Pair Morrow pairs by signing Morrow's challenge with the Bridge folder secret, and opens no page", async () => {
   await isolatedScenario("pairing-proof");
 });
 
@@ -2279,11 +2387,11 @@ test("pairing ignores an approved answer with fields outside the exact schema", 
   await isolatedScenario("pairing-exact-schema");
 });
 
-test("Connect Morrow with the Morrow app closed says Morrow is not running", async () => {
+test("Pair Morrow with the Morrow app closed says Morrow is not running", async () => {
   await isolatedScenario("pairing-not-running");
 });
 
-test("a Morrow that answers Connect Morrow without starting a connection is named as that", async () => {
+test("a Morrow that answers Pair Morrow without starting a connection is named as that", async () => {
   await isolatedScenario("pairing-refused");
 });
 

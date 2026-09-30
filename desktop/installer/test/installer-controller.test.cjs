@@ -1475,9 +1475,16 @@ async function repairableController(root, overrides = {}) {
       if (argumentsValue[1] === "mcp" && typeof overrides.writeClientConfiguration === "function") {
         await overrides.writeClientConfiguration();
       }
+      if (argumentsValue[1] === "mcp") {
+        const route = { id: argumentsValue[argumentsValue.indexOf("--route-id") + 1], generation: argumentsValue[argumentsValue.indexOf("--route-generation") + 1] };
+        const target = path.join(root, "Home", ".codex", "config.toml");
+        const text = await fs.readFile(target, "utf8");
+        await writeFixtureRoute(target, text, route);
+      }
       return { code: 0, stdout: "", stderr: "" };
     }
   });
+  installer.clientConfigModule = async () => import(pathToFileURL(path.join(installerRoot, "..", "packages", "client-config", "dist", "index.js")).href);
   return { installer, calls, manifestSha256 };
 }
 
@@ -1975,6 +1982,7 @@ test("repair re-points Morrow's entry after the assistant edited its file, and l
 
   await installer.repair();
   assert.deepEqual(calls.map((entry) => entry[0]), ["setup", "mcp"], "the edit elsewhere in the file does not stop repair");
+  const repairedContent = await fs.readFile(target);
 
   const runCli = installer.runCli;
   installer.runCli = async (executable, argumentsValue, options) => {
@@ -1986,7 +1994,7 @@ test("repair re-points Morrow's entry after the assistant edited its file, and l
     };
   };
   await assert.rejects(() => installer.repair(), (error) => error.code === "existing_morrow_configuration");
-  assert.deepEqual(await fs.readFile(target), edited, "the file is still on disk, byte for byte");
+  assert.deepEqual(await fs.readFile(target), repairedContent, "the refused second repair leaves the file byte for byte");
   assert.equal((await fs.stat(path.join(root, "UserData", "Bridge", "manifest.json"))).isFile(), true);
 });
 
@@ -2148,7 +2156,8 @@ test("repair re-points every configured assistant by Morrow's own entry, not by 
   assert.deepEqual(calls.map((entry) => entry[0]), ["setup", "mcp"]);
   assert.equal(calls[1].includes("--replace-morrow-entry"), true);
   assert.equal(calls[1].includes("--expected-config-sha256"), false);
-  assert.equal((await installer.record()).configured.codex.sha256, recorded);
+  assert.equal((await installer.record()).configured.codex.sha256, sha256(await fs.readFile(target)));
+  assert.notEqual((await installer.record()).configured.codex.sha256, recorded);
   assert.equal((await installer.record()).selectedAssistantId, "codex");
 });
 
@@ -2326,8 +2335,9 @@ test("a data removal without an explicit confirmation removes nothing", async ()
 
   const receipt = await installer.removeData(null);
   assert.equal(receipt.status, "cancelled");
+  assert.ok(receipt.remaining.length > 0, "cancelled removal names the data that remains untouched");
   assert.deepEqual(receipt.removed, []);
-  assert.deepEqual(receipt.remaining, []);
+  assert.deepEqual(new Set(receipt.remaining), new Set((await installer.state()).retention.locations.filter((location) => location.removable).map((location) => location.path)));
   assert.deepEqual(await treeDigest(paths.userData), before.userData);
   assert.deepEqual(await treeDigest(paths.home), before.home);
 
@@ -3100,43 +3110,245 @@ test("a data removal names the Window data folder as kept and leaves it on this 
   assert.equal(receipt.removed.includes(windowData), false);
 });
 
-test("Morrow records that an assistant connected only when its own session holds the runtime", async () => {
-  const root = await temporaryRoot();
-  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+test("an unattributed runtime session cannot confirm even one installed assistant", async () => {
+  const root = await fs.realpath(await temporaryRoot());
+  const materials = path.join(root, "UserData", "Materials");
+  await fs.mkdir(materials, { recursive: true });
+  const installer = connectionController(root);
+  const codex = await assistantFile(path.join(root, "Home", ".codex", "config.toml"), "[mcp_servers.morrow]\n");
+  await installer.writeRecord({ ...freshRecord(), materialsFolder: materials, selectedAssistantId: "codex", configured: { codex } });
+  installer.acquireRestartLease = OTHER_CLIENT;
+  installer.observedRoutes = [];
+  await assert.rejects(() => installer.checkAssistantConnection(), (error) => error.code === "assistant_not_connected");
+  assert.deepEqual(await connectedIds(installer), []);
+  installer.observedRoutes = [{ id: crypto.randomUUID(), generation: crypto.randomBytes(32).toString("base64url") }];
+  await assert.rejects(() => installer.checkAssistantConnection(), (error) => error.code === "assistant_connection_unconfirmed");
+  installer.observedRoutes = [codex.route];
+  await installer.checkAssistantConnection();
+  assert.deepEqual(await connectedIds(installer), ["codex"]);
+  const reopened = connectionController(root);
+  assert.deepEqual(await connectedIds(reopened), ["codex"]);
+  await reopened.forgetAssistantConnection("codex");
+  assert.deepEqual(await connectedIds(reopened), []);
+});
+
+/** One assistant settings file this installation wrote, as the installer record keeps it. */
+async function assistantFile(target, text) {
+  const route = { id: crypto.randomUUID(), generation: crypto.randomBytes(32).toString("base64url") };
+  return writeFixtureRoute(target, text, route);
+}
+
+async function writeFixtureRoute(target, text, route) {
+  const env = { MORROW_UPSTREAMS_FILE: "/fixture/upstreams.json", MORROW_ROUTE_ID: route.id, MORROW_ROUTE_GENERATION: route.generation };
+  if (target.endsWith(".toml")) {
+    text = text.replace(/^env = .*\n/gm, "");
+    text = text.replace("[mcp_servers.morrow]\n", `[mcp_servers.morrow]\nenv = { ${Object.entries(env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(", ")} }\n`);
+  }
+  else {
+    const parsed = JSON.parse(text);
+    parsed.mcpServers.morrow.env = env;
+    text = JSON.stringify(parsed);
+  }
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, text);
+  return { target, sha256: sha256(Buffer.from(text)), route };
+}
+
+function connectionController(root) {
   const installer = controller(root, { detectAssistant: async () => true });
   installer.ensureRuntime = async () => installer.paths;
-  const target = path.join(root, "Home", ".codex", "config.toml");
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(target, "[mcp_servers.morrow]\n");
-  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: sha256(await fs.readFile(target)) } } });
-  const codex = async (current) => (await current.state()).assistants.find((assistant) => assistant.id === "codex");
-  assert.equal((await codex(installer)).connected, false, "a configured assistant has not connected yet");
+  installer.clientConfigModule = async () => import(pathToFileURL(path.join(installerRoot, "..", "packages", "client-config", "dist", "index.js")).href);
+  installer.runtimeMonitorFor = async () => ({
+    start: async () => {},
+    maintenance: async ({ action }) => action === "routes" ? {
+      status: "routes", routes: installer.observedRoutes ?? Object.values((await installer.record()).configured).flatMap((entry) => entry.route ? [entry.route] : [])
+    } : { status: "unavailable" }
+  });
+  return installer;
+}
 
-  // No other client: the monitor alone holds the runtime, so the lease is granted and released.
-  const events = [];
-  installer.acquireRestartLease = async () => { events.push("acquire"); return { status: "granted", leaseId: "probe" }; };
-  installer.releaseRestartLease = async (leaseId) => { events.push(`release ${leaseId}`); return { status: "released" }; };
-  await assert.rejects(() => installer.checkAssistantConnection(), (error) => error.code === "assistant_not_connected");
-  assert.deepEqual(events, ["acquire", "release probe"]);
-  assert.equal((await codex(installer)).connected, false);
+async function connectedIds(installer) {
+  return (await installer.state()).assistants.filter((assistant) => assistant.connected).map((assistant) => assistant.id);
+}
 
-  // The runtime cannot tell, so Morrow says so instead of guessing.
-  installer.acquireRestartLease = async () => ({ status: "uncertain" });
+// The runtime refuses its lease while a client other than Morrow's monitor is
+// connected. The refusal does not say which client it is.
+const OTHER_CLIENT = async () => ({ status: "uncertain", reason: "local_owner_other_client_connected" });
+
+test("a runtime session that names no assistant is recorded for none while more than one assistant could be that session", async () => {
+  const root = await fs.realpath(await temporaryRoot());
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const installer = connectionController(root);
+  const codex = await assistantFile(path.join(root, "Home", ".codex", "config.toml"), "[mcp_servers.morrow]\n");
+  const gemini = await assistantFile(path.join(root, "Project", ".gemini", "settings.json"), "{\"mcpServers\":{\"morrow\":{}}}\n");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "gemini-cli", configured: { codex, "gemini-cli": gemini } });
+
+  for (const reason of ["local_owner_other_client_connected", "local_owner_request_in_flight"]) {
+    installer.acquireRestartLease = async () => ({ status: "uncertain", reason });
+    installer.observedRoutes = [{ id: crypto.randomUUID(), generation: crypto.randomBytes(32).toString("base64url") }];
+    await assert.rejects(() => installer.checkAssistantConnection(), (error) => {
+      assert.deepEqual(error, errorDetails("assistant_connection_unconfirmed"));
+      return true;
+    }, reason);
+    assert.deepEqual(await connectedIds(installer), [], `${reason} is recorded for neither assistant`);
+  }
+
+  // Claude Desktop's own session refuses the lease the same way, so a Claude
+  // Desktop setup that waits for approval is one more assistant it could be.
+  const bundlePath = path.join(root, "UserData", "State", "ClaudeDesktop", "setup-fixture", "Morrow.mcpb");
+  await installer.writeRecord({
+    ...freshRecord(),
+    selectedAssistantId: "codex",
+    configured: {
+      codex,
+      "claude-desktop": { bundlePath, installationId: "fixture-installation", receiptPath: path.join(path.dirname(bundlePath), "connection.json") }
+    }
+  });
+  installer.acquireRestartLease = OTHER_CLIENT;
   await assert.rejects(() => installer.checkAssistantConnection(), (error) => error.code === "assistant_connection_unconfirmed");
+  assert.deepEqual(await connectedIds(installer), [], "a Claude Desktop session is not recorded as ChatGPT");
+});
 
-  // The assistant's own Morrow session is connected.
-  installer.acquireRestartLease = async () => ({ status: "uncertain", reason: "local_owner_other_client_connected" });
+test("a connection proof counts only for the assistant, configuration generation, and materials folder it was observed with", async () => {
+  const root = await fs.realpath(await temporaryRoot());
+  const materials = path.join(root, "UserData", "Materials");
+  await fs.mkdir(materials, { recursive: true });
+  const installer = connectionController(root);
+  const codexTarget = path.join(root, "Home", ".codex", "config.toml");
+  let codex = await assistantFile(codexTarget, "[mcp_servers.morrow]\nargs = [\"first\"]\n");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex } });
+  installer.acquireRestartLease = OTHER_CLIENT;
+
+  // One assistant is set up, so the session can only be that assistant.
   await installer.checkAssistantConnection();
-  assert.equal((await codex(installer)).connected, true);
+  assert.deepEqual(await connectedIds(installer), ["codex"]);
+  const proof = JSON.parse(await fs.readFile(path.join(root, "UserData", "State", "assistant-connections.json"), "utf8"));
+  assert.deepEqual(proof, {
+    schema: "morrow.assistant-connections.v3",
+    assistants: [{ id: "codex", target: codexTarget, sha256: codex.sha256, materialsFolder: materials }]
+  });
 
-  // The observation outlives this window.
-  const { installer: reopened } = { installer: controller(root, { detectAssistant: async () => true }) };
-  reopened.ensureRuntime = async () => reopened.paths;
-  assert.equal((await codex(reopened)).connected, true);
+  // An assistant set up later has no proof of its own, and the first keeps its proof.
+  const gemini = await assistantFile(path.join(root, "Project", ".gemini", "settings.json"), "{\"mcpServers\":{\"morrow\":{}}}\n");
+  await installer.writeRecord({ ...await installer.record(), configured: { codex, "gemini-cli": gemini } });
+  assert.deepEqual(await connectedIds(installer), ["codex"]);
 
-  // Setting the assistant up again asks for the restart again.
-  await reopened.forgetAssistantConnection("codex");
-  assert.equal((await codex(reopened)).connected, false);
+  // A configuration Morrow wrote again is a new generation the assistant has not started with.
+  codex = await assistantFile(codexTarget, "[mcp_servers.morrow]\nargs = [\"second\"]\n");
+  await installer.writeRecord({ ...await installer.record(), configured: { codex, "gemini-cli": gemini } });
+  assert.deepEqual(await connectedIds(installer), []);
+
+  await installer.writeRecord({ ...await installer.record(), configured: { codex } });
+  await installer.checkAssistantConnection();
+  assert.deepEqual(await connectedIds(installer), ["codex"]);
+
+  // The file still names the earlier folder, for example when its project was
+  // not connected while the folder changed, so the proof does not carry over.
+  const other = path.join(root, "Other Materials");
+  await fs.mkdir(other);
+  await installer.writeRecord({ ...await installer.record(), materialsFolder: other });
+  assert.deepEqual(await connectedIds(installer), []);
+});
+
+test("choosing the folder in use keeps each proof, and choosing another folder drops the proof of each assistant it writes again", async () => {
+  const root = await fs.realpath(await temporaryRoot());
+  const materials = path.join(root, "UserData", "Materials");
+  const next = path.join(root, "New Materials");
+  await fs.mkdir(materials, { recursive: true });
+  await fs.mkdir(next);
+  const installer = connectionController(root);
+  const codexTarget = path.join(root, "Home", ".codex", "config.toml");
+  const codex = await assistantFile(codexTarget, "[mcp_servers.morrow]\n");
+  await installer.writeRecord({ ...freshRecord(), materialsFolder: materials, selectedAssistantId: "codex", configured: { codex } });
+  installer.acquireRestartLease = OTHER_CLIENT;
+  await installer.checkAssistantConnection();
+  assert.deepEqual(await connectedIds(installer), ["codex"]);
+
+  let choice = materials;
+  const writes = [];
+  installer.dialog = { showOpenDialog: async () => ({ canceled: false, filePaths: [choice] }) };
+  installer.admitMaterialsFolder = async () => {};
+  installer.withDesktopMutation = async (action) => action({ stopRuntime: async () => {} });
+  installer.executeCli = async (argumentsValue) => {
+    writes.push(argumentsValue);
+    const folder = argumentsValue[argumentsValue.indexOf("--workspace-root") + 1];
+    const route = { id: argumentsValue[argumentsValue.indexOf("--route-id") + 1], generation: argumentsValue[argumentsValue.indexOf("--route-generation") + 1] };
+    await writeFixtureRoute(codexTarget, `[mcp_servers.morrow]\nworkspace = ${JSON.stringify(folder)}\n`, route);
+  };
+
+  assert.equal(await installer.configureWorkspace(null), true);
+  assert.deepEqual(writes, [], "the folder in use is not written again");
+  assert.deepEqual(await connectedIds(installer), ["codex"], "nothing the assistant reads changed");
+
+  choice = next;
+  assert.equal(await installer.configureWorkspace(null), true);
+  assert.equal(writes.length, 1);
+  assert.equal((await installer.record()).materialsFolder, next);
+  assert.deepEqual(await connectedIds(installer), [], "the assistant must start again to read the new folder");
+});
+
+test("repair drops the proof of each assistant whose configuration it writes again", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const { installer } = await repairableController(root, {
+    writeClientConfiguration: () => fs.writeFile(target, "[mcp_servers.morrow]\ncommand = \"from Applications\"\n")
+  });
+  const codex = await assistantFile(target, "[mcp_servers.morrow]\ncommand = \"from the disk image\"\n");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex } });
+  installer.clientConfigModule = async () => import(pathToFileURL(path.join(installerRoot, "..", "packages", "client-config", "dist", "index.js")).href);
+  installer.runtimeMonitorFor = async () => ({ start: async () => {}, maintenance: async () => ({ status: "routes", routes: [codex.route] }) });
+  await installer.checkAssistantConnection();
+  assert.deepEqual(await connectedIds(installer), ["codex"]);
+
+  const repaired = await installer.repair();
+  assert.notEqual((await installer.record()).configured.codex.sha256, codex.sha256, "repair wrote a new generation");
+  assert.equal(repaired.assistants.find((assistant) => assistant.id === "codex").connected, false);
+});
+
+test("a connection record from an earlier Morrow, which names no evidence, proves no connection", async () => {
+  const root = await fs.realpath(await temporaryRoot());
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const installer = connectionController(root);
+  const codex = await assistantFile(path.join(root, "Home", ".codex", "config.toml"), "[mcp_servers.morrow]\n");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex } });
+  await fs.writeFile(
+    path.join(root, "UserData", "State", "assistant-connections.json"),
+    `${JSON.stringify({ schema: "morrow.assistant-connections.v1", assistants: ["codex"] })}\n`,
+    { mode: 0o600 }
+  );
+  assert.deepEqual(await connectedIds(installer), []);
+
+  installer.acquireRestartLease = OTHER_CLIENT;
+  await installer.checkAssistantConnection();
+  assert.deepEqual(await connectedIds(installer), ["codex"]);
+});
+
+test("a connection proof Morrow cannot write and read back is not reported as a connection", async () => {
+  const root = await fs.realpath(await temporaryRoot());
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const installer = connectionController(root);
+  const codex = await assistantFile(path.join(root, "Home", ".codex", "config.toml"), "[mcp_servers.morrow]\n");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex } });
+  installer.acquireRestartLease = OTHER_CLIENT;
+
+  // Something else holds the place of the proof, so the write cannot land.
+  const proofPath = path.join(root, "UserData", "State", "assistant-connections.json");
+  await fs.mkdir(proofPath);
+  await fs.writeFile(path.join(proofPath, "held"), "not Morrow's\n");
+  await assert.rejects(() => installer.checkAssistantConnection(), (error) => {
+    assert.deepEqual(error, errorDetails("assistant_connection_unconfirmed"));
+    return true;
+  });
+  assert.deepEqual(await connectedIds(installer), []);
+  await fs.rm(proofPath, { recursive: true });
+
+  // The write lands, but reading it back does not show the proof.
+  installer.assistantConnectionProofs = async () => [];
+  await assert.rejects(() => installer.checkAssistantConnection(), (error) => {
+    assert.deepEqual(error, errorDetails("assistant_connection_unconfirmed"));
+    return true;
+  });
 });
 
 test("Move to Applications asks the app to move itself, and says how to move it by hand when it cannot", async () => {

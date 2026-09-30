@@ -16,11 +16,11 @@ const inputSchema = z.discriminatedUnion("mode", [
     selections: z.array(z.strictObject({
       source_binding_id: sourceBindingId,
       enabled_categories: z.array(z.string().regex(/^[A-Za-z0-9_.:@-]{1,160}$/)).min(1).max(500),
-    })).min(1).max(500),
+    })).min(1),
   }),
   z.strictObject({
     mode: z.literal("plan"),
-    selections: z.array(z.strictObject({ source_binding_id: sourceBindingId })).min(1).max(500),
+    selections: z.array(z.strictObject({ source_binding_id: sourceBindingId })).min(1),
   }),
 ]);
 

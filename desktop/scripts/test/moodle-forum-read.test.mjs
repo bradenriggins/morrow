@@ -15,7 +15,7 @@ test("Moodle Forum reader uses only the native export download and preserves pri
   const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-forum-read-"));
   const key = join(directory, "key.pem"); const certificate = join(directory, "certificate.pem");
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", key, "-out", certificate], { stdio: "ignore" });
-  const requests = []; let origin = ""; let browser; let overRecords = false; let overBytes = false; let listDelayMs = 0;
+  const requests = []; let origin = ""; let browser; let overRecords = false; let overBytes = false; let listDelayMs = 0; let forumsOverride = null;
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, async (request, response) => {
     const target = new URL(request.url || "/", origin);
     requests.push({ method: request.method, path: target.pathname, search: target.search });
@@ -26,7 +26,7 @@ test("Moodle Forum reader uses only the native export download and preserves pri
       assert.equal(call.methodname, "mod_forum_get_forums_by_courses");
       assert.deepEqual(call.args, { courseids: [2] });
       if (listDelayMs) await new Promise((resolve) => setTimeout(resolve, listDelayMs));
-      return response.end(JSON.stringify([{ data: JSON.stringify([{ id: 8, course: 2, cmid: 71 }]) }]));
+      return response.end(JSON.stringify([{ data: JSON.stringify(forumsOverride ?? [{ id: 8, course: 2, cmid: 71 }]) }]));
     }
     if (target.pathname === "/mod/forum/export.php" && request.method === "GET" && target.search === "?id=8") return response.end(`<!doctype html><form method="post" action="/mod/forum/export.php"><input type="hidden" name="id" value="8"><input type="hidden" name="sesskey" value="private-session"><input type="hidden" name="_qf__mod_forum_form_export_form" value="1"><select multiple name="useridsselected[]"></select><select multiple name="discussionids[]"></select><select name="format"><option value="xlsx">xlsx</option><option value="csv">csv</option></select><input type="submit" name="submitbutton" value="Export"></form>`);
     if (target.pathname === "/mod/forum/export.php" && request.method === "POST" && !target.search) {
@@ -65,6 +65,11 @@ test("Moodle Forum reader uses only the native export download and preserves pri
       { author: { user_id: "3", name: "Course Teacher" }, subject: "Response", message: "Teacher reply", parent: "101" },
     ]);
     assert.deepEqual(await run({ course_id: 2, forum_module_id: 99 }), { ok: false, sent: false, error: "moodle_forum_target_unavailable" });
+    forumsOverride = { expired: true };
+    const beforeProviderExpired = exportRequests();
+    assert.deepEqual(await run(), { ok: false, sent: false, error: "moodle_forum_target_unavailable" }, "provider data cannot impersonate an internal timeout");
+    assert.equal(exportRequests(), beforeProviderExpired);
+    forumsOverride = null;
     const beforeExpired = fixtureRequests();
     assert.deepEqual(await run(undefined, Date.now() - 1), { ok: false, sent: false, error: "moodle_arguments_invalid" });
     assert.deepEqual(await run(undefined, null), { ok: false, sent: false, error: "moodle_arguments_invalid" });

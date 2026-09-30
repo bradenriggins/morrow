@@ -112,6 +112,7 @@ def tree_env(tmp_path, monkeypatch):
     state = tmp_path / "tree-state"
     state.mkdir()
     (state / "helper_token").write_text(TOKEN + "\n")
+    (state / "helper_token").chmod(0o600)
     monkeypatch.setenv("MORROW_HELPER_ENV_FILE", str(env_file))
     monkeypatch.setenv("MORROW_TREE_STATE_DIR", str(state))
     monkeypatch.setenv("MORROW_HOME", str(tmp_path / "home"))

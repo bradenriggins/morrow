@@ -62,9 +62,11 @@ def _fake_chromium(root, name):
 def _step3(env):
     """install.sh step 3's own probe, run the way install.sh runs it."""
     text = _read("install.sh")
-    code = re.search(r'CHROME_BIN="\$\(cd / && python3 -c "(.*?)"\)"',
-                     text, re.S).group(1).replace("${TREE}", TREE)
-    proc = subprocess.run([sys.executable, "-c", code], cwd="/", env=env,
+    match = re.search(r'CHROME_BIN="\$\((cd / && .*?)\)"', text, re.S)
+    assert match, "install.sh Chromium probe is missing"
+    command = match.group(1).replace("${TREE}", "${MORROW_INSTALL_TEST_TREE}")
+    proc = subprocess.run(["bash", "-c", command], cwd="/",
+                          env={**env, "MORROW_INSTALL_TEST_TREE": TREE},
                           capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     return proc.stdout.strip().splitlines()[-1]

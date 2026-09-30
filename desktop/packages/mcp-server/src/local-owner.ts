@@ -63,6 +63,7 @@ import {
 import { RuntimeStateLease, hardenMorrowStateFiles } from "./state-lease.js";
 import { StrictStdioServerTransport } from "./strict-stdio.js";
 import { PrivateChatContinuationLedger } from "./private-chat.js";
+import { installedClientRoute, type InstalledClientRoute } from "./client-route.js";
 
 const OWNER_SCHEMA = "morrow.local-owner.v1";
 const LOOPBACK_HOST = "127.0.0.1";
@@ -124,6 +125,8 @@ interface ClientPresence {
   readonly proxyPid: number;
   readonly observedAt: string;
   readonly workspace: WorkspaceAdmission;
+  route: InstalledClientRoute | null;
+  initialized: boolean;
 }
 
 interface Session extends ClientPresence {
@@ -138,7 +141,8 @@ interface ProxyPresence extends ClientPresence {
 }
 
 interface MaintenanceRequest {
-  readonly action: "acquire" | "release" | "commit" | "recover" | "bridge" | "retire";
+  readonly action: "acquire" | "release" | "commit" | "recover" | "bridge" | "retire" | "routes" | "route";
+  readonly route?: InstalledClientRoute;
   readonly runtimeIdentity?: string;
   readonly holderPid: number;
   readonly monitorProxyPid?: number;
@@ -550,11 +554,20 @@ function exactMaintenanceRequest(value: unknown): MaintenanceRequest | null {
   const source = value as Record<string, unknown>;
   const action = source.action;
   const base = source.schema === LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA
-    && (action === "acquire" || action === "release" || action === "commit" || action === "recover" || action === "bridge" || action === "retire")
-    && Object.entries(source).every(([key]) => ["schema", "action", "holderPid", "monitorProxyPid", "leaseId", "leaseToken", "control", "runtimeIdentity"].includes(key));
+    && (action === "acquire" || action === "release" || action === "commit" || action === "recover" || action === "bridge" || action === "retire" || action === "route" || action === "routes")
+    && Object.entries(source).every(([key]) => ["schema", "action", "holderPid", "monitorProxyPid", "leaseId", "leaseToken", "control", "runtimeIdentity", "route"].includes(key));
   const holderPid = exactPid(source.holderPid);
   const monitorProxyPid = exactPid(source.monitorProxyPid);
   if (!base || holderPid === null) return null;
+  if (action === "routes") return Object.keys(source).length === 3 ? { action, holderPid } : null;
+  if (action === "route") {
+    if (Object.keys(source).length !== 4 || !source.route || typeof source.route !== "object"
+      || Array.isArray(source.route) || Object.keys(source.route).sort().join(",") !== "generation,id") return null;
+    const candidate = source.route as Record<string, unknown>;
+    const route = installedClientRoute(candidate.id, candidate.generation);
+    return route ? { action, holderPid, route } : null;
+  }
+  if (source.route !== undefined) return null;
   if (action === "retire") {
     if (Object.keys(source).length !== 4 || typeof source.runtimeIdentity !== "string"
       || !RUNTIME_IDENTITY.test(source.runtimeIdentity)) return null;
@@ -647,7 +660,7 @@ async function asWebRequest(request: IncomingMessage, port: number, signal: Abor
   });
 }
 
-async function sendWebResponse(source: Response, target: ServerResponse): Promise<void> {
+async function sendWebResponse(source: Response, target: ServerResponse, observed?: { id: string | number; confirm: () => void }): Promise<void> {
   if (target.destroyed || target.writableEnded) return;
   target.writeHead(source.status, Object.fromEntries(source.headers.entries()));
   if (!source.body) {
@@ -655,7 +668,48 @@ async function sendWebResponse(source: Response, target: ServerResponse): Promis
     return;
   }
   try {
-    await pipeline(Readable.fromWeb(source.body as never), target);
+    const type = source.headers.get("content-type")?.split(";", 1)[0]?.trim();
+    const inspect = Boolean(observed && source.ok && (type === "application/json" || type === "text/event-stream"));
+    let pending = "";
+    let bytes = 0;
+    let stopped = !inspect;
+    const decoder = new TextDecoder();
+    const accept = (text: string): void => {
+      try {
+        const message = JSON.parse(text);
+        if (message?.jsonrpc === "2.0" && message.id === observed?.id
+          && Object.hasOwn(message, "result") && !Object.hasOwn(message, "error")) {
+          observed?.confirm();
+          stopped = true;
+          pending = "";
+        }
+      } catch {}
+    };
+    const forwarded = async function* () {
+      for await (const chunk of Readable.fromWeb(source.body as never)) {
+        if (!stopped) {
+          bytes += chunk.byteLength;
+          if (bytes > MAX_HTTP_BODY_BYTES) {
+            stopped = true;
+            pending = "";
+          } else {
+            pending += decoder.decode(chunk, { stream: true });
+            if (type === "text/event-stream") {
+              let boundary;
+              while (!stopped && (boundary = /\r?\n\r?\n/.exec(pending))) {
+                const frame = pending.slice(0, boundary.index);
+                pending = pending.slice(boundary.index + boundary[0].length);
+                accept(frame.split(/\r?\n/).filter((line) => line.startsWith("data:"))
+                  .map((line) => line.slice(5).replace(/^ /, "")).join("\n"));
+              }
+            }
+          }
+        }
+        yield chunk;
+      }
+      if (!stopped && type === "application/json") accept(pending + decoder.decode());
+    };
+    await pipeline(Readable.from(forwarded()), target);
   } catch (error) {
     if (!target.destroyed) throw error;
   }
@@ -903,6 +957,8 @@ async function startLocalOwner(config: GatewayConfig): Promise<void> {
       proxyPid,
       observedAt: new Date().toISOString(),
       workspace,
+      route: null,
+      initialized: false,
       requestStateKey: randomBytes(32),
       privateChatContinuations: new PrivateChatContinuationLedger(),
     };
@@ -923,6 +979,7 @@ async function startLocalOwner(config: GatewayConfig): Promise<void> {
       enableDnsRebindingProtection: true,
       onsessioninitialized: (sessionId) => {
         session.id = sessionId;
+        session.initialized = true;
         sessions.set(sessionId, session);
         startupGraceDeadline = 0;
         clearIdle();
@@ -936,7 +993,7 @@ async function startLocalOwner(config: GatewayConfig): Promise<void> {
     // process that connected, the project it was admitted for, and the name the
     // assistant reports at initialize.
     const server = createFullMorrowServer(runtime, { workspaceRoot: workspace.root, proxyPid });
-    session = { id: null, proxyPid, observedAt: new Date().toISOString(), workspace, server, transport };
+    session = { id: null, proxyPid, observedAt: new Date().toISOString(), workspace, server, transport, route: null, initialized: false };
     await server.connect(transport);
     return session;
   };
@@ -981,6 +1038,37 @@ async function startLocalOwner(config: GatewayConfig): Promise<void> {
     }
     if (!currentOwnerMatches() || !runtime || !descriptor) {
       maintenanceError(response, "local_owner_maintenance_owner_changed");
+      return;
+    }
+    if (input.action === "route") {
+      const presence = clientPresences().find((entry) => entry.proxyPid === proxyPid && entry.initialized
+        && entry.workspace.encoded === workspace.encoded);
+      if (!presence || await processMatchesRecordedLifetimeAsync(proxyPid, presence.observedAt) !== true) {
+        maintenanceError(response, "local_owner_route_session_required");
+        return;
+      }
+      if (presence.route && (presence.route.id !== input.route!.id || presence.route.generation !== input.route!.generation)) {
+        maintenanceError(response, "local_owner_route_generation_changed");
+        return;
+      }
+      presence.route = input.route!;
+      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify({ schema: "morrow.local-owner-maintenance.v1", status: "route" }));
+      return;
+    }
+    if (input.action === "routes") {
+      const routes: InstalledClientRoute[] = [];
+      for (const presence of clientPresences()) {
+        if (!presence.initialized || !presence.route || presence.workspace.encoded !== workspace.encoded
+          || await processMatchesRecordedLifetimeAsync(presence.proxyPid, presence.observedAt) !== true) continue;
+        if (!routes.some((route) => route.id === presence.route!.id && route.generation === presence.route!.generation)) routes.push(presence.route);
+      }
+      if (routes.length > 32) {
+        maintenanceError(response, "local_owner_route_capacity_exceeded");
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify({ schema: "morrow.local-owner-maintenance.v1", status: "routes", routes }));
       return;
     }
     // A client from a newer installed build asks this owner to stand down. It
@@ -1228,16 +1316,20 @@ async function startLocalOwner(config: GatewayConfig): Promise<void> {
       }
       const webRequest = await asWebRequest(request, descriptor!.port, signal);
       if (modernHandler && !await isLegacyRequest(webRequest)) {
-        if (!recordModernProxy(proxyPid, workspace)) {
+        const presence = recordModernProxy(proxyPid, workspace);
+        if (!presence) {
           sendProblem(response, 403, "local_owner_session_workspace_required");
           return;
         }
+        const rpcRequest = request.method === "POST" ? await webRequest.clone().json().catch(() => null) : null;
         const webResponse = await Promise.race<Response | null>([
           modernHandler.fetch(webRequest),
           disconnected.then(() => null),
         ]);
         finishMcpRequest();
-        if (webResponse) await sendWebResponse(webResponse, response);
+        if (webResponse) await sendWebResponse(webResponse, response,
+          rpcRequest && (typeof rpcRequest.id === "string" || typeof rpcRequest.id === "number")
+            ? { id: rpcRequest.id, confirm: () => { presence.initialized = true; } } : undefined);
         return;
       }
       const sessionId = typeof request.headers["mcp-session-id"] === "string"
@@ -1527,6 +1619,46 @@ export async function runLocalOwnerProxy(config: GatewayConfig): Promise<void> {
   const journalPath = canonicalLocalOwnerJournalPath(requestedJournalPath);
   const workspace = currentWorkspaceAdmission();
   const descriptor = await waitForOwner(journalPath, ownerConfigDigest(config));
+  const route = installedClientRoute(process.env.MORROW_ROUTE_ID, process.env.MORROW_ROUTE_GENERATION);
+  const registerRoute = async (): Promise<boolean> => {
+    if (!route) return true;
+    try {
+      const response = await fetch(new URL(LOCAL_OWNER_MAINTENANCE_PATH, `http://${LOOPBACK_HOST}:${descriptor.port}`), {
+        method: "POST",
+        headers: { authorization: `Bearer ${descriptor.token}`, "content-type": "application/json",
+          [PROXY_PID_HEADER]: String(process.pid), [PROXY_WORKSPACE_HEADER]: workspace.encoded },
+        body: JSON.stringify({ schema: LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA, action: "route", holderPid: process.pid, route }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (response.ok && response.body) {
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let bytes = 0;
+        try {
+          while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            bytes += next.value.byteLength;
+            if (bytes > 8_192) throw new Error("route response is too large");
+            chunks.push(next.value);
+          }
+          const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          if (value?.schema === "morrow.local-owner-maintenance.v1" && value.status === "route"
+            && Object.keys(value).sort().join(",") === "schema,status") return true;
+        } finally { await reader.cancel().catch(() => undefined); }
+      } else await response.body?.cancel();
+    } catch {}
+    console.error("[morrow] installed client route remains unconfirmed.");
+    return false;
+  };
+  let routeRegistered = false;
+  let routeRegistration: Promise<void> | null = null;
+  const ensureRouteRegistration = (): Promise<void> => {
+    if (routeRegistered) return Promise.resolve();
+    routeRegistration ??= registerRoute().then((confirmed) => { routeRegistered = confirmed; })
+      .finally(() => { routeRegistration = null; });
+    return routeRegistration;
+  };
   const http = new StreamableHTTPClientTransport(ownerUrl(descriptor), {
     requestInit: {
       headers: {
@@ -1569,6 +1701,9 @@ export async function runLocalOwnerProxy(config: GatewayConfig): Promise<void> {
   };
 
   http.onmessage = (message: JSONRPCMessage) => {
+    const confirmsModernRoute = modernProtocol && "id" in message && "result" in message
+      && (typeof message.id === "string" || typeof message.id === "number")
+      && activeModernRequests.has(modernRequestKey(message.id));
     if ("id" in message && ("result" in message || "error" in message)
       && (typeof message.id === "string" || typeof message.id === "number")) {
       settleModernRequest(message.id);
@@ -1583,6 +1718,12 @@ export async function runLocalOwnerProxy(config: GatewayConfig): Promise<void> {
       && typeof (message.result as { protocolVersion?: unknown }).protocolVersion === "string"
     ) {
       http.setProtocolVersion((message.result as { protocolVersion: string }).protocolVersion);
+      void ensureRouteRegistration().then(() => stdio.send(message)).catch(fail);
+      return;
+    }
+    if (confirmsModernRoute || (!modernProtocol && initialized && "id" in message && "result" in message)) {
+      void ensureRouteRegistration().then(() => stdio.send(message)).catch(fail);
+      return;
     }
     void stdio.send(message).catch(fail);
   };

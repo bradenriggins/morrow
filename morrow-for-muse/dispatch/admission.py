@@ -81,6 +81,7 @@ _TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE_ROOT not in sys.path:
     sys.path.insert(0, _TREE_ROOT)
 from config.paths import morrow_home  # noqa: E402
+from config.consent import explicit_nonapproval  # noqa: E402
 # W6-P2-7: the signing key is used through a zeroizable buffer, never
 # held as long-lived bytes (see config/secretbuf.py).
 from config.securebuf import secret_bytes  # noqa: E402
@@ -1317,7 +1318,7 @@ def sign_approval(record: dict, authorization: str,
     W6-P2-A3: the identity schedule is NO LONGER covered by the action
     authorization alone. When resolved_identities is non-empty, a
     SEPARATE identity_authorization (the educator's own words naming
-    the identities, any non-empty reply) is required and is sealed and journaled
+    the identities, a non-empty approving reply) is required and is sealed and journaled
     alongside the action authorization. Bundling the write action and
     the identity list into one rubber-stamp invited skipping the
     identity half (the FERPA-consequential half); two citations force
@@ -1346,8 +1347,12 @@ def sign_approval(record: dict, authorization: str,
     if not isinstance(authorization, str) or len(authorization.strip()) < APPROVAL_AUTH_MIN_LEN:
         raise ValueError(
             "sign_approval requires the educator's verbatim reply "
-            "approving the action (any non-empty reply, e.g. \"Yes\"); "
+            "approving the action (a non-empty approving reply, e.g. \"Yes\"); "
             "inferred or standing-note approvals are not accepted")
+    if explicit_nonapproval(authorization):
+        raise ValueError("sign_approval refuses an explicit denial or uncertain reply")
+    if resolved_identities and explicit_nonapproval(identity_authorization):
+        raise ValueError("sign_approval refuses an explicit denial or uncertain identity reply")
     if channel not in ("educator-chat", "driver"):
         raise ValueError(
             "sign_approval channel must be 'educator-chat' or 'driver', "

@@ -305,6 +305,18 @@ test("setup records only the account and courses Blackboard discovery returns", 
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test("Blackboard saves and reads more than 500 accessible and selected courses", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
+  const courses = Array.from({ length: 1_001 }, (_, index) => ({ courseId: `_${index + 1}_1`, title: `Course ${index + 1}` }));
+  try {
+    await setup(root, { discoverConnection: async () => ({ principalId: "_777_1", courses }) });
+    await selectCourses(root, courses.map(({ courseId }) => ({ courseId })));
+    const health = await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess });
+    assert.equal(health.tenants[0].availableCourses.length, 1_001);
+    assert.equal(health.tenants[0].courseBindings.length, 1_001);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test("failed Blackboard discovery writes neither configuration nor credential", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
   try {

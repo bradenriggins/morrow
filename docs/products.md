@@ -8,6 +8,7 @@ The desktop app plus Morrow Bridge, its Chrome extension. An educator downloads 
 
 - Works with Canvas and Moodle through the Chrome window where the educator is already signed in. Selected Canvas tasks have been checked on live test courses, and part of the Moodle catalog on a Moodle test course.
 - Can also connect to a Blackboard course once the school's Blackboard administrator sets up Morrow's connection, but no live Blackboard site has been tested yet.
+- Pair each Canvas or Moodle account once. Selected courses limits access to the courses you allow; Account access discovers available courses without a course selector. Both modes support any number of courses. Tell the assistant which courses to use by name, ID, or link. Switching modes does not pair again.
 - Every course starts in Plan: changes are reviewed before they are saved. Edit access can be granted per course and per type of change, and it stays on until the educator turns it off.
 - After each approved change, Morrow checks what the LMS actually saved and reports back.
 

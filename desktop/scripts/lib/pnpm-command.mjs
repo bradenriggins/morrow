@@ -3,6 +3,7 @@ import { win32 } from "node:path";
 
 const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
 const PNPM_ENTRY = /^pnpm\.(?:c|m)?js$/i;
+const PNPM_NATIVE = /^pnpm(?:\.exe)?$/i;
 
 const hostFileSystem = Object.freeze({
   isFile(path) {
@@ -19,14 +20,15 @@ function environmentValue(env, name) {
 }
 
 /**
- * The JavaScript file a Windows command shim starts. npm's cmd-shim and pnpm's
+ * The program a Windows command shim starts. npm's cmd-shim and pnpm's
  * own shims both name it as one quoted path, relative to the shim's folder
  * (`%~dp0` or `%dp0%`) or absolute.
  */
 function shimEntry(shimPath, text) {
   const folder = `${win32.dirname(shimPath)}\\`;
   const entries = new Set();
-  for (const match of text.matchAll(/"([^"\r\n]+\.(?:c|m)?js)"/gi)) {
+  for (const match of text.matchAll(/"([^"\r\n]+)"/g)) {
+    if (!/\.(?:c|m)?js$/i.test(match[1]) && !PNPM_NATIVE.test(win32.basename(match[1]))) continue;
     const named = match[1].replace(/%~dp0|%dp0%/gi, folder);
     if (!win32.isAbsolute(named)) continue;
     entries.add(win32.resolve(named));
@@ -38,7 +40,7 @@ function shimEntry(shimPath, text) {
 /**
  * How to start pnpm with no shell. On Windows pnpm is usually a .cmd shim, and
  * Node starts only a real executable when no shell is used (a .cmd or .bat is
- * refused), so the shim's JavaScript entry is started with this Node instead.
+ * refused). A JavaScript entry uses this Node; a native entry starts directly.
  * The lookup follows PATH and PATHEXT in the order Windows uses, so it starts
  * the same pnpm a terminal would.
  */
@@ -53,7 +55,7 @@ export function pnpmCommand({
   if (typeof running === "string" && win32.isAbsolute(running) && fileSystem.isFile(running)) {
     const name = win32.basename(running);
     if (PNPM_ENTRY.test(name)) return { command: execPath, args: [running] };
-    if (/^pnpm\.exe$/i.test(name)) return { command: running, args: [] };
+    if (PNPM_NATIVE.test(name)) return { command: running, args: [] };
   }
   const extensions = String(environmentValue(env, "PATHEXT") || DEFAULT_PATHEXT)
     .split(";")
@@ -70,10 +72,10 @@ export function pnpmCommand({
       if (extension === ".exe" || extension === ".com") return { command: candidate, args: [] };
       if (extension !== ".cmd" && extension !== ".bat") continue;
       const entry = shimEntry(candidate, fileSystem.readText(candidate));
-      if (!PNPM_ENTRY.test(win32.basename(entry)) || !fileSystem.isFile(entry)) {
+      if ((!PNPM_ENTRY.test(win32.basename(entry)) && !PNPM_NATIVE.test(win32.basename(entry))) || !fileSystem.isFile(entry)) {
         throw new Error(`pnpm could not start: ${candidate} names ${entry}, which is not a pnpm program on this computer.`);
       }
-      return { command: execPath, args: [entry] };
+      return PNPM_NATIVE.test(win32.basename(entry)) ? { command: entry, args: [] } : { command: execPath, args: [entry] };
     }
   }
   throw new Error("pnpm could not start: no pnpm program was found on PATH.");

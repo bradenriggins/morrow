@@ -94,8 +94,9 @@ On detection:
    (`~/.morrow/browser_lane.json`); on mismatch the halt stays and this
    escalates (possible account change), never auto-resumes. With no
    pinned account it refuses too and names the recovery: the educator
-   confirms in their own words that the account is theirs, then
-   `state_machine.py pin --confirm-account "<their words>"`.
+   checks the named account and school and replies **yes**, then
+   `state_machine.py pin --confirm-account "yes"`. A negative or uncertain
+   reply keeps the account unpinned and paused work paused.
 5. On match, resume lifts the halt itself. Never delete
    `~/.morrow/write_halt` by hand: that skips the account check.
    Quarantined ops replay only with explicit per-action approval;

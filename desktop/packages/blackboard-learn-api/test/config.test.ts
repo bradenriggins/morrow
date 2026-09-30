@@ -36,6 +36,12 @@ async function configuration(binding?: string): Promise<{ readonly path: string;
 }
 
 describe("Blackboard Learn configuration", () => {
+  it("loads every course binding above the former 500 course limit", async () => {
+    const input = await configuration();
+    const courses = Array.from({ length: 1_001 }, (_, index) => ({ courseId: `_${index + 1}_1` }));
+    await writeFile(input.path, JSON.stringify({ schema: "morrow.blackboard-learn.config.v1", tenants: [{ id: "school", baseUrl: "https://learn.example.edu", applicationKey: "application-key", credentialRef: "environment", principalId: "_11_1", courseBindings: courses }] }), { mode: 0o600 });
+    expect((await loadBlackboardLearnConfig(input.environment))[0]?.courseBindings).toHaveLength(1_001);
+  });
   it("derives a stable source binding from the normalized tenant, principal, and course without returning the secret", async () => {
     const input = await configuration();
     const tenants = await loadBlackboardLearnConfig(input.environment);

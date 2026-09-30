@@ -278,6 +278,28 @@ describe("bridge protocol", () => {
       .toThrow("UTF-8 bytes");
   });
 
+  it("accepts one profile instance and an explicit takeover in a hello, and nothing looser", () => {
+    const hello = {
+      schema: BRIDGE_SCHEMAS.hello,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      clientNonce: "b".repeat(64),
+      serverNonce: "c".repeat(64),
+      clientProof: "d".repeat(64),
+      extensionId: "a".repeat(32),
+      runtimeRevision: "revision-1",
+      catalogDigest: digest,
+      bindings: [],
+      sentAt: 1,
+    };
+    expect(parseBridgeHello({ ...hello, instanceId: "profile-owner-0001", takeover: true })).toMatchObject({ instanceId: "profile-owner-0001", takeover: true });
+    expect(parseBridgeHello(hello)).not.toHaveProperty("instanceId");
+    expect(parseBridgeHello(hello)).not.toHaveProperty("takeover");
+    expect(() => parseBridgeHello({ ...hello, takeover: false })).toThrow("takeover");
+    expect(() => parseBridgeHello({ ...hello, takeover: "yes" })).toThrow("takeover");
+    expect(() => parseBridgeHello({ ...hello, instanceId: "short" })).toThrow("instanceId");
+    expect(() => parseBridgeHello({ ...hello, instanceId: "profile owner with spaces" })).toThrow("instanceId");
+  });
+
   it("normalizes and sorts binding snapshots", () => {
     expect(normalizeBridgeBindings([
       { sourceBindingId: "canvas:22", provider: "canvas", courseId: "42", runtimeVerified: true },
