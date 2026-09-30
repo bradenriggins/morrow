@@ -5,9 +5,10 @@ read the installation trust notes and platform policies for the details. Muse sh
 
 ## What Morrow can do
 
-Morrow does admitted Canvas tasks when you ask it to. Its catalog records
-real-site evidence, and its current policy can hold a tested operation.
-Supported examples include:
+Morrow does supported Canvas tasks when you ask it to. Our tests cover
+more than 200 Canvas tasks, including Item Bank work, on real Canvas sites.
+Some tested tasks are still withheld in this version. Morrow runs only the
+tasks that are currently supported. Examples include:
 listing your courses and assignments; creating assignments, classic
 quizzes, pages, and modules; editing pages; and reading course files.
 It refuses anything we have not tested, instead of guessing. Morrow
