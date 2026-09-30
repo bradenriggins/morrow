@@ -11,6 +11,7 @@
 The release package is `morrow-muse-connector-0.4.8.zip` from the `muse/v0.4.8` GitHub release.
 
 - Complete course-only installs when an older optional encryption library is already present. The install checks now use the same library readiness check as the learner vault.
+- Do not label a Chrome network error or unrelated page as a signed-out Canvas session; keepalive requires the configured Canvas login URL.
 - Route both authenticated and unauthenticated egress proxies through the protected local forwarder. Muse can close direct Chromium proxy connections before the Canvas page loads.
 - Document the private Muse sign-in card, configured helper binding, and native artifact action route. Do not use undocumented viewer identity fields or send a VM localhost URL as the device setup path.
 - Use a virtual environment outside the connector folder for the pinned runtime packages. Document activation in every shell so Muse system Python protection does not block setup.

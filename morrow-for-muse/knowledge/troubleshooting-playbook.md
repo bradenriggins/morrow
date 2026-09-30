@@ -283,10 +283,10 @@ Its health model:
 - Probes `/status` with retries and backoff (2s, 4s) before any
   recovery.
 - HTTP 200 alone is NOT healthy: it parses the JSON. Exit 2 is emitted
-  for a status classified as signed out (`logged_in:false` with
-  `chromium_alive:true` and `starting:false`); that URL-based classification
-  alone is not proof of cookie expiry. Inspect Chrome/page/network errors
-  before asking for reauthentication; a logged-out session is
+  only for an alive, non-starting browser with `logged_in:false` and
+  a login URL at the configured Canvas origin. Chrome errors, blank/missing
+  URLs, and unrelated sites are indeterminate, not sign-out. This does not
+  prove why the login is required (expiry, revocation, or cleared cookies); a logged-out session is
   reported, never "recovered": the script never attempts a sign-in.
 - A dead Chromium (`chromium_alive:false`) is recoverable: the helper
   is restarted, not reported as signed out. Unknown liveness (a server
@@ -295,8 +295,8 @@ Its health model:
 
 Exit codes: 0 healthy, 1 unrecoverable (helper down and could not be
 recovered, /status JSON unparseable, or status indeterminate), 2 helper
-responding, Chromium alive, not starting, but not classified logged in
-(reported, no recovery attempted; verify the cause as described above).
+responding, Chromium alive, not starting, with a login URL at the configured Canvas origin
+(reported, no recovery attempted). Other unverified page states return 1.
 
 Note: a login-page read during work is not a keepalive failure; it is
 session death. Run the dead-session recovery above, not a helper

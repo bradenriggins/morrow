@@ -32,7 +32,7 @@ mkdir -p "${HOME}/workspace" \
 KA_SHIPPED="${HERE}/keepalive.sh"
 
 BODY_HEALTHY='{"logged_in": true, "chromium_alive": true, "starting": false}'
-BODY_SIGNOUT='{"logged_in": false, "chromium_alive": true, "starting": false}'
+BODY_SIGNOUT='{"logged_in": false, "chromium_alive": true, "starting": false, "url": "https://example.instructure.com/login/canvas"}'
 BODY_DEAD='{"logged_in": false, "chromium_alive": false, "starting": false}'
 BODY_STARTING='{"logged_in": false, "chromium_alive": true, "starting": true}'
 BODY_LEGACY='{"logged_in": false}'
@@ -125,6 +125,16 @@ test_shipped() {
     t "genuine_signout: healthy -> false" "false" "${got}"
     got="$(genuine_signout "${BODY_MALFORMED}")"
     t "genuine_signout: malformed body -> false" "false" "${got}"
+
+    # An error, unrelated host, or missing URL is not evidence of expiry.
+    # These cases were written before changing the classifier.
+    for bad_url in 'chrome-error://chromewebdata/' 'about:blank' '' 'https://other.example/dashboard' 'https://other.example/login/canvas' 'https://example.instructure.com/dashboard'; do
+      body="$(python3 -c 'import json,sys; print(json.dumps({"logged_in":False,"chromium_alive":True,"starting":False,"url":sys.argv[1]}))' "${bad_url}")"
+      got="$(genuine_signout "${body}")"
+      t "genuine_signout: ${bad_url:-missing URL} is not expiry" "false" "${got}"
+      status_body="${body}"; ( evaluate_status ); rc=$?
+      t "evaluate_status: ${bad_url:-missing URL} -> indeterminate" "1" "${rc}"
+    done
 
     # --- evaluate_status(): exit codes ----------------------------------
     # (evaluate_status calls exit, so each case runs in a subshell.)
