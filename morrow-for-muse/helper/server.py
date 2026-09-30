@@ -2162,6 +2162,10 @@ class Handler(BaseHTTPRequestHandler):
                 if "?" in self.path:
                     self._send_json({"error": "query parameters not allowed"}, 400)
                     return
+                if (self.headers.get("Transfer-Encoding") or
+                        self.headers.get("Content-Length", "0") != "0"):
+                    self._send_json({"error": "request body not allowed"}, 400)
+                    return
                 try:
                     self._send_json(BROWSER.page_layout())
                 except _HttpError as exc:

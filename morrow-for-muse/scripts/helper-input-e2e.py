@@ -121,9 +121,9 @@ try:
     check('partial-key-fault-releases-modifier', browser.cdp.evaluate(browser.tab, 'window.shiftHeld') is False)
     browser.cdp.call = original_call
     check('partial-stream-blocked-on-retry', request(partial)[0] == 409)
-    def layout(auth=True, query=''):
+    def layout(auth=True, query='', body=None):
         headers = {'X-Helper-Token':'a'*64} if auth else {}
-        req = urllib.request.Request(f'http://127.0.0.1:{port}/page/layout{query}', headers=headers)
+        req = urllib.request.Request(f'http://127.0.0.1:{port}/page/layout{query}', headers=headers, data=body, method='GET')
         try:
             with urllib.request.urlopen(req, timeout=10) as response:
                 return response.status, json.loads(response.read())
@@ -131,6 +131,7 @@ try:
             return error.code, json.loads(error.read())
     check('layout-auth-required', layout(False)[0] == 403)
     check('layout-query-refused', layout(query='?target=other')[0] == 400)
+    check('layout-body-refused', layout(body=b'x')[0] == 400)
     for name, x, y in [('left',80,200), ('right',1080,200), ('top',500,40), ('bottom',500,650)]:
         fixture = f"""<style>input,button{{position:absolute;width:300px;height:36px;box-sizing:border-box}}</style><input style="left:{x}px;top:{y}px" value="dummy-private-not-returned"><input type="password" style="left:{x}px;top:{y+70}px"><button style="left:{x}px;top:{y+140}px">dummy-label-not-returned</button><input style="display:none"><input disabled>"""
         browser.cdp.call(browser.tab, 'Page.setDocumentContent', {'frameId':frame,'html':fixture})
