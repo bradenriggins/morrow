@@ -45,7 +45,7 @@ test("each shipped platform has a pull-request desktop job on the release runner
     assert.match(body, /^ {4}defaults:\n {6}run:\n {8}working-directory: desktop$/m, `${id} must run in desktop/`);
     assert.match(body, /^ {4}timeout-minutes: \d+$/m, `${id} must be time-bounded`);
     assert.match(body, /^ {10}node-version: 22\.23\.2$/m, `${id} must use the exact Node release the payload embeds`);
-    assert.match(body, /^ {10}version: 10\.6\.1$/m, `${id} must use the pinned pnpm release`);
+    assert.ok(body.includes(`          version: ${manifest.packageManager.split("@")[1]}\n`), `${id} must use the pinned pnpm release`);
   }
 });
 

@@ -514,7 +514,7 @@ pnpm catalog:export
 pnpm catalog:merge
 pnpm catalog:check
 pnpm build
-pnpm --dir installer --ignore-workspace install
+pnpm --dir installer install
 pnpm test
 pnpm test:connector
 pnpm test:package

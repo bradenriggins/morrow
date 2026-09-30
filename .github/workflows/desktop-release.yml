@@ -19,7 +19,7 @@ jobs:
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 10.6.1
+          version: 12.6.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -31,7 +31,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install installer dependencies
-        run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
+        run: pnpm --dir installer install --frozen-lockfile
 
       # Reports whether a signed release could be built here. With no signing
       # secrets it says so and this unsigned release build continues; a partial
@@ -147,7 +147,7 @@ jobs:
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 10.6.1
+          version: 12.6.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -159,7 +159,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install installer dependencies
-        run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
+        run: pnpm --dir installer install --frozen-lockfile
 
       # Reports whether a signed and notarized release could be built here. With
       # no signing secrets it says so and this unsigned release build continues; a

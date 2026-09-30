@@ -54,7 +54,7 @@ test("a missing installer install reports the install command instead of a resol
   const none = guardRoot(t, []);
   assert.equal(none.status, 1);
   assert.match(none.stderr, /electron, electron-updater, @anthropic-ai\/mcpb/);
-  assert.match(none.stderr, /pnpm --dir installer --ignore-workspace install/);
+  assert.match(none.stderr, /pnpm --dir installer install/);
   assert.doesNotMatch(none.stderr, /Cannot find module|MODULE_NOT_FOUND/);
 
   const partial = guardRoot(t, ["electron"]);
@@ -70,7 +70,7 @@ test("a missing installer install reports the install command instead of a resol
 test("continuous integration installs the installer dependencies and runs the desktop suites", () => {
   const workflow = readFileSync(join(root, "..", ".github/workflows/ci.yml"), "utf8");
   const commands = [...workflow.matchAll(/^\s+(?:- )?run: (.+)$/gm)].map((match) => match[1].trim());
-  const install = commands.indexOf("pnpm --dir installer --ignore-workspace install --frozen-lockfile");
+  const install = commands.indexOf("pnpm --dir installer install --frozen-lockfile");
   const check = commands.indexOf("pnpm check");
   assert.ok(install >= 0, "ci.yml must install the installer dependencies");
   assert.ok(check > install, "ci.yml must install the installer dependencies before pnpm check");
