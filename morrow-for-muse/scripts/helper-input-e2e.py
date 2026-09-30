@@ -62,6 +62,30 @@ try:
     server.BROWSER = browser
     http = server.BoundedThreadingHTTPServer(('127.0.0.1', port), server.Handler)
     threading.Thread(target=http.serve_forever, daemon=True).start()
+    def status():
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/status', timeout=20) as response:
+            return json.loads(response.read())
+    initial_status = status()
+    check('identity-fixture-primary-tab-blank',
+          browser.cdp.evaluate(browser.tab, 'location.href') == 'about:blank')
+    check('configured-canvas-origin-present-while-page-blank',
+          initial_status.get('canvas_origin') == 'https://chcp.instructure.com'
+          and initial_status.get('logged_in') is False)
+    browser.base_url = 'https://other.instructure.com/'
+    other_status = status()
+    check('configured-canvas-origin-does-not-follow-current-page',
+          other_status.get('canvas_origin') == 'https://other.instructure.com'
+          and other_status.get('url') == initial_status.get('url')
+          and other_status.get('logged_in') is False)
+    browser.base_url = 'https://chcp.instructure.com/'
+    try:
+        browser.navigate('https://other.instructure.com/')
+    except ValueError:
+        navigation_refused = True
+    else:
+        navigation_refused = False
+    check('configured-origin-does-not-broaden-navigation', navigation_refused
+          and status().get('url') == initial_status.get('url'))
     epoch = server.INPUT_BATCHES.epoch
     stream = '1' * 32
     def request(body, token=True):

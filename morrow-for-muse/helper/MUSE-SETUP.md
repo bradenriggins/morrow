@@ -46,6 +46,11 @@ initial zoom; shared package code must not embed one account's values.
    repair message. A Chrome error page or blank page is not a usable
    sign-in page, even when Chromium is alive. Show the connection error
    and a retry control. Do not show a stale frame as connected.
+   Compare `/status.canvas_origin` with the configured Canvas origin, including
+   scheme and port. Keep that identity separate from the current page URL:
+   Canvas can redirect sign-in to an external HTTPS school identity provider.
+   Show its current host without counting it as signed-in Canvas. A missing or
+   mismatched configured origin blocks controls and requires update or repair.
 4. Proxy only the sign-in controls through private native artifact
    actions: status, screenshot, ordered input batches, mouse, wheel, and navigation to the
    configured Canvas address. Use the installed
@@ -54,14 +59,22 @@ initial zoom; shared package code must not embed one account's values.
    Never send a launch token to the artifact client, arguments, chat,
    logs, or an external service. Never expose arbitrary CDP evaluation
    or arbitrary HTTP forwarding as an artifact action.
+   Open Canvas returns to the configured Canvas origin root so the school's
+   normal SSO flow runs. Do not force the local-password `/login/canvas` route.
 5. Use the [input batch contract](README.md#ordered-private-input). Coalesce
    ordinary text briefly and send it once with `Input.insertText`; paired
-   control keys are ordered on the server. Use one queue for text, control
+   control keys are ordered on the server. Coalesce unsent text while a native
+   call is in flight so normal typing does not queue one call per character.
+   Keep dispatched payloads immutable. Use one queue for text, control
    keys, pointer, and navigation. Flush text before a focus change. Support
    paste, composition/IME, mobile backspace, Tab, Enter, selection, and blur.
    An ambiguous response may retry only the identical sequence and payload.
    A restart or uncertain partial outcome stops input and requires a fresh
-   frame and deliberate resumption. Never silently replay it into a new field.
+   frame and deliberate resumption. Every failed or throwing ordered operation
+   also stops queued input and pointer actions. Keep Resume input visible after
+   healthy frames. Before resuming, verify fresh status and a frame/layout from
+   the same current epoch; otherwise keep input blocked. Never silently replay
+   it into a new field.
    Keep frames and input transient; do not save or log typed values. Never
    show plaintext password echo in an intermediate relay field. Pause frame
    polling while input is pending and refresh after acknowledgement.
