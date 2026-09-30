@@ -10,7 +10,9 @@ educator homework.
 
 ## 1. Install
 
-Run `install.sh` from the dist root. Expected:
+Follow `INSTALL.md` Steps 1 and 2 from the dist root, including the
+external runtime environment and pinned packages. Activate that environment
+before every Morrow shell command. Expected:
 
 - Integrity check against `pack/carve-manifest.json` passes.
 - All 23 selftest suites pass (any failure fails the install and names
@@ -38,7 +40,9 @@ Run `install.sh` from the dist root. Expected:
 
 ## 3. Sign in (educator's hands only)
 
-1. The educator signs in on the login helper page, exactly as they
+1. Follow `helper/MUSE-SETUP.md` and present the private Muse artifact
+   card. Do not send a VM localhost URL for the educator to open directly
+   on their own device. The educator signs in on the login helper page, exactly as they
    normally would, including MFA. The agent never sees the password.
 2. Agent verifies immediately and pins the account:
    `python3 reauth/state_machine.py pin --first-signin`. It checks the
