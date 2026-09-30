@@ -308,7 +308,9 @@ or `{"type":"key","key":"Tab","code":"Tab","keyCode":9,"modifiers":0}`.
 Text is bounded to 4096 characters per operation and 8192 UTF-8 bytes total.
 Control key codes are 0–65535 and modifiers 0–15. Validation completes before
 any input. The browser applies text with `Input.insertText` and control keys
-as ordered down/up pairs, under a 10-second batch deadline.
+as ordered down/up pairs, under a 10-second batch deadline. An uncertain key failure makes one bounded
+key-up cleanup attempt (up to one additional second), while the batch remains
+failed. A lost reply must not leave a modifier held.
 
 Success returns `{"ok":true,"sequence":1,"replayed":false}`. An identical
 retry of the last acknowledged sequence returns `replayed:true` without

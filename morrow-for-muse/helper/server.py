@@ -1491,10 +1491,21 @@ class HelperBrowser:
                     self.cdp.call(self.tab, "Input.insertText",
                                   {"text": operation["text"]}, timeout=remaining())
                 else:
-                    for kind in ("down", "up"):
-                        self.key(kind, operation["key"], operation["code"],
-                                 operation["keyCode"], operation["modifiers"],
-                                 timeout=remaining())
+                    try:
+                        for kind in ("down", "up"):
+                            self.key(kind, operation["key"], operation["code"],
+                                     operation["keyCode"], operation["modifiers"],
+                                     timeout=remaining())
+                    except Exception:
+                        # Key-up is safe to repeat after an uncertain key-down.
+                        # Keep the batch failed even when cleanup succeeds.
+                        try:
+                            self.key("up", operation["key"], operation["code"],
+                                     operation["keyCode"], operation["modifiers"],
+                                     timeout=1)
+                        except Exception:
+                            pass
+                        raise
 
     def wheel(self, x, y, delta_x, delta_y):
         """Forward one scroll step at page point (x, y)."""
