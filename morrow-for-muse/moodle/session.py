@@ -59,6 +59,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
+_TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _TREE_ROOT not in sys.path:
+    sys.path.insert(0, _TREE_ROOT)
+from config.paths import morrow_home
+
 try:
     import requests
 except ImportError:  # pragma: no cover
@@ -324,8 +329,9 @@ class MoodleSession:
         self.sesskey = sesskey
         self.principal = principal or {}
         self.timeout = timeout
-        self.journal_dir = journal_dir or os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "journal", "moodle")
+        self._legacy_journal_dir = None if journal_dir else os.path.abspath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "journal", "moodle"))
+        self.journal_dir = journal_dir or os.path.join(morrow_home(), "journal", "moodle")
         os.makedirs(self.journal_dir, exist_ok=True)
         self.journal_path = os.path.join(self.journal_dir, "moodle.jsonl")
         # The journal is the durable record; rehydrate the used-op-id
@@ -335,6 +341,9 @@ class MoodleSession:
         # idempotent server-side, so this guard is the only replay
         # protection the lane has).
         self.used_op_ids: set = self._rehydrate_op_ids()
+        if self._legacy_journal_dir:
+            self.used_op_ids.update(self._rehydrate_op_ids(
+                os.path.join(self._legacy_journal_dir, "moodle.jsonl")))
         self._refresh_sesskey_tried = False
         # W4-P2-1: the Moodle lane's re-auth machine (same lifecycle
         # requirements as the Chromium lane). Created on the first
@@ -510,7 +519,7 @@ class MoodleSession:
 
     # -- governance: journal + used-op-id set ----------------------------
 
-    def _rehydrate_op_ids(self) -> set:
+    def _rehydrate_op_ids(self, path: Optional[str] = None) -> set:
         """Rebuild the used-op-id set from the append-only journal.
 
         Every journal line carries its op_id. A missing journal is a fresh
@@ -518,7 +527,7 @@ class MoodleSession:
         """
         ids = set()
         try:
-            with open(self.journal_path, encoding="utf-8") as fh:
+            with open(path or self.journal_path, encoding="utf-8") as fh:
                 for line in fh:
                     line = line.strip()
                     if not line:
@@ -566,6 +575,16 @@ class MoodleSession:
             raise MoodleLaneError("provider",
                                   "op id %s already used; refusing double dispatch"
                                   % op_id)
+        if self._legacy_journal_dir:
+            legacy = os.path.join(self._legacy_journal_dir, "reservations",
+                                  hashlib.sha256(str(op_id).encode("utf-8")).hexdigest())
+            try:
+                os.stat(legacy)
+            except FileNotFoundError:
+                pass
+            else:
+                raise MoodleLaneError(
+                    "provider", "op id %s already used; refusing double dispatch" % op_id)
         path = self._reservation_path(op_id)
         os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
         try:

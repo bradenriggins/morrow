@@ -2,6 +2,8 @@
 
 ## 0.4.8 (2026-09-30)
 
+- Store new Moodle journals and write reservations under `MORROW_HOME`.
+  Keep existing package-local records intact and honor them for replay checks.
 - Reserve Moodle write IDs durably before dispatch. Refuse replay after
   lost responses, failed readback, or process restart, and refuse writes
   when the existing journal cannot be trusted.
