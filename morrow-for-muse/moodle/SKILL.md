@@ -39,6 +39,11 @@ boundary described below.
   is an agent-operator step (the wave-2 discovery scripts show the
   pattern), not something the lane does on its own. Never invent a
   third path.
+- Form paths must start with one `/` and stay within the configured site.
+  Absolute URLs, authority changes, traversal, encoded path segments,
+  backslashes, control characters, and fragments are refused before dispatch.
+  Valid query parameters remain in the request, but receipts and error signals
+  identify only the path and HTTP status.
 - If a call returns a top-level `{"errorcode":"invalidrecordunknown"}`
   dict instead of the envelope list, the function is not registered on
   this deployment at all. Report it as not-available, never as a
