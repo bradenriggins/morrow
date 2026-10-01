@@ -892,7 +892,10 @@ async function startLocalOwner(config: GatewayConfig): Promise<void> {
           await settlesWithin(runtimeConnection, OWNER_STARTUP_CLOSE_TIMEOUT_MS);
         }
       } finally {
-        if (descriptor) removeOwnerDescriptor(journalPath, descriptor.nonce);
+        if (descriptor) {
+          removeOwnerDescriptor(journalPath, descriptor.nonce);
+          descriptor = null;
+        }
         lease.release();
       }
     })();
