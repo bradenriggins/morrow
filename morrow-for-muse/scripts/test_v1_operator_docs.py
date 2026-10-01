@@ -72,7 +72,8 @@ def test_install_points_writes_to_the_typed_flow():
 def test_moodle_lane_and_its_dependency_are_shipped_and_documented():
     assert "moodle/" not in carve.DEV_ONLY
     assert "moodle/session_selftest.py" in carve.DEV_ONLY
-    assert "moodle/session.py" in carve.shipped_files()
+    assert "moodle/session.py" in carve.DEV_ONLY
+    assert "moodle/cli.py" in carve.shipped_files()
     assert "Moodle lane" in _flat("INSTALL.md")
     assert "requirements-optional.txt" in _flat("INSTALL.md")
     assert "MOODLE_BASE_ALLOW_HTTP" in _flat("INSTALL.md")

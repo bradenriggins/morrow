@@ -45,13 +45,14 @@ sign-in and session recovery. Do not use UI automation as a substitute for
 an unsupported API write. Cookies and tokens stay inside their authorized
 browser/process boundary; never put them in chat, shell commands, or files.
 
-Moodle is a separate module. It has platform knowledge and tested session
-primitives, but this package does not transfer a production browser session
-into its HTTPS module. Its low-level write method does not enforce Canvas
-Plan/Edit or approval gates. Do not call it for production changes until
-an established connection and governed write path supply those controls.
-Explain the exact missing capability and provide a draft or read-only guide.
-Never export school credentials to bridge a missing integration.
+Moodle uses `bin/morrow moodle` and the VM's installed Chromium. Pair the
+account once; select courses through the assistant. Use the pinned catalog,
+current source review, Plan/Edit admission, encrypted learner vault, durable
+operation claims, and verified provider readback. Historical Python HTTPS
+authentication modules do not ship. Never export school credentials or
+bypass missing setup or capabilities. Native first-use and operation-specific
+qualification remain separate from fixture evidence.
+Qualify native Moodle first-use and provider operations before production release.
 
 ## Work like a careful course designer
 

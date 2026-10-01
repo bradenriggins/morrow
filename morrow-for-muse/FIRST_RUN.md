@@ -1,12 +1,10 @@
 # First-run checklist: brand-new educator, first hour
 
-V1 (2026-09-22). This checklist covers the Canvas first-run path. Moodle
-has a separate HTTPS module, described in `moodle/SKILL.md`; the release
-package has no command to transfer a signed-in VM browser session into
-that Python module. Confirm the working VM Moodle path before describing
-its setup or sending a course change. The educator does everything by
-talking to Muse; shell commands below are operator diagnostics, never
-educator homework.
+The steps below cover Canvas first use. Moodle uses the installed Chromium
+command path in `moodle/SKILL.md`; its native helper onboarding still needs
+release qualification. Pair the account once, not each course. The educator
+does everything by talking to Muse. Shell commands below are operator
+diagnostics, never educator homework.
 
 ## 1. Install
 

@@ -428,6 +428,53 @@ def default_forwarder_port(cdp_port):
     return derived
 
 
+def _darwin_browser_arguments():
+    import ctypes
+    try:
+        processes = subprocess.run(['ps', '-axo', 'pid=,comm='], capture_output=True,
+                                   check=True, timeout=5).stdout
+        if len(processes) > 2 * 1024 * 1024:
+            return []
+        libc = ctypes.CDLL(None)
+        libc.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                                ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+        libc.sysctl.restype = ctypes.c_int
+    except (OSError, subprocess.SubprocessError, AttributeError):
+        return []
+    result = []
+    for line in processes.decode('utf-8', 'replace').splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) != 2 or not fields[0].isdigit():
+            continue
+        if os.path.basename(fields[1]).lower() not in ('chrome', 'chromium', 'google chrome', 'google chrome for testing'):
+            continue
+        mib = (ctypes.c_int * 3)(1, 49, int(fields[0]))  # CTL_KERN, KERN_PROCARGS2, pid
+        size = ctypes.c_size_t()
+        if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0 or not 4 < size.value <= 2 * 1024 * 1024:
+            continue
+        buffer = ctypes.create_string_buffer(size.value)
+        if libc.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0) != 0:
+            continue
+        raw = buffer.raw[:size.value]
+        argc = int.from_bytes(raw[:4], sys.byteorder, signed=True)
+        offset = raw.find(b'\0', 4)
+        if not 1 <= argc <= 8192 or offset < 0:
+            continue
+        while offset < len(raw) and raw[offset] == 0:
+            offset += 1
+        argv = []
+        # Read exactly argc entries. The trailing environment is never decoded or returned.
+        for _ in range(argc):
+            end = raw.find(b'\0', offset)
+            if end < 0:
+                break
+            argv.append(raw[offset:end].decode('utf-8', 'replace'))
+            offset = end + 1
+        if len(argv) == argc:
+            result.append((fields[0], argv))
+    return result
+
+
 def _pipe_chromium_holders(proc_root="/proc"):
     """Return [(pid, user_data_dir_or_None), ...] for local processes
     whose argv carries the EXACT element --remote-debugging-pipe.
@@ -443,16 +490,21 @@ def _pipe_chromium_holders(proc_root="/proc"):
     try:
         pids = os.listdir(proc_root)
     except OSError:
-        return holders
-    for pid in pids:
-        if not pid.isdigit():
-            continue
-        try:
-            with open(os.path.join(proc_root, pid, "cmdline"), "rb") as fh:
-                raw = fh.read()
-        except OSError:
-            continue
-        argv = [a.decode("utf-8", "replace") for a in raw.split(b"\0")]
+        if sys.platform != 'darwin' or proc_root != '/proc':
+            return holders
+        arguments = _darwin_browser_arguments()
+    else:
+        arguments = []
+        for pid in pids:
+            if not pid.isdigit():
+                continue
+            try:
+                with open(os.path.join(proc_root, pid, "cmdline"), "rb") as fh:
+                    raw = fh.read()
+            except OSError:
+                continue
+            arguments.append((pid, [a.decode("utf-8", "replace") for a in raw.split(b"\0")]))
+    for pid, argv in arguments:
         if "--remote-debugging-pipe" not in argv:
             continue
         udd = None
@@ -1764,7 +1816,7 @@ class ChromiumLauncher:
             return probe["proxy"]
         return None
 
-    def start(self, timeout=30):
+    def start(self, timeout=30, *, attach_only=False):
         """Bring up this launcher's Chromium: attach to the serving login
         helper's browser via its token-authenticated /cdp/* proxy, or
         launch a private Chromium with --remote-debugging-pipe.
@@ -1783,6 +1835,8 @@ class ChromiumLauncher:
         print("[chromium] launching validated binary %s (version %s)"
               % (self.binary, version), flush=True)
         if os.environ.get("LOGIN_HELPER_OWN_BROWSER") == "1":
+            if attach_only:
+                raise RuntimeError('An attended helper is required for this command')
             # This process IS the login helper server: it bound the
             # helper HTTP port itself a moment ago (bind would have
             # failed loudly if a stale server were squatting it), so no
@@ -1806,6 +1860,8 @@ class ChromiumLauncher:
                   "its authenticated CDP proxy (helper port %d)"
                   % server_port, flush=True)
             return "attached"
+        if attach_only:
+            raise RuntimeError('An attended helper is required for this command')
         return self._launch_private(timeout=timeout)
 
     def _launch_private(self, timeout=30):

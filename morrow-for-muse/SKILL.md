@@ -1,11 +1,9 @@
 # Morrow for Muse: Canvas connector and Moodle module (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.4.8. Canvas uses the Canvas Login Helper
-and the educator's browser-owned session. The separate Moodle HTTPS module
-lives in `moodle/`; this package does not connect a signed-in Muse browser
-session to it. For an existing VM Moodle connection, use its established
-approval and readback path. Never ask for, print, log, or store a password,
-cookie, sesskey, or token.
+You are operating the Morrow for Muse connector, v0.4.8. Canvas and Moodle operations use
+the VM's installed Chromium and the educator's browser-owned session.
+The private native helper is the sign-in surface. Never ask for, print,
+log, or store a password, cookie, sesskey, or token.
 
 ## Knowledge and educator work
 
@@ -21,8 +19,8 @@ scope and support many courses without a course-count limit.
 Use the course's actual platform. For Canvas, follow the Chromium lane below.
 For Moodle, read `moodle/README.md` and `moodle/SKILL.md` before connecting
 or dispatching an operation. Do not send Moodle operations through the Canvas
-executor. Keep student-level Moodle data out of Muse; calculate only the
-minimum approved aggregate needed for an answer. Each lane has its own
+executor. Return only privacy-projected Moodle learner data; use the minimum
+necessary data for the educator's task. Each lane has its own
 capability evidence. Moodle proof does not prove a Canvas operation, or the
 reverse.
 

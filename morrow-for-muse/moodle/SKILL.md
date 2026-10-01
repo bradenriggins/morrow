@@ -1,97 +1,80 @@
-# Moodle lane: skill instruction layer
+# Moodle through installed Chromium
 
-How the agent uses the Moodle session lane. This is the instruction
-text the connector skill carries. The Python module enforces session
-and transport checks; its write method does not enforce the approval
-boundary described below.
+Use `bin/morrow moodle` for Moodle operations. Use the Chromium installed in
+the Muse VM, normally `/opt/meta-chromium/chrome`. The managed Browser is not
+the API execution path. Cookies and sesskeys stay inside Chromium. Never
+export them, use a shell HTTP client with school authentication, or ask the
+educator to put credentials in chat.
 
-## Session bootstrap (Lane 2 pattern)
+## Pair the account once
 
-1. The educator signs in once through the school's page in the Muse VM
-   browser. The form login in `login.py` proves the separate HTTPS lane
-   with the provider's published sandbox credentials; it is not a
-   production browser-session handoff.
-2. The Python lane accepts an in-memory `requests.Session` and sesskey
-   through `MoodleSession.from_bundle`. The release package does not
-   include a command that transfers the VM browser session into that
-   bundle. Do not export a school session cookie into a file, command,
-   transcript, or chat to bridge this gap. Keep an existing working VM
-   browser path in its browser-owned session. Code that already owns a
-   live `MoodleSession` can call `moodle.keepalive.probe_session(sess)`
-   for one read-only session check; a scheduled process cannot reload
-   that session from JSON.
-3. In the HTTPS lane, the sesskey is a per-session value of 10 or more
-   characters that does not rotate; it goes in the `sesskey` query param of every
-   `lib/ajax/service.php` call and in the `sesskey` field of every form
-   POST. It is visible by design (it is readable from page content), but
-   it is still never written to logs, transcripts, or chat.
+The educator signs in through the private native helper. Confirm that the
+helper owns this tree's persistent browser profile. Run:
 
-## Dispatch rules
+```
+bin/morrow moodle pair --site https://school.edu/moodle
+bin/morrow moodle status
+```
 
-- AJAX first: `POST {base}/lib/ajax/service.php?sesskey=...&info=<fn>`
-  with body `[{"index":0,"methodname":"<fn>","args":{...}}]`.
-- If the envelope error is `servicenotavailable`, the function is not
-  `allowed_from_ajax` on this deployment: use the form-path fallback.
-  Precision note on who does what: the lane's `form_write` posts the
-  caller-supplied fields plus the session sesskey to the form URL; it
-  does NOT fetch the form or extract its hidden fields. Fetching the
-  form and extracting hidden fields (including the form's own sesskey)
-  is an agent-operator step (the wave-2 discovery scripts show the
-  pattern), not something the lane does on its own. Never invent a
-  third path.
-- Form paths must start with one `/` and stay within the configured site.
-  Absolute URLs, authority changes, traversal, encoded path segments,
-  backslashes, control characters, and fragments are refused before dispatch.
-  Valid query parameters remain in the request, but receipts and error signals
-  identify only the path and HTTP status.
-- If a call returns a top-level `{"errorcode":"invalidrecordunknown"}`
-  dict instead of the envelope list, the function is not registered on
-  this deployment at all. Report it as not-available, never as a
-  provider domain error.
-- Result bounding: AJAX reads over the UTF-8 byte cap fail as
-  `incomplete`. Do not treat that failure as an empty or complete result.
-  Keep receipts to identifying fields (id, name, subject), and redact
-  learner data before presenting anything.
+Pairing discovers the educator ID from fresh provider configuration. Moodle
+4.1 uses the parameter-free own-profile page. Pairing selects no course.
+It persists one exact site and account; repeating it with that account is
+safe. A different account is refused and cannot replace the pairing.
+With multiple paired sites, pass `--site` to select the intended account.
 
-## Write governance (no exceptions)
+If no attended helper session exists, resolve private Moodle sign-in setup
+first. The CLI refuses to launch a substitute browser. Do not use the old
+Python form-login module. Native Moodle onboarding still needs release
+qualification; an already authenticated profile is not first-use proof.
 
-`MoodleSession.write` is a low-level HTTPS method. It does not check the
-operation catalog, Plan/Edit mode, or an educator approval. Do not call it
-for production course writes until it is behind those gates. A working VM
-browser path must keep its own approval and provider readback checks.
+## Select courses through conversation
 
-1. Frozen plan first: op id (UUID), tool, exact args, before-state
-   snapshot, expected after-state, frozen readback.
-2. Dispatch checks the op id against the used-op set; a repeat is
-   refused, never retried.
-3. Run the frozen readback and assert the expected fields. The
-   readback digest goes in the journal entry.
-4. Journal every op (append-only JSONL): op id, tool, args digest,
-   receipt, verification status. Never edit entries; supersede with
-   new ones.
-5. Undo availability is declared before dispatch. Where the provider
-   offers no inverse, say so before dispatch, never after. For forum
-   discussions on Moodle 5.2 the undo is the form-path delete of the
-   discussion's first post.
+Ask the assistant to use a course name, course ID, or course link. Discover
+courses with `bin/morrow moodle courses`. Follow `next_offset` with `--offset`
+until `complete` is true. The page size is a transport bound; there is no
+course-count limit. Resolve ambiguous names before a write. Do not ask the
+educator to pair each course or manage a course list in the Bridge.
 
-## Expiry handling (the state machine, not an error message)
+Read `bin/morrow moodle catalog` to get the pinned public operation schemas.
+Use `read --operation KEY --arguments JSON` for reads. The read command
+refuses writes. Results pass through the complete private roster and
+encrypted learner vault before the assistant sees them. Use issued learner
+labels; never invent a label or send a raw learner identity.
 
-- DETECT: envelope `servicerequireslogin` (or the older
-  `requireloginerror`/`sessionerror`), or a 30x to `/login` on page
-  requests. `invalidsesskey` means refresh the sesskey from a live
-  page and retry once; it is not expiry.
-- HALT: stop dispatching writes immediately. Quarantine in-flight
-  ops; never retry them blind against a dead session.
-- NOTIFY: plain language; which connection, what is paused, nothing lost.
-- RE-SIGN-IN: run the bootstrap again.
-- VERIFIED RESUME: the principal after re-auth must match the stored
-  principal (id + username). Replay quarantined ops only with fresh
-  per-action approval.
+## Plan and Edit modes
 
-## What this lane never does
+`bin/morrow moodle mode status` shows the account's mode. Change it only when
+the educator asks: `mode set plan` or `mode set edit`. Plan is the default.
+Account modes use the full site and educator identity; another Canvas or
+Moodle account does not inherit the mode. Conversation overrides use
+`MORROW_CONVERSATION_ID` when supplied.
 
-- Never mint a persistent API token from the session
-  (no session-to-token escalation, ever).
-- Never exceed the educator's own account permissions.
-- Never write cookie or sesskey values to disk, logs, or chat.
-  The journal records shapes, statuses, lengths, and IDs only.
+For Plan mode, read the target and use its current `snapshot_digest` as
+`expected_digest`. Run `plan --operation KEY --arguments JSON`. Show the
+returned course, change, complete values, and undo disclosure. Keep the
+returned operation ID. After the educator approves in chat, run
+`approve --op-id UUID --authorization "their exact reply"`. Never fabricate
+approval or require a special phrase. No approval-channel bypass is exposed.
+
+In Edit mode, run `execute --operation KEY --arguments JSON` with a fresh
+digest. The existing admission, scope, halt, privacy, claim, and verification
+gates still apply. A changed source refuses before approval is consumed.
+Immutable learner tokens bind labels to the identities the plan saw.
+
+Only `ok: true` with `verification.status: verified` proves a write. A lost
+response or failed readback remains uncertain. Inspect the operation journal
+and current provider state; never replay its operation ID or assume that a
+new ID makes a duplicate safe. A changed account, site, login, or course
+refuses operation preparation. Sign in again through the same private helper
+and verify the pinned account before new work.
+
+## Capability boundaries
+
+The canonical registry contains 249 public operations and one internal
+privacy roster operation. Presence in the catalog is not proof that a
+school enables that operation. Roles, plugins, site version, native forms,
+and feature settings still control access. Report a provider refusal and
+prepare a draft when needed. Do not bypass the governed path with UI writes.
+Private attachments, broader native provider qualification, and first-use
+Moodle helper setup remain release gates. Historical Python HTTPS proof
+stays in the source repository; its authentication modules do not ship.

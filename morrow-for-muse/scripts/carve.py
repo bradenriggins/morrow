@@ -76,6 +76,8 @@ DEV_ONLY = (
     "DEPLOY.md", "bin/scheduler.py", "bin/scheduler_selftest.py",
     "bin/keepalive-canvas.sh", "bin/keepalive-moodle.sh",
     "moodle/session_selftest.py",
+    "moodle/session.py", "moodle/login.py", "moodle/probe.py",
+    "moodle/keepalive.py", "moodle/reauth.py",
     # live-test drivers: they need a real tenant and name it
     "dispatch/live_proof_modes.py", "dispatch/live_proof_new_quiz.py",
     "dispatch/live_proof_write_hardening.py", "failures/live_verify.py",

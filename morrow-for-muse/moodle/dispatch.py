@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from dispatch import admission
 from dispatch import executor
 from moodle.browser_operations import MoodleAdapterLoader
-from moodle.session import MoodleLaneError
+from moodle.contracts import MoodleLaneError
 from privacy.boundary import SourceMcpPrivacyBoundary, moodle_source_history_available
 from privacy.executor_wire import _source_vault_path
 from privacy.core import LearnerVault, resolve_learner_tokens

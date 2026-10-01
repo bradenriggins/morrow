@@ -45,6 +45,8 @@ if DEPLOY_DIR not in sys.path:
     sys.path.insert(0, DEPLOY_DIR)
 
 _COMMANDS = {
+    "moodle": ("moodle/cli.py",
+               "pair the account, find courses, and run governed Moodle operations"),
     "dispatch": ("dispatch/executor.py",
                  "execute manifest entries and catalog operations"),
     "audit": ("catalog/a11y/runner.py",
