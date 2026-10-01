@@ -25,10 +25,13 @@ GOVERNED = "--governed-execution" in sys.argv[4:]
 LEGACY_GOVERNED = "--legacy-governed" in sys.argv[4:]
 RESTART_PROOF = "--process-restart-proof" in sys.argv[4:]
 PREFLIGHT_PROOF = "--preflight-proof" in sys.argv[4:]
+LABEL_PROOF = "--learner-approval-proof" in sys.argv[4:]
 report = {"scope": "public-page adapter staging only" if PUBLIC_STAGING else "private fixture staging and provider read", "test": "morrow.moodle-adapter-loader.real-helper.v1", "checks": {}, "provider_calls": 0}
 fixture_mode = 'modern'
 effect_mode = 'normal'
 effects = 0
+section_name = 'Welcome'
+learner_row = {'id': 17, 'name': 'Aster Sample', 'email': 'aster@example.test'}
 provider_state = {'course': {'id': 2, 'fullname': 'Fixture course'},
                   'section': [{'id': 10, 'number': 0, 'visible': True, 'hasrestrictions': False, 'component': None, 'cmlist': [19]}],
                   'cm': [{'id': 19, 'name': 'Essay by Aster Sample', 'module': 'page', 'sectionid': 10,
@@ -45,7 +48,7 @@ class Fixture(BaseHTTPRequestHandler):
 
     def do_GET(self):
         report['fixture_gets'] = report.get('fixture_gets', 0) + 1
-        course_page = '/course/view.php' in self.path or '/user/index.php' in self.path
+        course_page = any(path in self.path for path in ('/course/view.php', '/user/index.php', '/course/editsection.php'))
         cfg = {'wwwroot': base, 'userId': 43 if fixture_mode == 'wrong_account' else 42,
                'sesskey': 'DUMMY_BROWSER_ONLY', 'currentlogin': 123456, 'courseId': 2 if course_page else 1,
                'courseContextId': 200}
@@ -78,6 +81,10 @@ class Fixture(BaseHTTPRequestHandler):
         body_id = 'page-user-profile' if '/user/profile.php' in self.path else 'page-course-view'
         content = ('<!doctype html><body id="%s" class="course-%s"><h1>Fixture course</h1><script>M.cfg=%s;</script>%s</body>' %
                    (body_id, cfg['courseId'] if course_page else 2, json.dumps(cfg), footer)).encode()
+        if '/course/editsection.php' in self.path:
+            import html
+            form = '<form method="post" action="%s/course/editsection.php?id=10"><input type="hidden" name="id" value="10"><input type="hidden" name="course" value="2"><input type="hidden" name="sesskey" value="DUMMY_BROWSER_ONLY"><input name="name" value="%s"><textarea name="summary_editor[text]">Overview</textarea><input type="hidden" name="summary_editor[format]" value="1"><input type="submit" name="submitbutton" value="Save changes"></form>' % (base, html.escape(section_name, quote=True))
+            content = content.replace(b'</body>', form.encode() + b'</body>')
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'none'")
@@ -86,9 +93,19 @@ class Fixture(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_POST(self):
-        global effects
+        global effects, section_name
         report["provider_calls"] += 1
         body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        if '/course/editsection.php' in self.path:
+            from urllib.parse import parse_qs
+            form = parse_qs(body.decode())
+            section_name = form['name'][0]
+            effects += 1
+            self.send_response(303)
+            self.send_header('Location', base + '/course/editsection.php?id=10')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
         if '/admin/roles/check.php' in self.path:
             caps = ['moodle/site:accessallgroups', 'moodle/course:enrolreview', 'moodle/course:viewsuspendedusers', 'moodle/user:viewdetails']
             html = '<form method="post" action="%s/admin/roles/check.php?contextid=200"><select name="reportuser"><option selected value="42">Educator</option></select></form><table id="explaincaps">%s</table>' % (base, ''.join('<tr class="rolecap yes"><td><span class="cap-name">%s</span></td><td>Yes</td></tr>' % cap for cap in caps))
@@ -110,7 +127,7 @@ class Fixture(BaseHTTPRequestHandler):
                     return
                 data = json.dumps(provider_state)
             elif method == 'core_table_get_dynamic_table_content':
-                data = {'html': '<div data-region="core_table/dynamic" data-table-component="core_user" data-table-handler="participants" data-table-uniqueid="user-index-participants-2" data-table-total-rows="1"><table><tr><td><input class="usercheckbox" name="user17"></td><td>Aster Sample</td><td>aster@example.test</td></tr></table></div>'}
+                data = {'html': '<div data-region="core_table/dynamic" data-table-component="core_user" data-table-handler="participants" data-table-uniqueid="user-index-participants-2" data-table-total-rows="1"><table><tr><td><input class="usercheckbox" name="user%d"></td><td>%s</td><td>%s</td></tr></table></div>' % (learner_row['id'], learner_row['name'], learner_row['email'])}
             else:
                 data = {'courses': [{'id': 2, 'fullname': 'Fixture course'}]}
             payload = json.dumps([{"error": False, "data": data}]).encode()
@@ -135,6 +152,7 @@ try:
     for name in ("MORROW_USER_ID", "MORROW_CONVERSATION_ID", "LOGIN_HELPER_PRODUCTION", "LOGIN_HELPER_TLS_CERT", "LOGIN_HELPER_TLS_KEY"):
         os.environ.pop(name, None)
     os.environ.update(MORROW_HOME=str(root / 'state'), MORROW_TREE_STATE_DIR=str(root / 'tree'), MORROW_HELPER_ENV_FILE=str(root / 'empty-env'), LOGIN_HELPER_PROFILE_DIR=str(root / 'profile'), HELPER_AUTH_TOKEN='a' * 64, CHROMIUM_BIN=BINARY)
+    os.environ['MORROW_SOURCE_VAULT_PATH'] = str(root / 'state' / 'fixture-learner-vault.json')
     os.environ['LOGIN_HELPER_OWN_BROWSER'] = '1'
     for candidate in random.sample(range(12000, 22000), 10000):
         probes = [socket.socket(), socket.socket()]
@@ -409,6 +427,28 @@ print(json.dumps({'replay_refused':result.get('ok') is False,'journal_unchanged'
                 check(mode + '_new_process_no_effect', effects == before_effects)
         check('all_governed_outputs_secret_free', 'DUMMY_BROWSER_ONLY' not in json.dumps([read_result, write_result, record]))
         report['fixture_effects'] = effects
+        if LABEL_PROOF:
+            fixture_mode = 'modern'
+            effect_mode = 'normal'
+            section_read = 'moodle.form.course.editsection.read.v1'
+            section_write = 'moodle.form.course.editsection.write.v1'
+            before = dispatcher.dispatch(section_read, {'course_id': 2, 'section_id': 10}, op_id=str(uuid.uuid4()))
+            report['section_read'] = before
+            check('native_section_read_ready', before.get('ok') is True)
+            args = {'course_id': 2, 'section_id': 10, 'name': 'Section for Student A1', 'expected_digest': before['snapshot_digest']}
+            op_id = str(uuid.uuid4())
+            plan = dispatcher.plan(section_write, args, op_id=op_id)
+            approval = sign_approval(mint_approval(dispatcher.descriptor(section_write, args), args, base, target_identity=plan.target_identity), 'Rename this disposable section.', channel='driver')
+            from privacy.executor_wire import _source_vault_path
+            for path in (Path(_source_vault_path()), Path(_source_vault_path() + '.key')):
+                assert path.is_relative_to(root)
+                if path.exists():
+                    path.unlink()
+            learner_row = {'id': 18, 'name': 'Bram Sample', 'email': 'bram@example.test'}
+            provider_state['cm'][0]['name'] = 'Essay by Bram Sample'
+            current = dispatcher.dispatch(read_key, {'course_id': 2}, op_id=str(uuid.uuid4()))
+            check('new_learner_receives_reissued_label', 'Student A1' in json.dumps(current) and 'Bram Sample' not in json.dumps(current))
+            no_effect('old_approval_reissued_label_refused', lambda: dispatcher.dispatch(section_write, args, op_id=op_id, plan=plan, approval=approval, require_educator_channel=False))
     report['passed'] = True
 except Exception as exc:
     report['passed'] = False
