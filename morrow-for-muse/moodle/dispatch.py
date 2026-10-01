@@ -207,8 +207,8 @@ class MoodleDispatcher:
             if is_write and plan is not None:
                 if plan.before_state_digest != arguments.get('expected_digest'):
                     raise executor.MissingFrozenPlan('Moodle plan digest differs from the approved arguments')
-                identity = self._invoke(_STATE, self._request(_STATE,
-                    {'course_id': arguments['course_id']}, binding, mode='check_course'))
+                identity = self._private_read(_STATE,
+                    {'course_id': arguments['course_id']}, binding, mode='check_course')
                 if (identity.get('ok') is not True or
                         str(identity['data']['id']) != str(plan.target_identity.get('course_id')) or
                         identity['data']['name'] != plan.target_identity.get('course_name')):
