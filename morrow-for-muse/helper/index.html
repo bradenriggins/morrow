@@ -53,7 +53,7 @@
     padding: 6px 14px; border-radius: 999px;
     background: #3a4166; color: var(--muted);
     border: 1px solid #4a5280;
-    white-space: nowrap;
+    max-width: 100%; white-space: normal;
   }
   #badge.in { background: rgba(123, 201, 111, 0.15); color: var(--green); border-color: var(--green); }
   #badge.need { background: rgba(240, 184, 96, 0.12); color: var(--amber); border-color: var(--amber); }
@@ -128,12 +128,14 @@
     border-radius: var(--radius);
     border: 1px solid #2a3160;
     overflow: hidden;
+    height: clamp(280px, 60vh, 680px);
+    touch-action: none;
     background: #fff;
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
   }
-  #stage:focus { border-color: var(--morrow-blue); box-shadow: 0 0 0 2px var(--morrow-blue), 0 8px 40px rgba(0,0,0,0.45); }
+  #stage:focus, #stage.typing { border-color: var(--morrow-blue); box-shadow: 0 0 0 2px var(--morrow-blue), 0 8px 40px rgba(0,0,0,0.45); }
   #screen {
-    display: block; width: 100%; height: auto; background: #fff;
+    display: block; position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #fff;
     user-select: none; -webkit-user-select: none; touch-action: none;
   }
   /* Before the first screenshot arrives: a blank page-shaped stage, not a broken image. */
@@ -149,6 +151,12 @@
     padding: 10px 16px 0; max-width: 900px; margin: 0 auto;
   }
   #keys .btn:focus-visible { outline: 3px solid var(--morrow-lime); outline-offset: 2px; }
+  #stage.expanded { height: max(400px, 82vh); }
+  #keyboard { position: fixed; width: 1px; height: 1px; opacity: 0; left: 0; top: 0; padding: 0; border: 0; pointer-events: none; }
+  #view-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 auto 12px; max-width: 1600px; width: 100%; }
+  #input-status { flex: 1 1 260px; color: var(--muted); font-size: 13px; }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .btn:focus-visible { outline: 3px solid var(--morrow-lime); outline-offset: 2px; }
   footer {
     text-align: center; font-size: 11.5px; color: #6b739e;
     padding: 10px 0 14px;
@@ -189,17 +197,28 @@
 </div>
 
 <main>
+  <div id="view-controls" aria-label="Browser view controls">
+    <button id="fit-fields" class="btn" type="button">Fit sign-in fields</button>
+    <button id="fit" class="btn" type="button">Fit full page</button>
+    <button id="zoom-out" class="btn" type="button" aria-label="Zoom out">−</button>
+    <span id="zoom-level" aria-live="polite">100%</span>
+    <button id="zoom-in" class="btn" type="button" aria-label="Zoom in">+</button>
+    <button id="expand" class="btn" type="button" aria-pressed="false">Expand view</button>
+    <span id="input-status" role="status" aria-live="polite"></span>
+    <button id="resume" class="btn" type="button" hidden>Resume input</button>
+  </div>
+  <textarea id="keyboard" aria-label="Type privately into the sign-in page" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
   <div id="stage" tabindex="0" aria-label="Your school's sign-in page" aria-describedby="keys-help">
     <img id="screen" alt="Live LMS sign-in page" draggable="false">
   </div>
   <div id="keys">
-    <span id="keys-help">While the page has a blue outline, every key you press, Tab included, goes to the sign-in page. Press <b>Esc</b> to leave it and use this page. Scroll with your mouse wheel, trackpad, or one finger.</span>
+    <span id="keys-help">Click the page to type. Tab moves between sign-in fields. Press <b>Esc</b> to use these controls. Scroll with your wheel or trackpad. Hold Shift and drag to pan a zoomed page.</span>
     <button id="capture" class="btn" type="button">Type into the sign-in page</button>
   </div>
   <div id="hint"><b>Click the page, then type.</b> Sign in as you normally would, including SSO and MFA. If your school offers <b>&ldquo;Stay signed in&rdquo;</b>, leave it on. Your input goes directly to the private browser. Do not share credentials in chat.</div>
 </main>
 <footer>
-  Your sign-in stays in this private browser on your Muse computer. Morrow never sees your password. &middot; <a href="https://meetmorrow.app" target="_blank" rel="noopener">meetmorrow.app</a>
+  Your sign-in stays in this private browser on your Muse computer. Keep passwords in this private sign-in page. &middot; <a href="https://meetmorrow.app" target="_blank" rel="noopener">meetmorrow.app</a>
 </footer>
 
 <script>
@@ -207,406 +226,382 @@
   "use strict";
   var img = document.getElementById("screen");
   var stage = document.getElementById("stage");
+  var keyboard = document.getElementById("keyboard");
   var badge = document.getElementById("badge");
   var banner = document.getElementById("done-banner");
   var noticeEl = document.getElementById("session-notice");
   var noticeBody = document.getElementById("session-notice-body");
   var urlEl = document.getElementById("url");
   var errEl = document.getElementById("err");
-
-  // W3-P0-7 / M4M-F2: the server injects this tree's launch token
-  // into the __HELPER_TOKEN__ placeholder ONLY when this load carries
-  // a valid single-use page code (?code=, burned on use). Every
-  // protected endpoint (all POSTs, plus /screenshot) sends it back as
-  // the X-Helper-Token header. /status stays open and needs no token.
-  // A code-less load gets an empty token: the status poll still works,
-  // but the drive calls stay idle behind the one-time-link notice.
+  var inputStatus = document.getElementById("input-status");
+  var resumeBtn = document.getElementById("resume");
+  var captureBtn = document.getElementById("capture");
   var HELPER_TOKEN = "__HELPER_TOKEN__";
   var AUTH_HEADERS = { "X-Helper-Token": HELPER_TOKEN };
-  if (!HELPER_TOKEN) {
-    var nolink = document.getElementById("nolink");
-    if (nolink) nolink.style.display = "block";
-    // Without a token nothing here can reach the sign-in page, so the
-    // stage and its keyboard controls are not offered.
-    document.querySelector("main").style.display = "none";
-  }
+  var epoch = "", exhaustedEpoch = "", stream = "", sequence = 1;
+  var blocked = true, unsupported = false, generation = 0, busy = false;
+  var queue = [], composing = false, screenshotError = "", inputError = "";
+  var lastObjUrl = null, statusUrl = "", manualView = false;
+  var view = { scale: 1, x: 0, y: 0 }, layout = null;
+  var MAX_PENDING_TEXT_BYTES = 65536;
 
-  // Repeated identical failures leave the alert text untouched, so a
-  // screen reader announces each distinct problem once, not every poll.
-  var screenshotError = "";
-  var inputError = "";
+  function randomId() {
+    var bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  }
+  function validEpoch(value) { return /^[a-f0-9]{32}$/.test(value || ""); }
+  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
   function renderError() {
     var msg = inputError || screenshotError;
-    if (!msg) {
-      errEl.style.display = "none";
-      errEl.textContent = "";
-      return;
-    }
-    if (errEl.style.display === "block" && errEl.textContent === msg) return;
-    errEl.style.display = "block";
-    errEl.textContent = msg;
+    errEl.hidden = !msg;
+    errEl.style.display = msg ? "block" : "none";
+    if (errEl.textContent !== msg) errEl.textContent = msg;
   }
-  function showErr(msg) { screenshotError = msg; renderError(); }
-  function clearErr() {
-    screenshotError = "";
+  function renderInput() {
+    var message = unsupported ? "Helper update required. Secure input is unavailable. Ask your assistant to update the helper."
+      : exhaustedEpoch === epoch && epoch ? "Input session capacity reached. Ask your assistant to restart the helper and keep the browser profile."
+      : blocked ? "Input paused. Review the current page, then select Resume input. Unconfirmed input will not be sent again."
+      : busy || queue.length ? "Sending input…" : "Ready to type";
+    inputStatus.textContent = message;
+    inputStatus.dataset.state = blocked ? "blocked" : busy || queue.length ? "sending" : "ready";
+    resumeBtn.hidden = !blocked || unsupported;
+    resumeBtn.disabled = busy || unsupported || !validEpoch(epoch) || exhaustedEpoch === epoch;
+    captureBtn.disabled = blocked;
+    keyboard.disabled = blocked;
+  }
+  function block(message) {
+    generation += 1;
+    queue = [];
+    keyboard.value = "";
+    composing = false;
+    blocked = true;
+    inputError = message || "Input delivery was not confirmed. Review the page before resuming.";
+    renderInput();
     renderError();
   }
-  function inputFailure(e, releasing) {
-    inputError = e.status === 403
-      ? "This sign-in link has expired. Ask your agent for a fresh one-time link."
-      : releasing
-        ? "The helper could not release the keyboard. Keep this page open; it will retry."
-        : "The helper did not confirm your input. Wait for it to reconnect, then try again.";
-    renderError();
-  }
-  function failureMessage(e) {
-    if (e.invalidImage) {
-      return "The helper sent an unreadable image. Keep this page open; " +
-        "it will try again.";
-    }
-    if (!e.status) {
-      return "Cannot reach the Morrow helper. It may be restarting; keep " +
-        "this page open and it will reconnect on its own.";
-    }
-    if (e.status === 403) {
-      return "This page is no longer connected to the helper (HTTP 403). " +
-        "Ask your agent for a fresh one-time sign-in link and open it.";
-    }
-    if (e.status === 429 || e.status === 503) {
-      return "The helper is busy (HTTP " + e.status + "). This page slows " +
-        "down and tries again on its own.";
-    }
-    return "The helper could not show the school page (HTTP " + e.status +
-      "). Its browser may be restarting; keep this page open and it " +
-      "will try again.";
-  }
-
-  // --- screenshot stream: every 500ms, one request at a time ---
-  // A failure is shown with its HTTP status and retried after a pause
-  // (the server's Retry-After when it sends one), so a busy or
-  // restarting helper is not flooded by this page.
-  var SHOT_INTERVAL_MS = 500;
-  var lastObjUrl = null;
-  function refresh() {
-    fetch("/screenshot", { cache: "no-store", headers: AUTH_HEADERS })
-      .then(function (r) {
-        if (!r.ok) {
-          var failure = new Error("HTTP " + r.status);
-          failure.status = r.status;
-          failure.retryAfter = parseInt(r.headers.get("Retry-After"), 10) || 0;
-          throw failure;
-        }
-        return r.blob();
-      })
-      .then(function (blob) {
-        var nextUrl = URL.createObjectURL(blob);
-        var nextImage = new Image();
-        nextImage.src = nextUrl;
-        return nextImage.decode().then(function () {
-          img.src = nextUrl;
-          if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
-          lastObjUrl = nextUrl;
-          clearErr();
-          setTimeout(refresh, SHOT_INTERVAL_MS);
-        }).catch(function () {
-          URL.revokeObjectURL(nextUrl);
-          var failure = new Error("unreadable image");
-          failure.invalidImage = true;
-          throw failure;
-        });
-      })
-      .catch(function (e) {
-        showErr(failureMessage(e));
-        setTimeout(refresh, Math.max(2000, (e.retryAfter || 0) * 1000));
-      });
-  }
-  // M4M-F2: without a token the screenshot endpoint answers 403;
-  // stay idle instead of error-spamming until the educator opens a
-  // one-time link. The /status poll below still runs either way.
-  if (HELPER_TOKEN) {
-    refresh();
-  }
-
-  // --- login status ---
-  function pollStatus() {
-    fetch("/status", { cache: "no-store" })
-      .then(function (r) { return r.json(); })
-      .then(function (st) {
-        urlEl.textContent = st.url || "";
-        // W6-P1-S2: surface a pending educator notification (session
-        // death paused ops) as a prominent banner. textContent only:
-        // the notice text is our own file content, never page HTML.
-        if (st.session_notice) {
-          noticeBody.textContent = st.session_notice;
-          noticeEl.style.display = "block";
-        } else {
-          noticeEl.style.display = "none";
-          noticeBody.textContent = "";
-        }
-        if (st.chromium_alive === false) {
-          badge.textContent = "browser not running. The helper will restart it; no need to sign in again";
-          badge.className = "need";
-          banner.style.display = "none";
-        } else if (st.logged_in) {
-          // W6-P2-A4: show which Canvas account Morrow is connected to.
-          // The name is the account pinned at first sign-in; it is not
-          // the live account in the tab. The executor checks the
-          // signed-in account on every Canvas task and pauses if it is
-          // not this one.
-          if (st.principal_name) {
-            badge.textContent = "Morrow is connected to " + st.principal_name;
-          } else {
-            badge.textContent = "signed in";
-          }
-          badge.className = "in";
-          banner.style.display = "block";
-        } else {
-          var onLogin = st.session_state === "signed_out" || st.session_state === "signing_in" || (st.url || "").indexOf("/login") !== -1;
-          if (st.starting === true) {
-            badge.textContent = "starting\u2026";
-            badge.className = "";
-          } else {
-            badge.textContent = onLogin ? "sign in needed" : "checking\u2026";
-            badge.className = onLogin ? "need" : "";
-          }
-          banner.style.display = "none";
-        }
-      })
-      .catch(function () { badge.textContent = "status unknown"; badge.className = ""; });
-  }
-  setInterval(pollStatus, 2000);
-  pollStatus();
-
-  // --- coordinate mapping: displayed px -> page px ---
-  // The screenshot is scaled to fit this page; every pointer position is
-  // mapped back to the remote page's pixels and clamped to the image, so
-  // the helper never receives a point outside the remote viewport.
-  function pageScale() {
-    var r = img.getBoundingClientRect();
-    if (!img.naturalWidth || !r.width || !r.height) return null;
-    return { rect: r, x: img.naturalWidth / r.width,
-             y: img.naturalHeight / r.height };
-  }
-  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
-  function toPage(e) {
-    var s = pageScale();
-    if (!s) return null;
-    return {
-      x: clamp(Math.round((e.clientX - s.rect.left) * s.x), 0, img.naturalWidth - 1),
-      y: clamp(Math.round((e.clientY - s.rect.top) * s.y), 0, img.naturalHeight - 1)
-    };
-  }
-
-  function post(path, payload) {
-    if (!HELPER_TOKEN) return Promise.reject(new Error("missing sign-in token"));
+  function request(path, payload) {
+    if (!HELPER_TOKEN) return Promise.reject(new Error("missing helper link"));
     var controller = new AbortController();
-    var timeout = setTimeout(function () { controller.abort(); }, 5000);
+    var timer = setTimeout(function () { controller.abort(); }, path === "/input/batch" ? 15000 : 7000);
     return fetch(path, {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "Content-Type": "application/json",
-                 "X-Helper-Token": HELPER_TOKEN },
-      body: JSON.stringify(payload)
-    }).then(function (response) {
-      if (!response.ok) {
-        var failure = new Error("HTTP " + response.status);
-        failure.status = response.status;
-        failure.retryAfter = Math.min(5, parseInt(response.headers.get("Retry-After"), 10) || 0);
-        throw failure;
+      method: payload === undefined ? "GET" : "POST", cache: "no-store", signal: controller.signal,
+      headers: payload === undefined ? AUTH_HEADERS : { "Content-Type": "application/json", "X-Helper-Token": HELPER_TOKEN },
+      body: payload === undefined ? undefined : JSON.stringify(payload)
+    }).then(async function (r) {
+      if (!r.ok) {
+        var e = new Error("HTTP " + r.status);
+        e.status = r.status;
+        if (r.status === 429) {
+          try { e.capacity = (await r.json()).error === "input session capacity reached; restart helper"; } catch (_) {}
+        }
+        throw e;
       }
-      return response;
-    }).finally(function () { clearTimeout(timeout); });
+      return r;
+    }).finally(function () { clearTimeout(timer); });
   }
-  function postMouse(kind, p, button) {
-    if (!p) return;
-    post("/input/mouse", { kind: kind, x: p.x, y: p.y, button: button || "left" })
-      .catch(function (e) { inputFailure(e, false); });
-  }
-  var keyQueue = Promise.resolve();
-  function postKey(kind, key, code, keyCode, modifiers, released) {
-    // HTTP handlers can run concurrently. Keep key down/up in their original order.
-    keyQueue = keyQueue.then(function () {
-      function send() {
-        return post("/input/key", { kind: kind, key: key, code: code,
-          keyCode: keyCode, modifiers: modifiers }).then(function () {
-          if (released) released();
-          inputError = "";
-          renderError();
-        }).catch(function (e) {
-          inputFailure(e, kind === "up");
-          if (kind === "up" && e.status !== 403) {
-            // Releasing a key is safe to repeat after an uncertain response.
-            return new Promise(function (done) {
-              setTimeout(done, Math.max(500, (e.retryAfter || 0) * 1000));
-            }).then(send);
-          }
-          if (kind === "down") releaseKeys();
-        });
+  async function sendBatch(operations, currentGeneration) {
+    var body = { epoch: epoch, stream_id: stream, sequence: sequence, operations: operations };
+    var result;
+    for (var attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        result = await (await request("/input/batch", body)).json();
+        break;
+      } catch (e) {
+        if (currentGeneration !== generation) throw e;
+        if (e.status === 404 || e.status === 405 || e.status === 501) unsupported = true;
+        if (e.capacity) exhaustedEpoch = body.epoch;
+        if (e.status || attempt === 1) throw e;
       }
-      return send();
-    });
+    }
+    if (!result || result.ok !== true || result.sequence !== body.sequence || typeof result.replayed !== "boolean") {
+      throw new Error("Input acknowledgement is invalid");
+    }
+    if (currentGeneration !== generation || body.epoch !== epoch) throw new Error("Helper changed during input");
+    sequence += 1;
   }
-
-  // --- scrolling: wheel, trackpad, and one-finger swipes ---
-  // Motion is summed and sent at most every 100ms, one request at a time,
-  // so a fast trackpad or swipe stays inside the helper's rate limit.
-  // The helper refuses steps larger than MAX_WHEEL_DELTA page pixels.
-  var WHEEL_INTERVAL_MS = 100;
-  var MAX_WHEEL_DELTA = 5000;
-  var wheelPending = null;
-  var wheelTimer = null;
-  var wheelInFlight = false;
-  function queueWheel(p, dx, dy) {
-    if (!p) return;
-    if (!wheelPending) wheelPending = { x: p.x, y: p.y, dx: 0, dy: 0 };
-    wheelPending.x = p.x;
-    wheelPending.y = p.y;
-    wheelPending.dx += dx;
-    wheelPending.dy += dy;
-    if (!wheelTimer) wheelTimer = setTimeout(flushWheel, WHEEL_INTERVAL_MS);
+  async function drain() {
+    if (busy || blocked) return;
+    busy = true;
+    var currentGeneration = generation;
+    renderInput();
+    try {
+      while (queue.length && !blocked && currentGeneration === generation) {
+        var item = queue.shift();
+        if (item.type === "text" || item.type === "key") await sendBatch([item], currentGeneration);
+        else await request(item.path, item.payload);
+      }
+    } catch (e) {
+      if (currentGeneration === generation) block(e.status === 403
+        ? "This sign-in link expired. Ask your assistant for a fresh one-time link."
+        : "Input delivery was not confirmed. Review the page before resuming.");
+    } finally {
+      busy = false;
+      renderInput();
+      if (queue.length && !blocked) void drain();
+    }
   }
-  function flushWheel() {
-    wheelTimer = null;
-    if (wheelInFlight) {
-      wheelTimer = setTimeout(flushWheel, WHEEL_INTERVAL_MS);
+  function enqueue(item) {
+    if (blocked) return;
+    queue.push(item);
+    renderInput();
+    void drain();
+  }
+  function queueText(text) {
+    if (blocked || !text) return;
+    var encoder = new TextEncoder();
+    var pending = queue.reduce(function (count, item) { return count + (item.type === "text" ? encoder.encode(item.text).length : 0); }, 0);
+    if (pending + encoder.encode(text).length > MAX_PENDING_TEXT_BYTES) {
+      block("Too much input is pending. Review the page before resuming.");
       return;
     }
-    var w = wheelPending;
-    wheelPending = null;
-    if (!w) return;
-    var dx = clamp(Math.round(w.dx), -MAX_WHEEL_DELTA, MAX_WHEEL_DELTA);
-    var dy = clamp(Math.round(w.dy), -MAX_WHEEL_DELTA, MAX_WHEEL_DELTA);
-    if (!dx && !dy) return;
-    wheelInFlight = true;
-    post("/input/wheel", { x: w.x, y: w.y, deltaX: dx, deltaY: dy })
-      .catch(function (e) { inputFailure(e, false); })
-      .finally(function () { wheelInFlight = false; });
-  }
-  img.addEventListener("wheel", function (e) {
-    e.preventDefault();
-    var s = pageScale();
-    if (!s) return;
-    // deltaMode 1 is lines, 2 is pages; the remote page takes pixels.
-    var unit = e.deltaMode === 1 ? 40 : (e.deltaMode === 2 ? img.naturalHeight : 1);
-    queueWheel(toPage(e), e.deltaX * unit * s.x, e.deltaY * unit * s.y);
-  }, { passive: false });
-
-  // --- mouse: click to focus fields, drag-free simple clicks ---
-  img.addEventListener("mousedown", function (e) {
-    e.preventDefault();
-    stage.focus({ preventScroll: true });
-    postMouse("pressed", toPage(e), e.button === 2 ? "right" : "left");
-  });
-  img.addEventListener("mouseup", function (e) {
-    postMouse("released", toPage(e), e.button === 2 ? "right" : "left");
-  });
-  var lastMove = 0;
-  img.addEventListener("mousemove", function (e) {
-    var now = Date.now();
-    if (now - lastMove < 60) return; // throttle hover traffic
-    lastMove = now;
-    postMouse("moved", toPage(e));
-  });
-  img.addEventListener("contextmenu", function (e) { e.preventDefault(); });
-
-  // Touch: a tap is a click; a one-finger drag past TAP_SLOP_PX scrolls
-  // the remote page the way the finger moves.
-  var TAP_SLOP_PX = 8;
-  var touch = null;
-  img.addEventListener("touchstart", function (e) {
-    e.preventDefault();
-    if (e.touches.length !== 1) { touch = null; return; }
-    var t = e.touches[0];
-    touch = { startX: t.clientX, startY: t.clientY,
-              lastX: t.clientX, lastY: t.clientY, moved: false };
-  }, { passive: false });
-  img.addEventListener("touchmove", function (e) {
-    e.preventDefault();
-    if (!touch || e.touches.length !== 1) return;
-    var t = e.touches[0];
-    if (!touch.moved && Math.abs(t.clientX - touch.startX) < TAP_SLOP_PX
-        && Math.abs(t.clientY - touch.startY) < TAP_SLOP_PX) return;
-    touch.moved = true;
-    var s = pageScale();
-    if (s) {
-      queueWheel(toPage(t), (touch.lastX - t.clientX) * s.x,
-                 (touch.lastY - t.clientY) * s.y);
+    var chunk = "";
+    for (var character of text) {
+      if (chunk && (chunk.length + character.length > 4096 || encoder.encode(chunk + character).length > 8192)) {
+        appendText(chunk); chunk = "";
+      }
+      chunk += character;
     }
-    touch.lastX = t.clientX;
-    touch.lastY = t.clientY;
-  }, { passive: false });
-  img.addEventListener("touchend", function (e) {
+    if (chunk) appendText(chunk);
+    renderInput();
+    void drain();
+  }
+  function appendText(text) {
+    var last = queue[queue.length - 1];
+    if (last && last.type === "text" && last.text.length + text.length <= 4096 && new TextEncoder().encode(last.text + text).length <= 8192) last.text += text;
+    else queue.push({ type: "text", text: text });
+  }
+  function captureText() {
+    if (composing) return;
+    var text = keyboard.value;
+    keyboard.value = "";
+    queueText(text);
+  }
+  keyboard.addEventListener("input", function (e) { if (!e.isComposing) captureText(); });
+  keyboard.addEventListener("compositionstart", function () { composing = true; });
+  keyboard.addEventListener("compositionend", function () { composing = false; captureText(); });
+  keyboard.addEventListener("paste", function (e) {
     e.preventDefault();
-    if (touch && !touch.moved) {
-      stage.focus({ preventScroll: true });
-      var p = toPage({ clientX: touch.startX, clientY: touch.startY });
-      postMouse("pressed", p, "left");
-      postMouse("released", p, "left");
-    }
-    touch = null;
-  }, { passive: false });
-  img.addEventListener("touchcancel", function () { touch = null; });
+    queueText(e.clipboardData ? e.clipboardData.getData("text/plain") : "");
+  });
+  function modifiers(e) { return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0); }
+  keyboard.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { e.preventDefault(); captureBtn.focus(); return; }
+    if (blocked || e.isComposing || e.key === "Process" || e.key === "Dead") return;
+    if (["Shift", "Control", "Alt", "Meta"].indexOf(e.key) !== -1) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "v") return;
+    if ((!e.ctrlKey && !e.metaKey && !e.altKey || e.getModifierState("AltGraph")) && Array.from(e.key).length === 1) return;
+    e.preventDefault();
+    captureText();
+    enqueue({ type: "key", key: e.key, code: e.code || "", keyCode: e.keyCode || 0, modifiers: modifiers(e) });
+  });
+  function focusKeyboard() { if (!blocked) keyboard.focus({ preventScroll: true }); }
+  keyboard.addEventListener("focus", function () { stage.classList.add("typing"); });
+  keyboard.addEventListener("blur", function () { stage.classList.remove("typing"); });
+  stage.addEventListener("focus", focusKeyboard);
+  captureBtn.addEventListener("click", focusKeyboard);
 
-  // --- keyboard: forward every key while the stage has focus ---
-  // Tab goes to the remote page too (username to password). Escape is
-  // the one key kept here: it releases the keyboard to this page and
-  // moves focus to the "Type into the sign-in page" button, which
-  // returns to the stage. Tab and Shift+Tab also re-enter the stage.
-  var captureBtn = document.getElementById("capture");
-  var heldKeys = Object.create(null);
-  function keyModifiers(e) {
-    return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) |
-      (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+  function applyView() {
+    if (!img.naturalWidth) return;
+    var w = stage.clientWidth, h = stage.clientHeight;
+    view.x = clamp(view.x, Math.min(0, w - img.naturalWidth * view.scale), Math.max(0, (w - img.naturalWidth * view.scale) / 2));
+    view.y = clamp(view.y, Math.min(0, h - img.naturalHeight * view.scale), Math.max(0, (h - img.naturalHeight * view.scale) / 2));
+    img.style.width = img.naturalWidth + "px";
+    img.style.height = img.naturalHeight + "px";
+    img.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.scale + ")";
+    document.getElementById("zoom-level").textContent = Math.round(view.scale * 100) + "%";
   }
-  function releaseKeys() {
-    var keys = Object.keys(heldKeys);
-    keys.reverse().forEach(function (code) {
-      var key = heldKeys[code];
-      if (key.releasing) return;
-      key.releasing = true;
-      var remaining = Object.keys(heldKeys).filter(function (c) {
-        return !heldKeys[c].releasing;
-      }).map(function (c) { return heldKeys[c].key; });
-      var modifiers = (remaining.indexOf("Alt") >= 0 ? 1 : 0) |
-        (remaining.indexOf("Control") >= 0 ? 2 : 0) |
-        (remaining.indexOf("Meta") >= 0 ? 4 : 0) |
-        (remaining.indexOf("Shift") >= 0 ? 8 : 0);
-      postKey("up", key.key, key.code, key.keyCode, modifiers, function () {
-        if (heldKeys[code] === key) delete heldKeys[code];
-      });
-    });
+  function fit(fields) {
+    if (!img.naturalWidth) return;
+    var box = { x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight };
+    if (fields && layout && layout.input_epoch === epoch && layout.fields.length) {
+      var rects = layout.fields.concat(layout.actions || []);
+      var left = Math.min.apply(null, rects.map(function (r) { return r.x; }));
+      var top = Math.min.apply(null, rects.map(function (r) { return r.y; }));
+      var right = Math.max.apply(null, rects.map(function (r) { return r.x + r.width; }));
+      var bottom = Math.max.apply(null, rects.map(function (r) { return r.y + r.height; }));
+      box = { x: Math.max(0, left - 90), y: Math.max(0, top - 90), width: right - left + 180, height: bottom - top + 180 };
+    }
+    view.scale = Math.min(fields ? 2 : 1, stage.clientWidth / box.width, stage.clientHeight / box.height);
+    view.x = (stage.clientWidth - box.width * view.scale) / 2 - box.x * view.scale;
+    view.y = (stage.clientHeight - box.height * view.scale) / 2 - box.y * view.scale;
+    applyView();
   }
-  stage.addEventListener("keydown", function (e) {
+  document.getElementById("fit").addEventListener("click", function () { manualView = true; fit(false); });
+  document.getElementById("fit-fields").addEventListener("click", function () { manualView = true; fit(true); });
+  function zoom(factor) {
+    manualView = true;
+    var old = view.scale, next = clamp(old * factor, .15, 4);
+    view.x = stage.clientWidth / 2 - (stage.clientWidth / 2 - view.x) * next / old;
+    view.y = stage.clientHeight / 2 - (stage.clientHeight / 2 - view.y) * next / old;
+    view.scale = next; applyView();
+  }
+  document.getElementById("zoom-in").addEventListener("click", function () { zoom(1.25); });
+  document.getElementById("zoom-out").addEventListener("click", function () { zoom(.8); });
+  document.getElementById("expand").addEventListener("click", function () {
+    var expanded = stage.classList.toggle("expanded");
+    this.textContent = expanded ? "Reduce view" : "Expand view";
+    this.setAttribute("aria-pressed", String(expanded));
+    if (!manualView) fit(true); else applyView();
+  });
+  new ResizeObserver(function () { if (!manualView) fit(true); else applyView(); }).observe(stage);
+  function toPage(e) {
+    if (!img.naturalWidth) return null;
+    var r = stage.getBoundingClientRect();
+    var x = (e.clientX - r.left - stage.clientLeft - view.x) / view.scale;
+    var y = (e.clientY - r.top - stage.clientTop - view.y) / view.scale;
+    if (x < 0 || y < 0 || x >= img.naturalWidth || y >= img.naturalHeight) return null;
+    return { x: Math.round(clamp(x, 0, img.naturalWidth - 1)), y: Math.round(clamp(y, 0, img.naturalHeight - 1)) };
+  }
+  function mouse(kind, point, button) {
+    if (point) enqueue({ path: "/input/mouse", payload: { kind: kind, x: point.x, y: point.y, button: button || "left" } });
+  }
+  var pan = null, pointer = null;
+  stage.addEventListener("pointerdown", function (e) {
     e.preventDefault();
-    if (e.key === "Escape") {
-      releaseKeys();
-      captureBtn.focus();
+    if (!e.isPrimary || pointer || pan) return;
+    stage.setPointerCapture(e.pointerId);
+    if (e.shiftKey || e.button === 1) {
+      manualView = true;
+      pan = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+      stage.setPointerCapture(e.pointerId);
+    } else {
+      focusKeyboard();
+      pointer = { id: e.pointerId, touch: e.pointerType === "touch", x: e.clientX, y: e.clientY,
+        lastX: e.clientX, lastY: e.clientY, point: toPage(e), moved: false, button: e.button === 2 ? "right" : "left" };
+      if (!pointer.touch) mouse("pressed", pointer.point, pointer.button);
+    }
+  });
+  stage.addEventListener("pointermove", function (e) {
+    if (pointer && pointer.touch && pointer.id === e.pointerId) {
+      if (!pointer.moved && Math.abs(e.clientX - pointer.x) < 8 && Math.abs(e.clientY - pointer.y) < 8) return;
+      pointer.moved = true;
+      var point = toPage(e) || pointer.point;
+      if (point) enqueue({ path: "/input/wheel", payload: { x: point.x, y: point.y,
+        deltaX: clamp(Math.round((pointer.lastX - e.clientX) / view.scale), -5000, 5000),
+        deltaY: clamp(Math.round((pointer.lastY - e.clientY) / view.scale), -5000, 5000) } });
+      pointer.lastX = e.clientX; pointer.lastY = e.clientY;
       return;
     }
-    heldKeys[e.code || e.key] = { key: e.key, code: e.code, keyCode: e.keyCode };
-    postKey("down", e.key, e.code, e.keyCode, keyModifiers(e));
+    if (!pan) return;
+    view.x = pan.vx + e.clientX - pan.x; view.y = pan.vy + e.clientY - pan.y; applyView();
   });
-  stage.addEventListener("keyup", function (e) {
+  stage.addEventListener("pointerup", function (e) {
+    if (pan) { pan = null; return; }
+    if (!pointer || pointer.id !== e.pointerId) return;
+    if (pointer.touch && !pointer.moved) mouse("pressed", pointer.point, pointer.button);
+    if (!pointer.touch || !pointer.moved) mouse("released", toPage(e) || pointer.point, pointer.button);
+    pointer = null;
+  });
+  stage.addEventListener("pointercancel", function () {
+    var uncertain = pointer && !pointer.touch;
+    pan = null; pointer = null;
+    if (uncertain) block("Pointer input was interrupted. Review the page before resuming.");
+  });
+  stage.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  stage.addEventListener("wheel", function (e) {
     e.preventDefault();
-    if (e.key === "Escape") return;
-    var code = e.code || e.key;
-    var key = heldKeys[code];
-    if (key && key.releasing) return;
-    if (key) key.releasing = true;
-    postKey("up", e.key, e.code, e.keyCode, keyModifiers(e), function () {
-      if (heldKeys[code] === key) delete heldKeys[code];
-    });
-  });
-  stage.addEventListener("blur", releaseKeys);
-  window.addEventListener("blur", releaseKeys);
-  document.addEventListener("visibilitychange", function () {
-    if (document.hidden) releaseKeys();
-  });
-  captureBtn.addEventListener("click", function () { stage.focus({ preventScroll: true }); });
-  // Note: no blur refocus here. Clicking the badge or header must not
-  // steal focus back mid-typing; clicking the stage image refocuses.
+    if (e.ctrlKey || e.metaKey) { zoom(e.deltaY < 0 ? 1.1 : 1 / 1.1); return; }
+    var point = toPage(e);
+    if (!point) return;
+    var unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? img.naturalHeight : 1;
+    var payload = { x: point.x, y: point.y, deltaX: clamp(Math.round(e.deltaX * unit), -5000, 5000), deltaY: clamp(Math.round(e.deltaY * unit), -5000, 5000) };
+    var last = queue[queue.length - 1];
+    if (last && last.path === "/input/wheel") {
+      last.payload.deltaX = clamp(last.payload.deltaX + payload.deltaX, -5000, 5000);
+      last.payload.deltaY = clamp(last.payload.deltaY + payload.deltaY, -5000, 5000);
+      last.payload.x = payload.x; last.payload.y = payload.y;
+    } else enqueue({ path: "/input/wheel", payload: payload });
+  }, { passive: false });
 
-  if (HELPER_TOKEN) stage.focus({ preventScroll: true });
+  async function readLayout(expectedEpoch) {
+    var next = await (await request("/page/layout")).json();
+    if (!next || next.ok !== true || next.input_epoch !== expectedEpoch || !Array.isArray(next.fields) || !Array.isArray(next.actions)) throw new Error("Layout is not current");
+    return next;
+  }
+  async function displayFrame(response, expectedGeneration) {
+    var blob = await response.blob();
+    var objectUrl = URL.createObjectURL(blob), next = new Image();
+    next.src = objectUrl;
+    try { await next.decode(); } catch (e) { URL.revokeObjectURL(objectUrl); throw e; }
+    if (expectedGeneration !== generation) {
+      URL.revokeObjectURL(objectUrl);
+      throw new Error("Frame changed during refresh");
+    }
+    img.src = objectUrl;
+    await img.decode();
+    if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
+    lastObjUrl = objectUrl;
+    if (!manualView) fit(true);
+  }
+  async function refresh() {
+    if (busy || queue.length) { setTimeout(refresh, 100); return; }
+    var expectedGeneration = generation;
+    try {
+      await displayFrame(await request("/screenshot"), expectedGeneration);
+      screenshotError = "";
+    } catch (e) {
+      screenshotError = e.status === 403 ? "This sign-in link expired. Ask your assistant for a fresh one-time link."
+        : "Cannot show the private browser yet. This page will reconnect.";
+    }
+    renderError();
+    setTimeout(refresh, screenshotError ? 2000 : 500);
+  }
+  function acceptStatus(st) {
+    var nextEpoch = st.input_epoch;
+    if (!validEpoch(nextEpoch)) {
+      unsupported = true; block("The helper needs an update before secure input can work.");
+    } else if (!epoch) {
+      epoch = nextEpoch; stream = randomId(); blocked = false; unsupported = false;
+      void readLayout(epoch).then(function (next) { layout = next; if (!manualView) fit(true); }).catch(function () {});
+    } else if (epoch !== nextEpoch) {
+      epoch = nextEpoch; layout = null; manualView = false;
+      unsupported = false; block("The helper restarted. Review the current page, then resume input.");
+    }
+    if (statusUrl !== st.url) {
+      if (statusUrl && (busy || queue.length || composing || keyboard.value)) {
+        block("The sign-in page changed while input was pending. Review the page before resuming.");
+      }
+      statusUrl = st.url || ""; manualView = false; layout = null;
+      if (validEpoch(epoch)) void readLayout(epoch).then(function (next) { layout = next; if (!manualView) fit(true); }).catch(function () {});
+    }
+    urlEl.textContent = st.url || "";
+    noticeBody.textContent = st.session_notice || "";
+    noticeEl.style.display = st.session_notice ? "block" : "none";
+    badge.textContent = st.chromium_alive === false ? "browser restarting" : st.logged_in
+      ? st.principal_name ? "Morrow is connected to " + st.principal_name : "signed in"
+      : st.starting ? "starting…" : st.session_state === "checking" ? "checking…" : "sign in needed";
+    badge.className = st.logged_in ? "in" : "need";
+    banner.style.display = st.logged_in ? "block" : "none";
+    renderInput();
+  }
+  async function pollStatus() {
+    try { acceptStatus(await (await fetch("/status", { cache: "no-store" })).json()); }
+    catch (e) { badge.textContent = "status unknown"; }
+    setTimeout(pollStatus, 2000);
+  }
+  resumeBtn.addEventListener("click", async function () {
+    if (resumeBtn.disabled || busy) return;
+    resumeBtn.disabled = true;
+    var currentGeneration = generation;
+    try {
+      var first = await (await fetch("/status", { cache: "no-store" })).json();
+      if (!validEpoch(first.input_epoch) || first.input_epoch !== epoch || exhaustedEpoch === epoch) throw new Error("Status changed");
+      var nextLayout = await readLayout(first.input_epoch);
+      await displayFrame(await request("/screenshot"), currentGeneration);
+      var last = await (await fetch("/status", { cache: "no-store" })).json();
+      if (currentGeneration !== generation || last.input_epoch !== first.input_epoch || last.url !== first.url) throw new Error("Page changed");
+      layout = nextLayout; queue = []; keyboard.value = "";
+      stream = randomId(); sequence = 1; blocked = false; inputError = "";
+      renderError(); renderInput(); focusKeyboard();
+    } catch (e) { block("The page changed or could not be checked. Review it and try Resume input again."); }
+    finally { renderInput(); }
+  });
+  if (!HELPER_TOKEN) {
+    document.getElementById("nolink").style.display = "block";
+    document.querySelector("main").style.display = "none";
+  } else { void refresh(); }
+  renderInput(); void pollStatus();
 })();
 </script>
 </body>

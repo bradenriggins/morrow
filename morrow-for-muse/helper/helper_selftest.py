@@ -550,7 +550,7 @@ def main():
         ui = fh.read()
     with open(server, encoding="utf-8") as fh:
         srv = fh.read()
-    for endpoint in ("/status", "/screenshot", "/input/key",
+    for endpoint in ("/status", "/screenshot", "/input/batch",
                      "/input/mouse", "/input/wheel"):
         check("UI calls %s" % endpoint, '"%s"' % endpoint in ui)
         check("server implements %s" % endpoint,
@@ -904,15 +904,17 @@ def main():
           srv.count("self._require_auth()") >= 2)
     check("UI carries the __HELPER_TOKEN__ placeholder",
           "__HELPER_TOKEN__" in ui)
-    post_start = ui.find("function post(path, payload)")
-    post_end = ui.find("function postMouse", post_start)
+    post_start = ui.find("function request(path, payload)")
+    post_end = ui.find("async function sendBatch", post_start)
     protected_post = ui[post_start:post_end] if post_start >= 0 and post_end > post_start else ""
     check("UI sends X-Helper-Token on the protected fetches",
-          'fetch("/screenshot", { cache: "no-store", headers: AUTH_HEADERS })' in ui
+          'request("/screenshot")' in ui
           and '"X-Helper-Token": HELPER_TOKEN' in ui
           and '"X-Helper-Token": HELPER_TOKEN' in protected_post
-          and all('post("%s",' % route in ui for route in
-                  ("/input/key", "/input/mouse", "/input/wheel")))
+          and 'payload === undefined ? AUTH_HEADERS' in protected_post
+          and 'request("/input/batch", body)' in ui
+          and all('path: "%s"' % route in ui for route in
+                  ("/input/mouse", "/input/wheel")))
     check("UI /status poll stays token-free",
           'fetch("/status", { cache: "no-store" })' in ui)
     check("non-loopback LOGIN_HELPER_BIND is FATAL without opt-in",
