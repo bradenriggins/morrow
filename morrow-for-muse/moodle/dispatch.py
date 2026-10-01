@@ -11,6 +11,7 @@ from moodle.browser_operations import MoodleAdapterLoader
 from moodle.session import MoodleLaneError
 from privacy.boundary import SourceMcpPrivacyBoundary, moodle_source_history_available
 from privacy.executor_wire import _source_vault_path
+from privacy.core import LearnerVault, resolve_learner_tokens
 
 
 _ROSTER = 'moodle.native.participants_table.privacy_roster.v1'
@@ -30,6 +31,28 @@ class MoodleDispatcher:
         self.transport = transport
         self.loader = MoodleAdapterLoader(assets, registry_sha256=registry_sha256)
         self.registry_sha256 = registry_sha256
+
+    def _learner_tokens(self, arguments):
+        parsed = urlsplit(self.transport.base)
+        port = parsed.port
+        if (parsed.scheme == 'https' and port == 443) or (parsed.scheme == 'http' and port == 80):
+            port = None
+        origin = parsed.scheme + '://' + parsed.hostname.lower() + (':' + str(port) if port else '')
+        scope = {'canvasOrigin': origin,
+                 'account': _digest(self.transport.base + '\n' + self.transport.principal_id),
+                 'course': str(arguments.get('course_id')),
+                 'principal': _digest(self.transport.principal_id), 'profile': 'source:moodle'}
+        tokens = {}
+
+        class ApprovalVault:
+            def resolve(self, current_scope, reference):
+                identity, token = LearnerVault(_source_vault_path()).resolve_with_token(current_scope, reference)
+                tokens[reference] = token
+                return identity
+
+        # Use the same traversal as execution, including labels in text and object keys.
+        resolve_learner_tokens(arguments, ApprovalVault(), scope)
+        return tokens
 
     def descriptor(self, operation_key, arguments):
         route = self.loader.operations.get(operation_key)
@@ -53,6 +76,7 @@ class MoodleDispatcher:
                                      'site': self.transport.base,
                                      'principal_id': self.transport.principal_id,
                                      'arguments_json': json.dumps(arguments, sort_keys=True, ensure_ascii=False),
+                                     'learner_tokens': self._learner_tokens(arguments),
                                      'privacy': 'morrow.source-roster-v1'}}}
 
     def _binding(self, course_id):
@@ -196,6 +220,8 @@ class MoodleDispatcher:
                     approval=approval, op_id=op_id, vault_ready=True,
                     mode_ctx=mode_ctx, require_educator_channel=require_educator_channel,
                     journal=False)
+                if self._learner_tokens(arguments) != entry['request']['body']['learner_tokens']:
+                    raise executor.MissingFrozenPlan('Moodle learner identity changed. Read and approve the target again.')
                 _, state['claim'] = executor._check_write_gates(entry, arguments, plan, op_id,
                     plan_not_required=bool(is_write and audit and audit.get('mode') == 'edit'))
                 if is_write:
