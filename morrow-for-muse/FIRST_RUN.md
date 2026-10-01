@@ -6,6 +6,14 @@ release qualification. Pair the account once, not each course. The educator
 does everything by talking to Muse. Shell commands below are operator
 diagnostics, never educator homework.
 
+For Moodle, follow the same private sign-in flow in `helper/MUSE-SETUP.md`.
+The assistant sets `MORROW_LMS_PROVIDER=moodle` and the exact `MOODLE_BASE`
+in this tree's `helper/env`, then runs `bash install.sh`. Keep the site path.
+The helper reports its provider and site separately from the current SSO
+page. Wait for `session_verified=true`, pair with `bin/morrow moodle pair
+--site SITE`, then verify `status` and a first course read. Do not count a
+live browser, a course screenshot, or an installer result as that first read.
+
 ## 1. Install
 
 Follow `INSTALL.md` Steps 1 and 2 from the dist root, including the

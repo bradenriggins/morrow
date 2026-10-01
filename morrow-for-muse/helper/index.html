@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Morrow &middot; Canvas Login Helper</title>
+<title>Morrow &middot; Sign-in helper</title>
 <style>
   :root {
     --morrow-blue: #6080f0;
@@ -166,7 +166,7 @@
   <div class="brand">
     <img src="logo.png" alt="Morrow logo">
     <div>
-      <div class="name">Morrow <span>&middot;</span> Canvas Login Helper</div>
+      <div class="name">Morrow <span>&middot;</span> Sign-in helper</div>
       <div class="sub">Sign in once. Morrow keeps the session for you.</div>
     </div>
   </div>
@@ -176,7 +176,7 @@
 
 <div id="done-banner" role="status">
   <strong>You&rsquo;re signed in.</strong>
-  <div class="fine">You can close this page. Morrow keeps your Canvas sign-in in this private browser on your Muse computer, and you won&rsquo;t need to sign in again unless Canvas itself expires it. If that ever happens, just come back here. The name above is the Canvas account Morrow was connected to on this computer; on every task, Morrow checks the account signed in to this browser and pauses if it is not that one.</div>
+  <div class="fine">You can close this page after you sign in. Morrow keeps your LMS session in this private browser on your Muse computer. Your school may require a new sign-in when the session expires. Morrow checks the paired account before each task.</div>
 </div>
 <div id="err" role="alert"></div>
 <div id="nolink" role="alert">
@@ -184,19 +184,19 @@
   <div class="fine">Ask the agent for a fresh one-time helper link, then open that instead. The page below cannot drive the helper until then; the sign-in status above still updates.</div>
 </div>
 <div id="session-notice" role="alert">
-  <strong>Action needed: your Canvas session notice</strong>
+  <strong>Action needed: your Morrow session notice</strong>
   <div class="body" id="session-notice-body"></div>
 </div>
 
 <main>
   <div id="stage" tabindex="0" aria-label="Your school's sign-in page" aria-describedby="keys-help">
-    <img id="screen" alt="Live Canvas page" draggable="false">
+    <img id="screen" alt="Live LMS sign-in page" draggable="false">
   </div>
   <div id="keys">
     <span id="keys-help">While the page has a blue outline, every key you press, Tab included, goes to the sign-in page. Press <b>Esc</b> to leave it and use this page. Scroll with your mouse wheel, trackpad, or one finger.</span>
     <button id="capture" class="btn" type="button">Type into the sign-in page</button>
   </div>
-  <div id="hint"><b>Click the page, then type.</b> Sign in exactly as you normally would, including SSO and MFA. If Canvas offers <b>&ldquo;Stay signed in&rdquo;</b>, leave it on. Nothing you type is shown here or sent anywhere except the Canvas page itself.</div>
+  <div id="hint"><b>Click the page, then type.</b> Sign in as you normally would, including SSO and MFA. If your school offers <b>&ldquo;Stay signed in&rdquo;</b>, leave it on. Your input goes directly to the private browser. Do not share credentials in chat.</div>
 </main>
 <footer>
   Your sign-in stays in this private browser on your Muse computer. Morrow never sees your password. &middot; <a href="https://meetmorrow.app" target="_blank" rel="noopener">meetmorrow.app</a>
@@ -361,7 +361,7 @@
           badge.className = "in";
           banner.style.display = "block";
         } else {
-          var onLogin = (st.url || "").indexOf("/login") !== -1;
+          var onLogin = st.session_state === "signed_out" || st.session_state === "signing_in" || (st.url || "").indexOf("/login") !== -1;
           if (st.starting === true) {
             badge.textContent = "starting\u2026";
             badge.className = "";
@@ -494,7 +494,7 @@
   // --- mouse: click to focus fields, drag-free simple clicks ---
   img.addEventListener("mousedown", function (e) {
     e.preventDefault();
-    stage.focus();
+    stage.focus({ preventScroll: true });
     postMouse("pressed", toPage(e), e.button === 2 ? "right" : "left");
   });
   img.addEventListener("mouseup", function (e) {
@@ -538,7 +538,7 @@
   img.addEventListener("touchend", function (e) {
     e.preventDefault();
     if (touch && !touch.moved) {
-      stage.focus();
+      stage.focus({ preventScroll: true });
       var p = toPage({ clientX: touch.startX, clientY: touch.startY });
       postMouse("pressed", p, "left");
       postMouse("released", p, "left");
@@ -602,11 +602,11 @@
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) releaseKeys();
   });
-  captureBtn.addEventListener("click", function () { stage.focus(); });
+  captureBtn.addEventListener("click", function () { stage.focus({ preventScroll: true }); });
   // Note: no blur refocus here. Clicking the badge or header must not
   // steal focus back mid-typing; clicking the stage image refocuses.
 
-  if (HELPER_TOKEN) stage.focus();
+  if (HELPER_TOKEN) stage.focus({ preventScroll: true });
 })();
 </script>
 </body>

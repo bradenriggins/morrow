@@ -16,6 +16,8 @@ Read only the needed fields. Never print the complete environment or token.
 | Tree UUID | `config.paths.read_tree_uuid(tree_path)`, from `.morrow-tree-id`. Require a valid installed UUID; it is not in the carve manifest. |
 | State directory | `transport.local_chromium.tree_state_dir(tree_path)` in the helper's configured environment. Honor `MORROW_TREE_STATE_DIR`, then `MORROW_HOME`; require its `tree_path` binding to match the exact tree. |
 | Canvas origin | `config.tree_config.canvas_base()` normalized with `normalize_tenant_base()`. Custom approved HTTPS origins are supported; do not assume an `instructure.com` hostname. |
+| LMS provider | `config.tree_config.lms_provider()`: `canvas` or `moodle`. Require `/status.lms_provider` to match. |
+| LMS site | `config.tree_config.lms_base()` normalized with `normalize_lms_base()`. Require `/status.lms_base` to match without a trailing slash. Moodle retains the full site path. |
 | Profile | Effective `LOGIN_HELPER_PROFILE_DIR` from the helper's launch configuration; default `<tree>/helper/profile`. Compare real paths. |
 | Helper port | `config.tree_config.helper_port()` in the helper's configured environment. Keep transport on the exact loopback listener. |
 | CDP identity | Effective `LOGIN_HELPER_CDP_PORT`, default 19223. This is an identity label and forwarder allocation input, not a TCP debugging endpoint. Chromium uses a private pipe. |
@@ -40,6 +42,17 @@ helper update or repair; never infer the configured tenant from the page URL.
 Keep programmatic navigation and course API egress tenant-only. The Open Canvas
 action returns to the configured origin root so the school can run its normal
 SSO flow; do not force `/login/canvas` or accept a caller-supplied URL.
+
+For Moodle, validate `lms_provider=moodle` and the exact `lms_base` rather
+than `canvas_origin`. The Open Moodle action returns to that configured site
+root, including its path. Do not navigate to another Moodle site on the same
+host. `session_verified=true` means the helper verified the educator through
+fresh Moodle configuration and, for Moodle 4.1, the parameter-free own profile.
+`session_state=checking` is pending; `unavailable` requires connection diagnosis.
+`signed_out` or `signing_in` permits the private sign-in controls. It does not
+permit course operations. After sign-in, run `bin/morrow moodle pair --site SITE`
+once, then `status` to verify the pinned account. Never infer that pairing from
+a screenshot or a live browser. Do not show a Canvas account name for Moodle.
 
 ## Client behavior
 

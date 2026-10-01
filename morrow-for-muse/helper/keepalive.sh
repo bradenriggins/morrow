@@ -148,6 +148,21 @@ if [ -f "${MORROW_LEGACY_ENV}" ]; then
 fi
 
 # --- tree identity (W2-P0-6, W2-P1-30) ------------------------------------
+_lms_config="$(MORROW_CONFIG_TREE="${HELPER_DIR}/.." python3 -c '
+import os,sys
+sys.path.insert(0,os.environ["MORROW_CONFIG_TREE"])
+from config.tree_config import lms_provider,lms_base,normalize_lms_base
+provider=lms_provider()
+base=lms_base()
+print(provider)
+print(normalize_lms_base(base,provider) if base else "")
+')" || { printf 'keepalive: invalid LMS configuration\n' >&2; exit 1; }
+LMS_PROVIDER="${_lms_config%%$'\n'*}"
+LMS_BASE=""
+if [[ "${_lms_config}" == *$'\n'* ]]; then
+  LMS_BASE="${_lms_config#*$'\n'}"
+fi
+unset _lms_config
 tree_id_legacy() {
   # W4-P2-13: the pre-bounding slug, unbounded. Only used for the
   # dual-lookup below so existing installs keep resolving their state
@@ -535,7 +550,8 @@ genuine_signout() {
   # P0-8: exit 2 is emitted only for this state. A legacy server that
   # omits chromium_alive (unknown), a malformed body, a dead Chromium, or
   # a still-starting helper must never read as signed-out.
-  local fields kv logged_in="unknown" chromium_alive="unknown" starting="unknown"
+  local fields kv logged_in="unknown" chromium_alive="unknown" starting="unknown" site="${LMS_BASE:-}"
+  [ "${LMS_PROVIDER}" = "canvas" ] && site="${CANVAS_BASE:-}"
   fields="$(status_fields "$1")"
   if [ "${fields}" = "parse_error" ] || [ -z "${fields}" ]; then
     echo false
@@ -559,13 +575,20 @@ try:
     d=json.load(sys.stdin)
     url=urlsplit(d.get("url", ""))
     base=urlsplit(sys.argv[1])
+    if sys.argv[2] == "moodle":
+        trusted=(d.get("lms_provider") == "moodle" and d.get("lms_base") == sys.argv[1].rstrip("/"))
+        if trusted and d.get("session_state") in ("signed_out", "signing_in") and url.scheme == "https":
+            print("true")
+            sys.exit(0)
     same=(url.scheme == base.scheme == "https" and bool(base.hostname)
           and url.hostname == base.hostname and url.port == base.port
           and url.username is None and url.password is None)
-    login=url.path == "/login" or url.path.startswith("/login/")
+    prefix=base.path.rstrip("/") if sys.argv[2] == "moodle" else ""
+    path=url.path[len(prefix):] if not prefix or url.path.startswith(prefix+"/") else ""
+    login=path == "/login" or path.startswith("/login/")
     print("true" if same and login else "false")
 except (ValueError, TypeError, AttributeError):
-    print("false")' "${CANVAS_BASE:-}" 2>/dev/null || echo false
+    print("false")' "${site}" "${LMS_PROVIDER}" 2>/dev/null || echo false
   else
     echo false
   fi
@@ -697,6 +720,7 @@ pipe_holder_pid_for_profile() {
 # only while nothing is pinned yet. The pin command itself refuses
 # during a re-auth write halt: it never pins whoever signed back in.
 pin_first_signin() {
+  [ "${LMS_PROVIDER}" = "moodle" ] && return 0
   [ -f "${MORROW_HOME_DIR}/browser_lane.json" ] && return 0
   local out
   if out="$(PYTHONDONTWRITEBYTECODE=1 python3 \
@@ -771,6 +795,26 @@ memory_watch_check() {
 }
 
 evaluate_status() {
+  if [ "${LMS_PROVIDER}" = "moodle" ]; then
+    local probe_attempt
+    for probe_attempt in $(seq 1 70); do
+      if ! printf '%s' "${status_body}" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+sys.exit(0 if d.get("session_state") == "checking" else 1)' 2>/dev/null; then
+        break
+      fi
+      sleep .5
+      probe_status 2 || break
+    done
+    if ! printf '%s' "${status_body}" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+sys.exit(0 if d.get("lms_provider") == "moodle" and d.get("lms_base") == sys.argv[1].rstrip("/") else 1)' "${LMS_BASE}" 2>/dev/null; then
+      log "UNHEALTHY: helper LMS identity differs from this tree; no recovery attempted"
+      exit 1
+    fi
+  fi
   local fields kv logged_in="unknown" chromium_alive="unknown" starting="unknown"
   fields="$(status_fields "${status_body}")"
   if [ "${fields}" = "parse_error" ] || [ -z "${fields}" ]; then
@@ -952,8 +996,8 @@ recover_helper() {
   reap_tree_forwarders
   sleep 1
   cd "${HELPER_DIR}"
-  if [ -z "${CANVAS_BASE:-}" ]; then
-    log "ERROR: CANVAS_BASE not set (set it in ${TREE_ENV_FILE}, or the legacy ${MORROW_LEGACY_ENV}); cannot relaunch"
+  if [ -z "${LMS_BASE:-}" ] && { [ "${LMS_PROVIDER}" != "canvas" ] || [ -z "${CANVAS_BASE:-}" ]; }; then
+    log "ERROR: LMS address not set in ${TREE_ENV_FILE}; cannot relaunch"
     return 1
   fi
   # W3-P0-7/W3-P0-8, W6-P1-1: helper auth token lifecycle. The token

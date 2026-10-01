@@ -1,5 +1,6 @@
 """Real helper proxy and disposable Chromium; trusted adapter staging only."""
 import hashlib
+import base64
 from datetime import datetime, timezone
 import importlib.util
 import json
@@ -29,6 +30,7 @@ PREFLIGHT_PROOF = "--preflight-proof" in sys.argv[4:]
 LABEL_PROOF = "--learner-approval-proof" in sys.argv[4:]
 CLI_PROOF = "--public-cli-proof" in sys.argv[4:]
 COURSE_NAME_PROOF = "--masked-course-plan-proof" in sys.argv[4:]
+HELPER_PROVIDER_PROOF = "--moodle-helper-provider-proof" in sys.argv[4:]
 if CLI_PROOF:
     sys.path.remove(str(TREE))
     TREE = Path(os.environ['MORROW_CLI_TEST_TREE']).resolve()
@@ -60,6 +62,8 @@ class Fixture(BaseHTTPRequestHandler):
         cfg = {'wwwroot': base, 'userId': 43 if fixture_mode == 'wrong_account' else 42,
                'sesskey': 'DUMMY_BROWSER_ONLY', 'currentlogin': 123456, 'courseId': 2 if course_page else 1,
                'courseContextId': 200}
+        if fixture_mode == 'guest':
+            cfg['currentlogin'] = None
         if fixture_mode.startswith('legacy41'):
             cfg.pop('userId')
         if '/user/profile.php' in self.path:
@@ -158,7 +162,7 @@ class TLSFixtureServer(ThreadingHTTPServer):
         sock.settimeout(10)
         return self.tls.wrap_socket(sock, server_side=True, do_handshake_on_connect=False), address
 
-helper = browser = provider = scratch = None
+helper = ui_helper = browser = provider = scratch = None
 try:
     scratch = tempfile.TemporaryDirectory(prefix="morrow-adapter-loader-e2e-")
     tmp = scratch.name
@@ -197,6 +201,10 @@ try:
     provider.tls = tls
     base = 'https://127.0.0.1:%d/lms' % provider.server_port
     os.environ['CANVAS_BASE'] = 'https://sandbox.moodledemo.net'
+    if HELPER_PROVIDER_PROOF:
+        os.environ.pop('CANVAS_BASE', None)
+        os.environ['MOODLE_BASE'] = base
+        os.environ['MORROW_LMS_PROVIDER'] = 'moodle'
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     with urllib.request.urlopen(base + '/', context=ssl._create_unverified_context(), timeout=3) as response:
         check('disposable_https_fixture_serves_html', response.status == 200 and b'Fixture course' in response.read())
@@ -207,16 +215,22 @@ try:
     spec.loader.exec_module(server)
     browser = server.HelperBrowser()
     browser.launcher.extra_args.extend(['--ignore-certificate-errors', '--disable-features=LocalNetworkAccessChecks'])
-    browser.launcher.start()
-    browser.cdp = browser.launcher.cdp
-    browser.tab = browser.cdp.new_tab('about:blank')
+    if HELPER_PROVIDER_PROOF:
+        check('moodle_helper_configuration_selected', server.DEFAULT_BASE.rstrip('/') == base)
+        browser.start(server.DEFAULT_BASE)
+        check('moodle_helper_site_subpath_preserved', browser.base_url.rstrip('/') == base)
+    else:
+        browser.launcher.start()
+        browser.cdp = browser.launcher.cdp
+        browser.tab = browser.cdp.new_tab('about:blank')
     browser.cdp.call(browser.tab, 'Network.enable', {})
     try:
         report['fixture_navigation'] = browser.cdp.navigate(browser.tab, base + '/', timeout=10)
     except Exception:
         report['navigation_events'] = [{'method': e.get('method'), 'error': (e.get('params') or {}).get('errorText')} for e in browser.cdp.poll_session_events(browser.cdp.tab_session(browser.tab), timeout=1) if e.get('method') in ('Network.loadingFailed', 'Page.loadEventFired')]
         raise
-    browser.base_url = base
+    if not HELPER_PROVIDER_PROOF:
+        browser.base_url = base
     server.BROWSER = browser
     helper = server.BoundedThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
     threading.Thread(target=helper.serve_forever, daemon=True).start()
@@ -228,6 +242,82 @@ try:
             break
         time.sleep(.05)
     check('real_authenticated_helper_proxy', proxy.evaluate(tab, '1 + 1') == 2)
+    if HELPER_PROVIDER_PROOF:
+        for target in (base.replace('/lms', '/other'), base + '/../outside', base + '/%2e%2e/outside'):
+            try:
+                browser.navigate(target)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('moodle_helper_navigation_escaped_site')
+            check('moodle_helper_refuses_' + target.rsplit('/', 1)[-1] + '_' + str(len(report['checks'])), True)
+        check('moodle_helper_proxy_refuses_sibling_site', browser._proxy_tenant_ok(base.replace('/lms', '/other')) is False)
+        for _ in range(100):
+            status = browser.status()
+            if status.get('session_verified') is True:
+                break
+            time.sleep(.1)
+        check('moodle_helper_provider_identity', status.get('lms_provider') == 'moodle')
+        check('moodle_helper_site_identity', status.get('lms_base') == base)
+        check('moodle_helper_authenticated_fixture_ready', status.get('logged_in') is True)
+        check('moodle_helper_session_verified', status.get('session_verified') is True)
+        proxy.navigate(tab, base + '/login/index.php', timeout=10)
+        for _ in range(100):
+            if proxy.evaluate(tab, 'location.href') == base + '/login/index.php':
+                break
+            time.sleep(.05)
+        check('moodle_helper_subpath_login_not_signed_in', browser.status().get('logged_in') is False)
+        proxy.navigate(tab, base + '/', timeout=10)
+        for _ in range(100):
+            if proxy.evaluate(tab, 'location.href') == base + '/':
+                break
+            time.sleep(.05)
+        for _ in range(100):
+            status = browser.status()
+            if status.get('session_verified') is True:
+                break
+            time.sleep(.1)
+        check('moodle_helper_returned_site_ready', status.get('logged_in') is True and status.get('session_verified') is True)
+        for mode, expected in (('legacy41', 'verified'), ('guest', 'signed_out')):
+            fixture_mode = mode
+            proxy.navigate(tab, base + '/?probe=' + mode, timeout=10)
+            for _ in range(100):
+                status = browser.status()
+                if status.get('session_state') == expected:
+                    break
+                time.sleep(.1)
+            check('moodle_helper_' + mode + '_session_state', status.get('session_state') == expected)
+            check('moodle_helper_' + mode + '_login_state', status.get('logged_in') is (mode == 'legacy41'))
+        fixture_mode = 'modern'
+        proxy.navigate(tab, base + '/', timeout=10)
+        ui_helper = server.BoundedThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+        ui_helper.socket = tls.wrap_socket(ui_helper.socket, server_side=True)
+        threading.Thread(target=ui_helper.serve_forever, daemon=True).start()
+        code_request = urllib.request.Request('https://127.0.0.1:%d/page-code' % ui_helper.server_port,
+            data=b'{}', headers={'X-Helper-Token': 'a' * 64, 'Content-Type': 'application/json'})
+        with urllib.request.urlopen(code_request, context=ssl._create_unverified_context(), timeout=5) as response:
+            page_code = json.loads(response.read())['page_code']
+        ui_tab = browser.cdp.new_tab('about:blank')
+        try:
+            browser.cdp.navigate(ui_tab, 'https://127.0.0.1:%d/?code=%s' % (ui_helper.server_port, page_code))
+            for _ in range(100):
+                if browser.cdp.evaluate(ui_tab, 'document.title') == 'Morrow · Sign-in helper':
+                    break
+                time.sleep(.05)
+            check('moodle_helper_ui_generic_title', browser.cdp.evaluate(ui_tab, 'document.title') == 'Morrow · Sign-in helper')
+            time.sleep(1)
+            frame = browser.cdp.call(ui_tab, 'Page.captureScreenshot', {'format': 'png'})
+            ui_path = OUT.with_name(OUT.stem + '-helper-ui.png')
+            ui_path.write_bytes(base64.b64decode(frame['data']))
+            report['helper_ui_screenshot'] = str(ui_path)
+            check('moodle_helper_ui_header_visible', browser.cdp.evaluate(ui_tab,
+                'document.querySelector("header").getBoundingClientRect().top >= 0') is True)
+        finally:
+            browser.cdp.close_tab(ui_tab)
+        if '--helper-setup-only' in sys.argv[4:]:
+            report['scope'] = 'private Moodle helper setup only'
+            report['passed'] = True
+            raise SystemExit(0)
     if CLI_PROOF:
         cli_tree = Path(os.environ['MORROW_CLI_TEST_TREE']).resolve()
         check('cli_package_has_no_legacy_auth_modules', not any((cli_tree / 'moodle' / name).exists()
@@ -236,8 +326,8 @@ try:
         report['cli_package_hashes'] = {name: hashlib.sha256((cli_tree / name).read_bytes()).hexdigest()
                                         for name in manifest['files']}
         check('cli_package_manifest_exact', report['cli_package_hashes'] == manifest['files'])
-        from config.paths import mint_tree_uuid
-        cli_id = mint_tree_uuid(cli_tree)
+        from config.paths import mint_tree_uuid, read_tree_uuid
+        cli_id = read_tree_uuid(cli_tree) or mint_tree_uuid(cli_tree)
         cli_state = root / 'cli-state'
         cli_state.mkdir(mode=0o700)
         (cli_state / '.morrow-tree-binding').write_text(cli_id)
@@ -460,11 +550,12 @@ try:
             no_effect('source_changed_before_send_refused', lambda: dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval, require_educator_channel=False))
             check('stale_source_keeps_approval_unconsumed', not approval_used(approval))
             provider_state['cm'][0]['name'] = 'Essay by Aster Sample'
+        approved_effects_before = effects
         write_result = dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval, require_educator_channel=False)
         report['approved_write_result'] = write_result
         report['approved_write_journal'] = find_journal_op(write_id)
         check('approved_write_verified', write_result.get('ok') is True and write_result.get('verification', {}).get('status') == 'verified')
-        check('exactly_one_approved_effect', effects == 1 and provider_state['cm'][0]['visible'] is False)
+        check('exactly_one_approved_effect', effects == approved_effects_before + 1 and provider_state['cm'][0]['visible'] is False)
         record = find_journal_op(write_id)
         check('durable_verified_outcome', record['verification'] == 'verified' and record['uncertain'] is False)
         check('journal_masks_learner', 'Aster Sample' not in json.dumps(record))
@@ -578,6 +669,9 @@ except Exception as exc:
     report['error_type'] = type(exc).__name__
     raise
 finally:
+    if ui_helper:
+        ui_helper.shutdown()
+        ui_helper.server_close()
     if helper:
         helper.shutdown()
         helper.server_close()

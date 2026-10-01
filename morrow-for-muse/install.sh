@@ -755,6 +755,9 @@ if [ ! -f "${TREE_ENV_FILE}" ]; then
   if cat > "${TREE_ENV_FILE}" <<'EOF'
 # Morrow for Muse: educator config for THIS tree. Uncomment and set your tenant:
 # CANVAS_BASE=https://myschool.instructure.com
+# Or select Moodle, including its site path when needed:
+# MORROW_LMS_PROVIDER=moodle
+# MOODLE_BASE=https://lms.your-institution.edu/moodle
 # There is no default tenant; the login helper refuses to start without one.
 #
 # Tree-scoped: the helper profile is always <tree>/helper/profile
@@ -1053,6 +1056,7 @@ step "10/10 helper launch"
 # the keepalive cron sources ONLY the tree env file, so a shell-only
 # value would work at install and then fail weeks later at recovery time.
 _SHELL_CANVAS_BASE="${CANVAS_BASE:-}"
+_SHELL_MOODLE_BASE="${MOODLE_BASE:-}"
 if [ -f "${TREE_ENV_FILE}" ]; then
   # shellcheck disable=SC1090
   . "${TREE_ENV_FILE}"
@@ -1070,8 +1074,28 @@ if [ -z "${CANVAS_BASE:-}" ] && [ -f "${LEGACY_ENV_FILE}" ]; then
   fi
   unset _LEGACY_CB
 fi
-if [ -z "${CANVAS_BASE:-}" ]; then
-  note "CANVAS_BASE is not set yet: skipping the helper launch."
+_LMS_CONFIG="$(MORROW_CONFIG_TREE="${TREE}" CANVAS_BASE="${CANVAS_BASE:-}" \
+  MOODLE_BASE="${MOODLE_BASE:-}" MORROW_LMS_PROVIDER="${MORROW_LMS_PROVIDER:-}" python3 -c '
+import os,sys
+sys.path.insert(0,os.environ["MORROW_CONFIG_TREE"])
+from config.tree_config import lms_provider,lms_base
+print(lms_provider())
+print(lms_base())
+')" || fail "env" "Select one LMS provider and its address in ${ENV_FILE}."
+LMS_PROVIDER="${_LMS_CONFIG%%$'\n'*}"
+LMS_BASE=""
+if [[ "${_LMS_CONFIG}" == *$'\n'* ]]; then
+  LMS_BASE="${_LMS_CONFIG#*$'\n'}"
+fi
+LMS_SETTING=CANVAS_BASE
+[ "${LMS_PROVIDER}" = "moodle" ] && LMS_SETTING=MOODLE_BASE
+unset _LMS_CONFIG
+if [ -z "${LMS_BASE}" ]; then
+  if [ "${LMS_PROVIDER}" = "canvas" ]; then
+    note "CANVAS_BASE is not set yet: skipping the helper launch."
+  else
+    note "MOODLE_BASE is not set yet: skipping the helper launch."
+  fi
   note "Set it in ${ENV_FILE}, then rerun this installer: it checks the address before it starts the helper. The one-time sign-in comes after."
 else
   HELPER_STATUS_URL="http://127.0.0.1:${HELPER_PORT}/status"
@@ -1099,8 +1123,13 @@ else
     fi
   }
   if [ -n "${_SHELL_CANVAS_BASE}" ] \
+    && [ "${LMS_PROVIDER}" = "canvas" ] \
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then
     fail "env" "CANVAS_BASE is set in this shell but absent from ${ENV_FILE}; the keepalive cron sources only that file, so helper recovery would fail later. Set CANVAS_BASE to your Canvas tenant URL in ${ENV_FILE} and rerun."
+  fi
+  if [ -n "${_SHELL_MOODLE_BASE}" ] && [ "${LMS_PROVIDER}" = "moodle" ] \
+    && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?MOODLE_BASE=' "${ENV_FILE}" 2>/dev/null; then
+    fail "env" "MOODLE_BASE is set only in this shell. Set it in ${ENV_FILE} so the helper can recover after restart."
   fi
   # Muse UX audit 3 (2026-09-23): the helper's tenant rule runs BEFORE
   # the network probe, from the shared validator in
@@ -1116,20 +1145,27 @@ else
   # containing ''' used to close the triple-quoted string early and
   # execute injected Python (inject_proof.py under the final-sweep
   # scratchpad).
-  _TENANT_CHECK="$(cd / && CANVAS_BASE="${CANVAS_BASE}" \
+  _TENANT_CHECK="$(cd / && MORROW_LMS_BASE="${LMS_BASE:-${CANVAS_BASE:-}}" MORROW_LMS_PROVIDER="${LMS_PROVIDER:-canvas}" \
     CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED="${CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED:-}" \
     CANVAS_BASE_ALLOW_HTTP="${CANVAS_BASE_ALLOW_HTTP:-}" \
     MORROW_TREE="${TREE}" python3 -c "
 import os, sys
 sys.path.insert(0, os.environ['MORROW_TREE'])
-from config.tree_config import normalize_tenant_base
+from config.tree_config import normalize_lms_base, normalize_tenant_base
 try:
-    normalize_tenant_base(os.environ['CANVAS_BASE'])
+    if os.environ['MORROW_LMS_PROVIDER'] == 'canvas':
+        normalize_tenant_base(os.environ['MORROW_LMS_BASE'])
+    else:
+        normalize_lms_base(os.environ['MORROW_LMS_BASE'],'moodle')
 except ValueError as exc:
     print(exc)
 " 2>&1)"
   if [ -n "${_TENANT_CHECK}" ]; then
-    fail "tenant" "CANVAS_BASE is not a Canvas address the helper accepts: ${_TENANT_CHECK} Fix it in ${ENV_FILE} and rerun."
+    if [ "${LMS_PROVIDER:-canvas}" = "canvas" ]; then
+      fail "tenant" "CANVAS_BASE is not a Canvas address the helper accepts: ${_TENANT_CHECK} Fix it in ${ENV_FILE} and rerun."
+    else
+      fail "tenant" "MOODLE_BASE is not a Moodle address the helper accepts: ${_TENANT_CHECK} Fix it in ${ENV_FILE} and rerun."
+    fi
   fi
   unset _TENANT_CHECK
   # P1-26: probe the tenant before launching the helper against it.
@@ -1137,21 +1173,31 @@ except ValueError as exc:
   # apostrophe as U+2019, so match "find your login page" bare.)
   # The probe body lives under MORROW_HOME (never the package tree) with
   # a PID suffix, and is removed on every path below.
-  _TENANT_HOST="$(printf '%s' "${CANVAS_BASE}" | python3 -c 'import sys,urllib.parse; print(urllib.parse.urlparse(sys.stdin.read().strip()).hostname or "")')"
+  _TENANT_HOST="$(printf '%s' "${LMS_BASE}" | python3 -c 'import sys,urllib.parse; print(urllib.parse.urlparse(sys.stdin.read().strip()).hostname or "")')"
   case "${_TENANT_HOST}" in
     ""|instructure.com|example.com|example.instructure.com|myschool.instructure.com|canvas.instructure.com|your-school.*|yourschool.*|your_school.*)
-      fail "tenant" "CANVAS_BASE looks like a placeholder; set your real tenant in ${ENV_FILE}."
+      fail "tenant" "${LMS_SETTING} looks like a placeholder; set your real tenant in ${ENV_FILE}."
       ;;
   esac
   # No -f: an HTTP error status (e.g. 404) still fetches the body, so a
   # Canvas error page is reported as an error page, not as unreachable.
   # Only network/DNS failures exit non-zero here.
   _PROBE_BODY="${MORROW_HOME}/.tenant-probe.$$.body"
-  if ! curl -s -m 15 -L --max-redirs 3 "${CANVAS_BASE}" -o "${_PROBE_BODY}" 2>/dev/null; then
-    rm -f "${_PROBE_BODY}"
-    fail "tenant" "CANVAS_BASE is unreachable; check the URL in ${ENV_FILE} and your network, then rerun."
+  _LMS_PROBE_RC=0
+  if [ "${LMS_PROVIDER:-canvas}" = "moodle" ]; then
+    curl -s -m 15 -L --max-redirs 3 "${LMS_BASE}" -o "${_PROBE_BODY}" 2>/dev/null || _LMS_PROBE_RC=$?
+  else
+    curl -s -m 15 -L --max-redirs 3 "${CANVAS_BASE}" -o "${_PROBE_BODY}" 2>/dev/null || _LMS_PROBE_RC=$?
   fi
-  if grep -qi "find your login page\|Page Not Found" "${_PROBE_BODY}" 2>/dev/null; then
+  if [ "${_LMS_PROBE_RC}" -ne 0 ]; then
+    rm -f "${_PROBE_BODY}"
+    if [ "${LMS_PROVIDER}" = "canvas" ]; then
+      fail "tenant" "CANVAS_BASE is unreachable; check the URL in ${ENV_FILE} and your network, then rerun."
+    else
+      fail "tenant" "MOODLE_BASE is unreachable; check the URL in ${ENV_FILE} and your network, then rerun."
+    fi
+  fi
+  if [ "${LMS_PROVIDER}" = "canvas" ] && grep -qi "find your login page\|Page Not Found" "${_PROBE_BODY}" 2>/dev/null; then
     rm -f "${_PROBE_BODY}"
     fail "tenant" "CANVAS_BASE serves a Canvas error page; fix it in ${ENV_FILE} and rerun."
   fi
@@ -1169,7 +1215,7 @@ except ValueError as exc:
       fi
       STATUS="$(_install_helper_status 2>/dev/null)" \
         || fail "helper" "keepalive returned ${KEEP_RC}, but no helper answered /status on port ${HELPER_PORT}. A concurrent keepalive may have held the lock. Check ${TREE_STATE_DIR}/keepalive.log and rerun after the helper is available."
-      _STATUS_STATE="$(printf '%s' "${STATUS}" | TREE="${TREE}" TREE_VERSION="${TREE_VERSION}" python3 -c '
+      _STATUS_STATE="$(printf '%s' "${STATUS}" | TREE="${TREE}" TREE_VERSION="${TREE_VERSION}" LMS_PROVIDER="${LMS_PROVIDER}" LMS_BASE="${LMS_BASE}" python3 -c '
 import json, os, sys
 try:
     d = json.load(sys.stdin)
@@ -1187,6 +1233,10 @@ if d.get("chromium_alive") is not True or d.get("starting") is not False \
         or type(d.get("profile_has_cookies")) is not bool:
     sys.exit(1)
 if d["logged_in"] and not d["profile_has_cookies"]:
+    sys.exit(1)
+if os.environ["LMS_PROVIDER"] == "moodle" and (
+        d.get("lms_provider") != "moodle" or d.get("lms_base") != os.environ["LMS_BASE"].rstrip("/")
+        or (d["logged_in"] and d.get("session_verified") is not True)):
     sys.exit(1)
 print("signed-in" if d["logged_in"] else "signed-out")
 ')" || fail "helper" "keepalive returned ${KEEP_RC}, but /status on port ${HELPER_PORT} did not prove this tree's helper and browser are ready. Check ${TREE_STATE_DIR}/keepalive.log and ${TREE_STATE_DIR}/server.log; rerun after the helper is available."
@@ -1227,7 +1277,7 @@ else:
       fi
       ;;
     2)
-      note "helper is up but the Canvas session is signed out."
+      note "helper is up; complete your ${LMS_PROVIDER} sign-in in the private helper."
       if [ ! -f "${ONBOARDED_SENTINEL}" ]; then
         # P0-7: onboarding is NOT recorded here. This notice repeats on
         # every install until the session is genuinely live; the sentinel
@@ -1240,9 +1290,9 @@ else:
           "The helper is running. Ask your agent for a one-time sign-in" \
           "link and open THAT (it reaches http://127.0.0.1:${HELPER_PORT}/;" \
           "the bare address loads no token, each link works once), then" \
-          "sign in to Canvas yourself, SSO and MFA included." \
+          "sign in to ${LMS_PROVIDER} yourself, SSO and MFA included." \
           "" \
-          "Leave Canvas's \"Stay signed in\" (or \"Remember me\") ON: that" \
+          "If your school offers \"Stay signed in\" or \"Remember me\", leave it ON. That" \
           "is what keeps your session alive across helper and machine" \
           "restarts, so this is the only sign-in. Your agent never sees" \
           "your password: keystrokes go straight into the page." \

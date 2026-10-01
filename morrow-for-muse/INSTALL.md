@@ -203,13 +203,22 @@ it does, in order:
 9. **Selftest suites.** Runs all 23 selftest suites from this tree
    (transport, dispatch, privacy, helper, reauth). Any failure fails the
    install and names the suite. Test scratch is removed afterwards.
-10. **Helper launch and onboarding notice.** When `CANVAS_BASE` is
+10. **Helper launch and onboarding notice.** When the selected LMS address is
     set, runs `helper/keepalive.sh` so the helper is up immediately,
     then prints the sign-in notice. The notice repeats on every
     install until onboarding genuinely completes (a signed-in session
     with stored cookies); it is not shown once ever. When
-    `CANVAS_BASE` is not set yet, the launch is skipped and the
+    that address is not set yet, the launch is skipped and the
     installer tells you to set it and rerun.
+
+    Canvas uses `CANVAS_BASE`. Moodle uses `MORROW_LMS_PROVIDER=moodle` and
+    `MOODLE_BASE` in this tree's `helper/env`. Preserve the Moodle site path.
+    The helper verifies a Moodle session in installed Chromium, including
+    Moodle 4.1's own-profile identity check. A pending check or network failure
+    does not count as signed in. If both addresses are present, select the
+    provider explicitly. Keep each installed tree and profile bound to its
+    configured account; do not retarget an existing signed-in tree for a
+    different account.
 
 On success it prints the four first-run steps below.
 

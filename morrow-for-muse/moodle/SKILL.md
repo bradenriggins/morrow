@@ -9,7 +9,16 @@ educator to put credentials in chat.
 ## Pair the account once
 
 The educator signs in through the private native helper. Confirm that the
-helper owns this tree's persistent browser profile. Run:
+helper owns this tree's persistent browser profile.
+
+First configure this tree's `helper/env` with `MORROW_LMS_PROVIDER=moodle`
+and `MOODLE_BASE` set to the school's exact HTTPS Moodle site, including its
+path when needed. Run `bash install.sh`. Present the private card using
+[`helper/MUSE-SETUP.md`](../helper/MUSE-SETUP.md). Require its provider, site,
+profile, version, and tree checks before the educator types. This is one
+account setup step; it does not select or limit courses.
+
+After the helper verifies the sign-in, run:
 
 ```
 bin/morrow moodle pair --site https://school.edu/moodle
@@ -24,8 +33,9 @@ With multiple paired sites, pass `--site` to select the intended account.
 
 If no attended helper session exists, resolve private Moodle sign-in setup
 first. The CLI refuses to launch a substitute browser. Do not use the old
-Python form-login module. Native Moodle onboarding still needs release
-qualification; an already authenticated profile is not first-use proof.
+Python form-login module. Native Moodle onboarding must be verified on the
+installed package and owner card; an already authenticated profile is not
+first-use proof.
 
 ## Select courses through conversation
 
