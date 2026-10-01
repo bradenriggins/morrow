@@ -43,9 +43,10 @@ boundary described below.
   dict instead of the envelope list, the function is not registered on
   this deployment at all. Report it as not-available, never as a
   provider domain error.
-- Result bounding: truncate payloads past the byte cap (head), keep
-  receipts to identifying fields (id, name, subject), redact learner
-  data before presenting anything.
+- Result bounding: AJAX reads over the UTF-8 byte cap fail as
+  `incomplete`. Do not treat that failure as an empty or complete result.
+  Keep receipts to identifying fields (id, name, subject), and redact
+  learner data before presenting anything.
 
 ## Write governance (no exceptions)
 

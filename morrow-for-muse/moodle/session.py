@@ -18,8 +18,8 @@ Rules from the architecture, enforced here:
     server-side set). The set is rehydrated from the append-only
     journal at startup, so a process restart cannot replay an op id
     that was already journaled as dispatched.
-  - Truncation: any result over the byte cap is truncated head with a
-    flag; payloads never land whole in the journal.
+  - Result bounds: an AJAX read over the UTF-8 byte cap is refused as
+    incomplete; payloads never land whole in the journal.
   - Expiry classification (see reauth.py): requireloginerror and
     login-page redirects are re-authentication events; a 30x whose
     Location header targets /login is reauth on every path; an HTTP
@@ -421,7 +421,7 @@ class MoodleSession:
         # top-level case: it means "no such function", not a domain error.
         envelope: Optional[Dict[str, Any]]
         top_level_error = False
-        if isinstance(payload, list) and payload:
+        if isinstance(payload, list) and len(payload) == 1:
             envelope = payload[0]
         elif isinstance(payload, dict) and payload.get("errorcode"):
             top_level_error = True
@@ -430,6 +430,17 @@ class MoodleSession:
                                       "message": payload.get("error")}}
         else:
             envelope = None
+        if payload is not None and not (
+                isinstance(envelope, dict)
+                and isinstance(envelope.get("error"), bool)
+                and ((envelope["error"] is False and "data" in envelope)
+                     or (envelope["error"] is True
+                         and isinstance(envelope.get("exception"), dict)
+                         and isinstance(envelope["exception"].get("errorcode"), str)
+                         and envelope["exception"]["errorcode"]))):
+            raise MoodleLaneError(
+                "provider", "malformed Moodle AJAX response",
+                {"method": methodname, "http": resp.status_code})
         kind, detail = classify_signal(resp.status_code, resp.url, envelope,
                                         location=resp.headers.get("Location"))
         if top_level_error and kind == "provider":
@@ -463,13 +474,15 @@ class MoodleSession:
                     exc.detail)
             raise
         data = env.get("data")
-        raw = json.dumps(data, default=str)
-        truncated = len(raw) > RESULT_MAX_BYTES
-        if truncated:
-            raw = raw[:RESULT_MAX_BYTES]
+        raw = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
+        if len(raw) > RESULT_MAX_BYTES:
+            raise MoodleLaneError(
+                "incomplete", "Moodle AJAX result exceeds the byte limit",
+                {"method": methodname, "http": 200,
+                 "max_bytes": RESULT_MAX_BYTES})
         return {
             "data": data,
-            "truncated": truncated,
+            "truncated": False,
             "receipt": _receipt(data, receipt_fields or ["id", "name"]),
             "http": 200,
         }
