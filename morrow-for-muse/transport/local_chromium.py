@@ -1248,8 +1248,19 @@ class ProxyCDP(CDP):
         super().__init__(port, owner=owner)
         self._server_port = server_port if server_port is not None \
             else tree_helper_port()
+        self._request_pace_lock = threading.Lock()
+        self._last_request = 0.0
+
+    def _pace_request(self):
+        # Leave capacity for the owner's helper while adapters load and probe.
+        with self._request_pace_lock:
+            delay = self._last_request + 0.075 - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            self._last_request = time.monotonic()
 
     def _post(self, path, body, timeout):
+        self._pace_request()
         code, raw = _helper_request("POST", path, body,
                                     port=self._server_port,
                                     timeout=timeout)
@@ -1263,6 +1274,7 @@ class ProxyCDP(CDP):
             raise CDPError("helper CDP proxy %s returned non-JSON" % path)
 
     def _get(self, path, timeout):
+        self._pace_request()
         code, raw = _helper_request("GET", path, port=self._server_port,
                                     timeout=timeout)
         if code != 200:
