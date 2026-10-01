@@ -15,6 +15,11 @@ Integration layers:
    verified writes, uncertain-effect recovery, and one-time private setup.
 4. Native helper, installed-package E2E, and live disposable-provider proof.
 
+The carve supplies layer 2's canonical source assets under
+`moodle/browser-assets/`: the Desktop adapters and generated catalog,
+unchanged and covered by the integrity manifest. It does not yet execute
+those adapters through Muse's governed dispatch.
+
 Layer 1 is not proof that layers 2–4 are finished. No raw browser write
 interface may be added as a substitute for governed execution.
 

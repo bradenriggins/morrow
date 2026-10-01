@@ -40,6 +40,8 @@ jobs:
               - 'docs/versioning.md'
             muse:
               - 'morrow-for-muse/**'
+              - 'desktop/connector/extension/src/**'
+              - 'desktop/connector/extension/generated/moodle-browser-catalog.json'
               - '.github/**'
               - '.gitattributes'
               - '.gitignore'
