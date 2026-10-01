@@ -108,7 +108,7 @@ REPO_FILES = ("LICENSE",)
 MOODLE_ASSET_SOURCE = "desktop/connector/extension/src/moodle-*.js"
 MOODLE_CATALOG_SOURCE = "desktop/connector/extension/generated/moodle-browser-catalog.json"
 MOODLE_CORE_SOURCE = "desktop/connector/extension/src/moodle-executor.js"
-MOODLE_ROUTE_SOURCE = "desktop/connector/extension/generated/moodle-browser-routes.json"
+MOODLE_ROUTE_SOURCE = "desktop/artifacts/moodle-browser/moodle-browser-routes.json"
 MOODLE_WORKER_SOURCE = "desktop/connector/extension/src/service-worker.js"
 # pytest-only test modules: they rely on conftest.py to stay out of the
 # live home, so run from an installed tree they would write the

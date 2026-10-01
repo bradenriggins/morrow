@@ -12,7 +12,7 @@ import ts from "@typescript/typescript6";
 const root = new URL("../../", import.meta.url);
 const workerUrl = new URL("connector/extension/src/service-worker.js", root);
 const catalogUrl = new URL("connector/extension/generated/moodle-browser-catalog.json", root);
-const routesUrl = new URL("connector/extension/generated/moodle-browser-routes.json", root);
+const routesUrl = new URL("artifacts/moodle-browser/moodle-browser-routes.json", root);
 const generator = new URL("scripts/generate-moodle-browser-routes.mjs", root);
 const sha = (data) => createHash("sha256").update(data).digest("hex");
 const read = (url) => readFileSync(url, "utf8");

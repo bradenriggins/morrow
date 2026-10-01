@@ -172,7 +172,8 @@ def mini(tmp_path, monkeypatch):
         path.write_text(text)
     shared = Path(TREE).parent / "desktop" / "connector" / "extension"
     for source in [*sorted((shared / "src").glob("moodle-*.js")), shared / "src/service-worker.js",
-                   *sorted((shared / "generated").glob("moodle-browser-*.json"))]:
+                   shared / "generated/moodle-browser-catalog.json",
+                   Path(TREE).parent / "desktop/artifacts/moodle-browser/moodle-browser-routes.json"]:
         destination = repo / source.relative_to(Path(TREE).parent)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
@@ -511,14 +512,14 @@ def test_env_template_promises_only_what_keepalive_honors():
 # Shared-adapter failure cases precede the carve implementation.
 SHARED_CORE = "desktop/connector/extension/src/moodle-executor.js"
 SHARED_CATALOG = "desktop/connector/extension/generated/moodle-browser-catalog.json"
-SHARED_ROUTES = "desktop/connector/extension/generated/moodle-browser-routes.json"
+SHARED_ROUTES = "desktop/artifacts/moodle-browser/moodle-browser-routes.json"
 SHARED_WORKER = "desktop/connector/extension/src/service-worker.js"
 
 
 def test_canonical_moodle_assets_ship_byte_for_byte(carved):
     root = Path(TREE).parent
     sources = [*sorted((root / "desktop/connector/extension/src").glob("moodle-*.js")),
-               *sorted((root / "desktop/connector/extension/generated").glob("moodle-browser-*.json"))]
+               root / SHARED_CATALOG, root / SHARED_ROUTES]
     manifest = json.loads((Path(carved) / "pack/carve-manifest.json").read_text())
     assert len(sources) == 42
     for source in sources:

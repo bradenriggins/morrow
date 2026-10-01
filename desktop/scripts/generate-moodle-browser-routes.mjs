@@ -8,7 +8,7 @@ import ts from "@typescript/typescript6";
 const root = new URL("../", import.meta.url);
 const workerUrl = new URL("connector/extension/src/service-worker.js", root);
 const catalogUrl = new URL("connector/extension/generated/moodle-browser-catalog.json", root);
-const outputUrl = new URL("connector/extension/generated/moodle-browser-routes.json", root);
+const outputUrl = new URL("artifacts/moodle-browser/moodle-browser-routes.json", root);
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 function parse(name, source) {
