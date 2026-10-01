@@ -43,3 +43,22 @@ def test_same_host_redirect_followed():
     target = sess.get_redirect_target(_redirect(
         "https://moodle.school.edu/login/index.php", "/my/"))
     assert target == "/my/"
+
+
+@pytest.mark.parametrize("from_url,location", [
+    ("https://moodle.school.edu/my/?sesskey=SOURCE-CANARY",
+     "https://evil.example/collect?code=TARGET-CANARY#FRAGMENT-CANARY"),
+    ("https://moodle.school.edu/my/?sesskey=SOURCE-CANARY",
+     "http://moodle.school.edu/my/?code=TARGET-CANARY#FRAGMENT-CANARY"),
+    ("https://moodle.school.edu/my/?sesskey=SOURCE-CANARY",
+     "https://user:PASSWORD-CANARY@evil.example/collect"),
+])
+def test_refused_redirect_never_discloses_url_auth_material(from_url, location):
+    # Failure case: a refused SSO or downgrade URL enters a probe's error
+    # result verbatim, including its source sesskey and destination code.
+    sess = ms.SafeRedirectSession()
+    with pytest.raises(ms.MoodleLaneError) as caught:
+        sess.get_redirect_target(_redirect(from_url, location))
+    message = str(caught.value)
+    assert "CANARY" not in message
+    assert "moodle.school.edu" in message
