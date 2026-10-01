@@ -1,5 +1,15 @@
 # Changelog
 
+## Release hardening: ordered web helper input
+
+- Replace separate key requests with ordered text and control-key batches.
+  Keep paste, IME, clicks, and scrolling in input order.
+- Retry a lost batch reply with the identical body once. Stop on uncertain
+  input and require a fresh explicit resume. Distinguish rate limits from
+  exhausted input-session capacity. Refuse missing batch support.
+- Add field fitting, full-page fitting, zoom, expanded view, and manual pan.
+  Keep keyboard focus from moving the header out of view.
+
 ## Release hardening: Moodle helper provider setup
 
 - Select Canvas or Moodle in the installed tree's helper configuration.
@@ -11,8 +21,8 @@
 - Support Moodle in installer launch, keepalive, doctor, and private card
   instructions while retaining Canvas setup and recovery behavior.
 - Keep the web helper header in view when keyboard focus starts. Use LMS
-  sign-in wording. Native owner-card qualification and ordered web-client
-  input remain required before publication.
+  sign-in wording. Native owner-card qualification remains required before
+  publication.
 
 ## Release hardening: governed Moodle command path
 

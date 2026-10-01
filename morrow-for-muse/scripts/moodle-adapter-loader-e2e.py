@@ -94,6 +94,8 @@ class Fixture(BaseHTTPRequestHandler):
         import html
         content = ('<!doctype html><body id="%s" class="course-%s"><h1>%s</h1><script>M.cfg=%s;</script>%s</body>' %
                    (body_id, cfg['courseId'] if course_page else 2, html.escape(course_name), json.dumps(cfg), footer)).encode()
+        if '--web-input-proof' in sys.argv[4:]:
+            content = content.replace(b'</body>', b'<label>Disposable name <input id="dummy-first" autocomplete="off"></label><label>Disposable code <input id="dummy-second" autocomplete="off"></label><button>Fixture only</button></body>')
         if '/course/editsection.php' in self.path:
             import html
             form = '<form method="post" action="%s/course/editsection.php?id=10"><input type="hidden" name="id" value="10"><input type="hidden" name="course" value="2"><input type="hidden" name="sesskey" value="DUMMY_BROWSER_ONLY"><input name="name" value="%s"><textarea name="summary_editor[text]">Overview</textarea><input type="hidden" name="summary_editor[format]" value="1"><input type="submit" name="submitbutton" value="Save changes"></form>' % (base, html.escape(section_name, quote=True))
@@ -306,6 +308,32 @@ try:
                 time.sleep(.05)
             check('moodle_helper_ui_generic_title', browser.cdp.evaluate(ui_tab, 'document.title') == 'Morrow · Sign-in helper')
             time.sleep(1)
+            if '--web-input-proof' in sys.argv[4:]:
+                def ui_wait(expression):
+                    for _ in range(160):
+                        if browser.cdp.evaluate(ui_tab, expression):
+                            return True
+                        time.sleep(.05)
+                    return False
+                check('web_helper_batch_ready', ui_wait('document.getElementById("input-status").dataset.state === "ready"'))
+                browser.cdp.evaluate(tab, 'document.getElementById("dummy-first").focus()')
+                browser.cdp.evaluate(ui_tab, 'document.getElementById("capture").click()')
+                browser.cdp.call(ui_tab, 'Input.insertText', {'text': 'dummy café 🧪'})
+                for kind in ('keyDown', 'keyUp'):
+                    browser.cdp.call(ui_tab, 'Input.dispatchKeyEvent', {'type': kind, 'key': 'Tab', 'code': 'Tab', 'windowsVirtualKeyCode': 9})
+                browser.cdp.call(ui_tab, 'Input.insertText', {'text': 'second'})
+                check('web_helper_real_batch_drained', ui_wait('document.getElementById("input-status").dataset.state === "ready"'))
+                check('web_helper_real_unicode_exactly_once', browser.cdp.evaluate(tab, 'document.getElementById("dummy-first").value') == 'dummy café 🧪')
+                check('web_helper_real_tab_preserves_order', browser.cdp.evaluate(tab, 'document.getElementById("dummy-second").value') == 'second')
+                check('web_helper_no_plaintext_local_echo', browser.cdp.evaluate(ui_tab, 'document.getElementById("keyboard").value') == '')
+                browser.cdp.evaluate(ui_tab, 'document.getElementById("fit").click(); document.getElementById("zoom-in").click(); document.getElementById("expand").click()')
+                check('web_helper_view_controls_expand', browser.cdp.evaluate(ui_tab, 'document.getElementById("expand").getAttribute("aria-pressed")') == 'true')
+                for width in (1280, 390):
+                    browser.cdp.call(ui_tab, 'Emulation.setDeviceMetricsOverride', {'width': width, 'height': 900, 'deviceScaleFactor': 1, 'mobile': False})
+                    time.sleep(.3)
+                    check('web_helper_real_no_overflow_' + str(width), browser.cdp.evaluate(ui_tab, 'document.documentElement.scrollWidth <= innerWidth'))
+                    ui_frame = browser.cdp.call(ui_tab, 'Page.captureScreenshot', {'format': 'png'})
+                    OUT.with_name(OUT.stem + '-web-' + str(width) + '.png').write_bytes(base64.b64decode(ui_frame['data']))
             frame = browser.cdp.call(ui_tab, 'Page.captureScreenshot', {'format': 'png'})
             ui_path = OUT.with_name(OUT.stem + '-helper-ui.png')
             ui_path.write_bytes(base64.b64decode(frame['data']))

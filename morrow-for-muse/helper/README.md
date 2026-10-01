@@ -335,3 +335,25 @@ nearby buttons on different sign-in pages. This fixed primary-tab endpoint
 returns geometry only. It rejects query parameters and reads no field values.
 See [the artifact contract](ARTIFACT-CONTRACT.md#protected-layout-contract) for
 the exact response, limits, embedded-frame behavior, and required UI checks.
+
+## Web helper input and view controls
+
+The one-time helper page uses the same ordered batch endpoint. It sends
+ordinary text, paste, and committed IME text without a separate request for
+each key. Tab, Enter, and other control keys use paired key operations.
+Pointer and scroll requests share the input queue. An identical batch can
+be retried once after a lost transport reply. A conflict or unconfirmed
+result stops the queue and discards unsent input.
+
+Use **Resume input** only after checking the current page. Resume checks a
+fresh status, layout, and frame before it starts a new stream. It does not
+send discarded input. A rate limit pauses input. Exhausted stream capacity
+requires a helper restart with the browser profile preserved. Missing batch
+support requires an update; the page never falls back to per-key requests.
+
+**Fit sign-in fields** uses field and button geometry, without reading their
+values. **Fit full page**, zoom, and **Expand view** remain available when a
+school uses a different layout or an SSO frame. Hold Shift and drag to pan a
+zoomed page. A touch drag scrolls the school page; a tap clicks it. Manual
+zoom stays in place while frames refresh. Press Escape to use local view
+controls. Passwords belong in the private helper, never agent chat.
