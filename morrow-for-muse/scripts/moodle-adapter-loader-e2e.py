@@ -23,6 +23,8 @@ OUT, BINARY, ASSETS = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]).resolve(
 PUBLIC_STAGING = "--public-staging-only" in sys.argv[4:]
 GOVERNED = "--governed-execution" in sys.argv[4:]
 LEGACY_GOVERNED = "--legacy-governed" in sys.argv[4:]
+RESTART_PROOF = "--process-restart-proof" in sys.argv[4:]
+PREFLIGHT_PROOF = "--preflight-proof" in sys.argv[4:]
 report = {"scope": "public-page adapter staging only" if PUBLIC_STAGING else "private fixture staging and provider read", "test": "morrow.moodle-adapter-loader.real-helper.v1", "checks": {}, "provider_calls": 0}
 fixture_mode = 'modern'
 effect_mode = 'normal'
@@ -330,6 +332,10 @@ try:
                 check(name, False)
             check(name + '_no_effect', effects == before_effects)
         no_effect('unapproved_write_refused', lambda: dispatcher.dispatch(hide_key, args, op_id=str(uuid.uuid4())))
+        if PREFLIGHT_PROOF:
+            provider_state['cm'][0]['name'] = 'Changed source title'
+            no_effect('stale_source_plan_refused', lambda: dispatcher.plan(hide_key, args, op_id=str(uuid.uuid4())))
+            provider_state['cm'][0]['name'] = 'Essay by Aster Sample'
         write_id = str(uuid.uuid4())
         plan = dispatcher.plan(hide_key, args, op_id=write_id)
         entry = dispatcher.descriptor(hide_key, args)
@@ -337,6 +343,12 @@ try:
                                  'Hide this activity in this disposable fixture.', channel='driver')
         no_effect('driver_channel_refused_by_default', lambda: dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval))
         no_effect('changed_approved_arguments_refused', lambda: dispatcher.dispatch(hide_key, {**args, 'module_id': 20}, op_id=write_id, plan=plan, approval=approval))
+        if PREFLIGHT_PROOF:
+            from dispatch.admission import approval_used
+            provider_state['cm'][0]['name'] = 'Changed source title'
+            no_effect('source_changed_before_send_refused', lambda: dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval, require_educator_channel=False))
+            check('stale_source_keeps_approval_unconsumed', not approval_used(approval))
+            provider_state['cm'][0]['name'] = 'Essay by Aster Sample'
         write_result = dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval, require_educator_channel=False)
         report['approved_write_result'] = write_result
         report['approved_write_journal'] = find_journal_op(write_id)
@@ -361,6 +373,40 @@ try:
             record = find_journal_op(op_id)
             check(mode + '_durable_uncertain', record['uncertain'] is True)
             no_effect(mode + '_replay_refused', lambda: MoodleDispatcher(transport, ASSETS, registry_sha256=digest).dispatch(hide_key, args, op_id=op_id, plan=plan, approval=approval))
+            if RESTART_PROOF:
+                before_effects = effects
+                child = r'''
+import json,sys,uuid
+from types import SimpleNamespace
+sys.path.insert(0, sys.argv[1])
+from transport.local_chromium import ProxyCDP
+from moodle.browser_transport import MoodleBrowserTransport
+from moodle.dispatch import MoodleDispatcher
+from dispatch.admission import mint_approval,sign_approval
+from dispatch.executor import find_journal_op
+tree,base,assets,pin,port,helper_port,key,arguments,op_id = sys.argv[1:]
+owner=SimpleNamespace()
+owner.cdp=ProxyCDP(int(port), owner=owner, server_port=int(helper_port))
+transport=MoodleBrowserTransport(base,owner,principal_id='42')
+dispatcher=MoodleDispatcher(transport,assets,registry_sha256=pin)
+args=json.loads(arguments)
+before=find_journal_op(op_id)
+fresh=dispatcher.dispatch('moodle.ajax.core_courseformat_get_state.v1', {'course_id':args['course_id']},op_id=str(uuid.uuid4()))
+args['expected_digest']=fresh['snapshot_digest']
+plan=dispatcher.plan(key,args,op_id=op_id)
+approval=sign_approval(mint_approval(dispatcher.descriptor(key,args),args,base,target_identity=plan.target_identity), 'Disposable restart proof only.',channel='driver')
+result=dispatcher.dispatch(key,args,op_id=op_id,plan=plan,approval=approval,require_educator_channel=False)
+after=find_journal_op(op_id)
+print(json.dumps({'replay_refused':result.get('ok') is False,'journal_unchanged':before==after,'uncertain':after.get('uncertain') is True}))
+'''
+                restarted = subprocess.run([sys.executable, '-c', child, str(TREE), base, str(ASSETS), digest,
+                    str(browser.launcher.cdp_port), str(helper.server_port), hide_key, json.dumps(args), op_id],
+                    capture_output=True, text=True, timeout=90)
+                check(mode + '_new_process_finished', restarted.returncode == 0)
+                restart_result = json.loads(restarted.stdout.strip().splitlines()[-1])
+                check(mode + '_new_process_refuses_fresh_approval_replay', restart_result['replay_refused'])
+                check(mode + '_new_process_keeps_uncertain_journal', restart_result['journal_unchanged'] and restart_result['uncertain'])
+                check(mode + '_new_process_no_effect', effects == before_effects)
         check('all_governed_outputs_secret_free', 'DUMMY_BROWSER_ONLY' not in json.dumps([read_result, write_result, record]))
         report['fixture_effects'] = effects
     report['passed'] = True

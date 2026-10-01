@@ -86,6 +86,7 @@ class MoodleAdapterLoader:
         definitions = {row.get("key"): row for row in rows if isinstance(row, dict)}
         if len(definitions) != len(rows) or set(definitions) != set(self.operations):
             raise ValueError("adapter catalog routes mismatch")
+        self.definitions = definitions
         for key, route in self.operations.items():
             definition = definitions[key]
             if (not isinstance(route, dict) or not _FILE.fullmatch(str(route.get("file", "")))
