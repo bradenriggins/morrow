@@ -9,6 +9,7 @@ from dispatch import admission
 from dispatch import executor
 from moodle.browser_operations import MoodleAdapterLoader
 from moodle.contracts import MoodleLaneError
+from moodle.private_files import PrivateMoodleFiles
 from privacy.boundary import SourceMcpPrivacyBoundary, moodle_source_history_available
 from privacy.executor_wire import _source_vault_path
 from privacy.core import LearnerVault, resolve_learner_tokens
@@ -103,6 +104,8 @@ class MoodleDispatcher:
                                  'provider': 'moodle', 'readOnly': route['readOnly']},
                    'binding': binding, 'arguments': arguments,
                    'expiresAt': int(time.time() * 1000) + 60000}
+        if mode == 'execute' and route.get('attachmentMode', 'none') != 'none':
+            request.update(PrivateMoodleFiles().attachments(binding, arguments, route['attachmentMode']))
         if mode == 'check_course' or route['inputKind'] == 'roster':
             request['courseId'] = binding['courseId']
         return request
@@ -145,12 +148,40 @@ class MoodleDispatcher:
             lambda resolved: self._invoke(key, self._request(key,
                 {k: v for k, v in resolved.items() if k != '_morrow'}, binding, mode=mode)))
 
+    def stage_file(self, course_id, source, filename):
+        if type(course_id) is not int or not 1 <= course_id <= 9007199254740991:
+            raise ValueError('Moodle course ID must be an exact integer')
+        binding = self._binding(course_id)
+        entry = self.descriptor(_STATE, {'course_id': course_id})
+        admission.check_policy_gates(entry, vault_ready=True)
+        return self._boundary(binding).invoke('moodle_stage_file',
+            {'course_id': course_id, 'filename': filename,
+             '_morrow': {'source_binding_id': binding['sourceBindingId']}}, {},
+            lambda resolved: {'ok': True, 'manifest': PrivateMoodleFiles().stage(
+                binding, source, resolved['filename'])})
+
+    def _check_private_files(self, operation_key, arguments, binding):
+        mode = self.loader.operations[operation_key].get('attachmentMode', 'none')
+        if mode == 'none':
+            return
+
+        def check(resolved):
+            params = {key: value for key, value in resolved.items() if key != '_morrow'}
+            PrivateMoodleFiles().attachments(binding, params, mode)
+            return {'ok': True}
+
+        result = self._boundary(binding).invoke(self.loader.operations[operation_key]['toolName'],
+            {**arguments, '_morrow': {'source_binding_id': binding['sourceBindingId']}}, {}, check)
+        if result.get('ok') is not True:
+            raise MoodleLaneError('provider', 'Stage the exact reviewed files before preparing the Moodle write')
+
     def plan(self, operation_key, arguments, *, op_id):
         arguments = _freeze(arguments)
         entry = self.descriptor(operation_key, arguments)
         if entry['effects'] != 'write':
             raise ValueError('Only Moodle writes need a frozen plan')
         binding = self._binding(arguments.get('course_id'))
+        self._check_private_files(operation_key, arguments, binding)
         review = self._review(operation_key, arguments, binding)
         identity = self._private_read(_STATE, {'course_id': arguments['course_id']}, binding, mode='check_course')
         if identity.get('ok') is not True:

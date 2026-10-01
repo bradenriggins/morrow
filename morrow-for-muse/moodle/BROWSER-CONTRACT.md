@@ -56,8 +56,17 @@ Mac helper attachment uses exact native process arguments through Apple's
 Linux keeps the `/proc` argument path. Its real CFT helper regression first
 failed the holder proof, then passed after the native argument reader.
 
-Private file payloads, broader operation qualification, owner setup and
-native provider proof remain required before release.
+`moodle/private_files.py` supplies immutable, encrypted private file bytes.
+`stage-file` returns only the exact review manifest through the roster
+privacy boundary. The root private attachment envelopes are loaded for all
+nine canonical file routes. Plan validates the files before storing approval;
+execution reloads and checks them before staging or claiming the write.
+Account, site, and course scope cannot be transferred. Native adapters verify
+the uploaded draft and saved bytes. The real-helper E2E covers encrypted
+records, learner file names, source changes, altered records, ordered file
+sets, one native Resource save, and cross-process refusal after lost upload
+replies. Broader native file/provider qualification and owner first use
+remain required before release.
 
 `moodle/browser_operations.py` stages those assets through the authenticated
 helper proxy. It checks the pinned route registry, catalog, module and exact

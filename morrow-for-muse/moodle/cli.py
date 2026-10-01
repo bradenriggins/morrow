@@ -104,9 +104,13 @@ def _parser():
     commands = parser.add_subparsers(dest='command', required=True)
     pair = commands.add_parser('pair', help='pair one signed-in account; no course selection')
     pair.add_argument('--site', required=True)
-    for name in ('status', 'courses', 'catalog', 'read', 'execute', 'plan', 'approve', 'mode'):
+    for name in ('status', 'courses', 'catalog', 'read', 'execute', 'plan', 'approve', 'mode', 'stage-file'):
         command = commands.add_parser(name)
         command.add_argument('--site')
+        if name == 'stage-file':
+            command.add_argument('--course-id', type=int, required=True)
+            command.add_argument('--path', required=True)
+            command.add_argument('--filename')
         if name == 'courses':
             command.add_argument('--offset', type=int, default=0)
             command.add_argument('--limit', type=int, default=100)
@@ -162,6 +166,8 @@ def _run(args):
     if args.command == 'courses':
         return {'ok': True, **transport.courses_page(offset=args.offset, limit=args.limit)}
     dispatcher = _dispatcher(transport)
+    if args.command == 'stage-file':
+        return dispatcher.stage_file(args.course_id, args.path, args.filename or Path(args.path).name)
     pending = Path(lc.tree_state_dir()) / 'moodle_pending'
     if args.command == 'approve':
         op_id = executor.check_uuid(args.op_id)

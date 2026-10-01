@@ -1,5 +1,15 @@
 # Changelog
 
+## Release hardening: private Moodle files
+
+- Stage exact local file bytes in encrypted private state for the paired
+  account, site, and course. Return only the reviewed manifest through
+  the complete roster privacy boundary.
+- Supply canonical private file envelopes to all nine file operations.
+  Validate staged bytes before a plan and before browser dispatch.
+- Preserve native draft and saved-byte verification, frozen approval,
+  scope, halt, and replay controls.
+
 ## Release hardening: ordered web helper input
 
 - Replace separate key requests with ordered text and control-key batches.
@@ -36,8 +46,8 @@
   arguments. Linux retains its `/proc` checks.
 - Remove source-only Python HTTPS authentication modules from the package
   and align current knowledge and operator guidance with the browser path.
-- Native Moodle helper setup, private attachments, and broader provider
-  qualification remain release requirements.
+- Native Moodle helper setup and broader native provider qualification
+  remain release requirements.
 
 ## Release hardening: canonical Moodle operation routes
 
