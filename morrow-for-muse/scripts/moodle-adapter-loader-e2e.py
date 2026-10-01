@@ -153,7 +153,7 @@ try:
         check('disposable_fixture_loaded', proxy.evaluate(tab, 'location.href') == base + '/')
     context = proxy.create_isolated_world(tab, 'morrow_adapter_loader_e2e')
     check('real_isolated_world', isinstance(context, int))
-    report['source_hashes'] = {str(path.relative_to(TREE)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (TREE / 'helper/server.py', TREE / 'transport/local_chromium.py', TREE / 'moodle/browser_operations.py', Path(__file__))}
+    report['source_hashes'] = {str(path.relative_to(TREE)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (TREE / 'helper/server.py', TREE / 'transport/local_chromium.py', TREE / 'moodle/browser_operations.py', TREE / 'moodle/browser_transport.py', Path(__file__))}
     from moodle.browser_operations import MoodleAdapterLoader
     registry = ASSETS / 'moodle-browser-routes.json'
     digest = hashlib.sha256(registry.read_bytes()).hexdigest()
