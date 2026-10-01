@@ -345,7 +345,12 @@ The `/status` endpoint returns `url`, `logged_in`,
 `chromium_alive`, and `starting` (true while Chromium is alive but the
 tab is still `about:blank`). Healthy means `"logged_in": true`,
 `"profile_has_cookies": true`, `"chromium_alive": true`,
-`"starting": false`. Diagnostic: `logged_in: false` with
+`"starting": false` for the exact configured helper, profile, tree, and
+version. These are health signals, not the full principal check. Moodle also
+requires the exact configured `lms_provider` and `lms_base`, plus
+`session_verified=true`; confirm its paired principal with
+`bin/morrow moodle status --site SITE`. Canvas uses the users/self read in
+Step 6. Diagnostic: `logged_in: false` with
 `profile_has_cookies: false` and `chromium_alive: true` on a fresh box
 is normal first onboarding (sign in once); the same on a
 previously-working box can mean a wrong profile, cleared cookies, or session
@@ -402,7 +407,12 @@ executor governance, the Chromium lane, your session, your tenant.
 
 ## Dispatching real work
 
-Reads need nothing further. In plan mode (the default), a write waits
+The Canvas commands below use the Canvas governed executor. For Moodle,
+use `bin/morrow moodle read`, `plan`, `approve`, and `execute` as described
+in `moodle/SKILL.md`. Do not send Moodle operations through the Canvas
+HTTP catalog or its approval commands.
+
+Reads need nothing further. In plan mode (the default), a Canvas write waits
 for the educator: the agent runs `plan-write`, shows the educator the
 change in plain words, and runs `approve-write` with their reply
 (`SKILL.md`, "Dispatching operations"). In edit mode, writes run

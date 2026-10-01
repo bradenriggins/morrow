@@ -7,7 +7,7 @@ a blank tab, a wrong profile, and a genuine login redirect need different fixes.
 
 ## Healthy-state checklist
 
-Before Canvas work, activate the supported runtime and inspect doctor. Resolve
+Before Canvas or Moodle work, activate the supported runtime and inspect doctor. Resolve
 the configured helper endpoint and profile through `config.tree_config`; this
 also supports custom per-tree ports and configured TLS clients:
 
@@ -15,8 +15,12 @@ also supports custom per-tree ports and configured TLS clients:
 bin/morrow doctor --json
 ```
 
-Healthy means JSON with your Canvas URL, `"logged_in": true`, and
-`"profile_has_cookies": true`. The full `/status` shape:
+Check exact helper, tree, version, profile, provider, and site identity first.
+For Canvas, the URL and login fields are health signals; confirm the principal
+with the supported users/self read. For Moodle, require the configured
+`lms_provider=moodle`, exact `lms_base`, and `session_verified=true`, then
+fresh-read `bin/morrow moodle status --site SITE`. Cookies or a site URL alone
+do not prove Moodle authentication. Relevant `/status` fields:
 
 - `url`: the tab's live URL, scheme://host/path only (query string
   and fragment are stripped before output).
@@ -34,13 +38,20 @@ Healthy means JSON with your Canvas URL, `"logged_in": true`, and
 - `chromium_alive`: whether the helper's Chromium process is running.
 - `starting`: true when Chromium is alive but the tab is still
   `about:blank`/empty (slow first boot, not a dead session).
+- `lms_provider` and `lms_base`: configured provider and full site address.
+  Keep a Moodle site path; do not reduce it to the host.
+- `session_verified`: Moodle's trusted provider identity check. Canvas keeps
+  its existing principal readback; this field is not a Canvas login proof.
+- `session_state`: Moodle's verification state. An unverified state must not
+  be displayed as a working account connection.
 
 There is no `title` field: the server deliberately never returns
 `document.title` (page JS can copy cookie values into it, so a title
 field would be a cookie-exfiltration channel).
 
 Healthy checklist: `"logged_in": true`, `"profile_has_cookies": true`,
-`"chromium_alive": true`, `"starting": false`.
+`"chromium_alive": true`, `"starting": false`, exact configured identity,
+and the provider-specific principal check above.
 
 The wrong-profile diagnostic: `logged_in: false` with
 `profile_has_cookies: false` and `chromium_alive: true` on a fresh box
@@ -50,7 +61,7 @@ cookies, or session eviction. Check `profile_dir` and exact helper identity
 before asking for sign-in. Do not wipe the profile or infer expiry from this
 reading alone.
 
-Then confirm the principal through the executor (it reads the Canvas
+For Canvas, confirm the principal through the executor (it reads the Canvas
 address from the tree's `helper/env`, and changes nothing):
 
 ```
@@ -68,7 +79,25 @@ The helper page rule: check before you open. Show the educator the
 helper page only for verified reauthentication or once for first onboarding. Never
 open it preemptively or on every run; a healthy session needs no page.
 
-## Dead session detection and recovery
+## Moodle session recovery
+
+Read [the Moodle skill](../moodle/SKILL.md). Preserve the paired account,
+browser profile, private vault, pending plans, and operation journal. A
+network error alone does not authorize a new account or profile. Restore
+transport first; when sign-in is required, the educator uses the same private
+provider-aware helper. Require its exact site and `session_verified=true`,
+then run `bin/morrow moodle status --site SITE` and verify the paired principal.
+Repeating `pair` is safe only for the same exact site and principal; it cannot
+replace an account that changed.
+
+Do not apply the Canvas `reauth/state_machine.py` recovery below to Moodle.
+Inspect native provider state after any uncertain Moodle write. Durable claims
+and consumed approvals prevent replay, including after a new process starts.
+A new operation ID or new approval is not proof that another write is safe.
+Read the target again before preparing any separately authorized new action.
+Do not delete a write halt by hand or bypass its account and recovery checks.
+
+## Canvas dead session detection and recovery
 
 Detection signals:
 - A verified sign-in redirect at the correct configured host; status alone is not proof.
@@ -178,7 +207,8 @@ locates Chromium, probes egress, creates the `~/.morrow` state layout and
 wiped, reset, or repackaged), sets up keepalive supervision (one cron
 entry when the machine has cron; otherwise a supervised background
 loop, which is what the Muse VM gets), probes the Canvas address and
-launches the helper when `CANVAS_BASE` is set, re-runs all 23 selftest
+launches the helper when the selected provider's site is configured, re-runs
+all 23 selftest
 suites, and runs the secrets deny-list gate. It exits non-zero naming
 the failed step.
 
@@ -192,9 +222,10 @@ the failed step.
 - `MORROW_CRON=0` skips keepalive supervision (both the cron entry and
   the background loop) for an operator who runs their own scheduler.
   It does not disable the helper.
-- The installer launches the helper only when `CANVAS_BASE` is set.
-  There is no default tenant; the helper refuses to start on the
-  placeholder.
+- Canvas uses `CANVAS_BASE`. Moodle uses `MORROW_LMS_PROVIDER=moodle` and
+  `MOODLE_BASE`. With both addresses present, select the provider explicitly.
+  There is no default tenant; a missing or invalid site must be repaired
+  before sign-in. Keep the existing tree and profile.
 
 ## Never "fix" a dead session by restarting anything
 
@@ -284,7 +315,7 @@ Its health model:
   recovery.
 - HTTP 200 alone is NOT healthy: it parses the JSON. Exit 2 is emitted
   only for an alive, non-starting browser with `logged_in:false` and
-  a login URL at the configured Canvas origin. Chrome errors, blank/missing
+  a login URL at the configured provider site. Chrome errors, blank/missing
   URLs, and unrelated sites are indeterminate, not sign-out. This does not
   prove why the login is required (expiry, revocation, or cleared cookies); a logged-out session is
   reported, never "recovered": the script never attempts a sign-in.
@@ -295,7 +326,7 @@ Its health model:
 
 Exit codes: 0 healthy, 1 unrecoverable (helper down and could not be
 recovered, /status JSON unparseable, or status indeterminate), 2 helper
-responding, Chromium alive, not starting, with a login URL at the configured Canvas origin
+responding, Chromium alive, not starting, with a login URL at the configured provider site
 (reported, no recovery attempted). Other unverified page states return 1.
 
 Note: a login-page read during work is not a keepalive failure; it is

@@ -27,9 +27,13 @@ satisfy a request. Knowledge is not dispatch permission.
 
 ## Respect the operating mode
 
-Plan is the default. Reads can proceed. Present the exact proposed change,
-then use `plan-write` and the printed `approve-write` command with the actual
-educator reply. Do not invent a reply or add a required approval phrase.
+Plan is the default. Reads can proceed. Present the exact proposed change.
+For Canvas, use `plan-write` and the printed `approve-write` command.
+For Moodle, use `bin/morrow moodle plan` and then
+`bin/morrow moodle approve --op-id UUID --authorization "their exact reply"`.
+Use the returned operation ID and the actual educator reply. Read the
+provider's skill for required arguments. Do not invent authorization or add
+a required approval phrase.
 Edit is explicit standing authorization inside the requested scope; ordinary
 writes do not need a new approval. Destructive confirmation still applies
 when `confirm_destructive_writes` is on. Read [modes](../modes/README.md) for
@@ -71,7 +75,8 @@ Qualify native Moodle first-use and provider operations before production releas
 ## Protect people and authority
 
 Use the encrypted learner vault on its supported runtime for people-bearing
-Canvas operations. Pseudonymous labels are not proof of legal anonymization.
+Canvas and Moodle operations. Keep labels inside their provider, account,
+and course scope. Pseudonymous labels are not proof of legal anonymization.
 Never paste LMS learner identifiers into Muse. Content, small cohorts, and
 free text can still identify people; minimize what is processed and reported.
 Read [privacy](privacy-ferpa.md) and [compliance](accessibility-and-compliance.md)

@@ -1416,9 +1416,9 @@ educator decisions)
 
 | Status | Canvas + Item Bank | Moodle lane | Total |
 |--------|------------------|-------------|-------|
-| live-proven | 203 | 2 | 205 |
-| pending | 215 | 248 | 463 |
-| failed | 14 | 0 | 14 |
+| live-proven | 209 | 2 | 211 |
+| pending | 212 | 248 | 460 |
+| failed | 12 | 0 | 12 |
 | evidence-hold | 5 | 0 | 5 |
 | unsupported | 11 | 0 | 11 |
 | excluded | 8 | 0 | 8 |
@@ -1426,6 +1426,6 @@ educator decisions)
 | New Quiz sequence rows | - | - | 10 live-proven, 1 unsupported |
 | Moodle lane-level rows (below the M-rows) | - | - | 5 live-proven, 5 unsupported |
 
-Canvas course-scoped ops in reference catalog: 436, plus 20 Item Bank quiz-api ops.
+Canvas rows in reference catalog: 437, plus 20 Item Bank quiz-api rows.
 Moodle ops in reference catalog: 250, plus 10 lane-level rows.
 Learner-data flagged: 146 Canvas, 26 Moodle.

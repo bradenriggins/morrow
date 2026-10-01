@@ -45,8 +45,10 @@ single automated signal. The educator makes consequential learner decisions.
 
 Feedback should be specific: identify the evidence, explain the gap against
 criteria, and suggest a next action. Use only the approved minimum student data.
-Drafting messages is different from sending them. This release excludes
+Drafting messages is different from sending them. Canvas excludes
 announcements and conversation sends; provide a draft for the educator to use.
+For Moodle, read [its workflows](moodle-workflows.md) and the operation's
+current admission before any forum post or notification-related change.
 Do not include other learners' records in feedback.
 
 ## End of term

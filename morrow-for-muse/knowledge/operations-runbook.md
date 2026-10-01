@@ -1,9 +1,45 @@
 # Operations runbook: what the catalog covers and how to dispatch it
 
-This is the agent-facing map of the Morrow for Muse operation catalog and
-the governed dispatch path. The catalog file is the provenance record;
+This is the agent-facing map of the Canvas and Item Bank operation catalog
+and its governed dispatch path. The catalog file is the provenance record;
 `dispatch/admission.py` with `dispatch/admission_policy.json` is the
 enforcement gate. Both must agree before anything dispatches.
+
+Moodle has a separate canonical browser catalog and command path. Use the
+Moodle procedure below. Do not send a Moodle operation through the Canvas
+HTTP catalog, approval commands, or learner lookup examples in this file.
+
+## Moodle operation procedure
+
+1. Follow [the Moodle skill](../moodle/SKILL.md) for private helper setup,
+   one-time account pairing, and exact-site selection. Check
+   `bin/morrow moodle status --site SITE` before work.
+2. Resolve course names, ID values, or links through
+   `bin/morrow moodle courses --site SITE`. Follow `next_offset` until
+   `complete` is true. There is no course-count limit. Discovery itself
+   needs no course selection; a write still needs an exact authorized target.
+3. Read `bin/morrow moodle catalog --site SITE` for canonical operation keys
+   and argument schemas. Use the target operation's declared review operation
+   with `read --operation KEY --arguments JSON`. Keep its fresh
+   `snapshot_digest` and use it as `expected_digest` in write arguments.
+   Use returned learner labels only in their original course scope.
+4. In Plan, run `bin/morrow moodle plan --site SITE --operation KEY
+   --arguments JSON`. Show the returned target, values, and undo disclosure.
+   After the educator approves, run `bin/morrow moodle approve --site SITE
+   --op-id UUID --authorization "their exact reply"` with that plan's ID.
+   In Edit, use `execute --operation KEY --arguments JSON` with the same
+   exact site and fresh digest. Mode, scope, privacy, halt, and provider
+   capability checks still apply.
+5. For file operations, use `stage-file` and the returned reviewed manifests
+   as described in the skill. Do not place file bytes or source paths in a
+   plan. Only `ok: true` with `verification.status: verified` proves a write.
+   Inspect native state after an uncertain result. Never replay it or assume
+   that a new operation ID makes a duplicate safe.
+
+The catalog contains 249 public Moodle operations and one internal roster
+operation. Presence is a runtime contract, not native qualification for every
+site, role, version, or plugin. Native setup and operation-specific provider
+proof are release requirements; fixture results do not replace them.
 
 ## The catalog in one minute
 
