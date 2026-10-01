@@ -326,8 +326,8 @@ try:
         report['cli_package_hashes'] = {name: hashlib.sha256((cli_tree / name).read_bytes()).hexdigest()
                                         for name in manifest['files']}
         check('cli_package_manifest_exact', report['cli_package_hashes'] == manifest['files'])
-        from config.paths import mint_tree_uuid
-        cli_id = mint_tree_uuid(cli_tree)
+        from config.paths import mint_tree_uuid, read_tree_uuid
+        cli_id = read_tree_uuid(cli_tree) or mint_tree_uuid(cli_tree)
         cli_state = root / 'cli-state'
         cli_state.mkdir(mode=0o700)
         (cli_state / '.morrow-tree-binding').write_text(cli_id)
@@ -550,11 +550,12 @@ try:
             no_effect('source_changed_before_send_refused', lambda: dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval, require_educator_channel=False))
             check('stale_source_keeps_approval_unconsumed', not approval_used(approval))
             provider_state['cm'][0]['name'] = 'Essay by Aster Sample'
+        approved_effects_before = effects
         write_result = dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval, require_educator_channel=False)
         report['approved_write_result'] = write_result
         report['approved_write_journal'] = find_journal_op(write_id)
         check('approved_write_verified', write_result.get('ok') is True and write_result.get('verification', {}).get('status') == 'verified')
-        check('exactly_one_approved_effect', effects == 1 and provider_state['cm'][0]['visible'] is False)
+        check('exactly_one_approved_effect', effects == approved_effects_before + 1 and provider_state['cm'][0]['visible'] is False)
         record = find_journal_op(write_id)
         check('durable_verified_outcome', record['verification'] == 'verified' and record['uncertain'] is False)
         check('journal_masks_learner', 'Aster Sample' not in json.dumps(record))
