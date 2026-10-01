@@ -11,12 +11,13 @@ its boundary. Do not load every document before every call.
 | [DOCTRINE.md](DOCTRINE.md) | Start here; intent, authority, modes, privacy, evidence |
 | [first-use-and-conversation.md](first-use-and-conversation.md) | First 30 minutes, natural course selection, calm recovery |
 | [canvas-and-moodle.md](canvas-and-moodle.md) | Provider concepts, identifiers, boundaries |
+| [moodle-workflows.md](moodle-workflows.md) | Moodle sections, completion, restrictions, grades, forums, and restore checks |
 | [instructional-design.md](instructional-design.md) | Alignment, practice, assessment, inclusive learning |
 | [course-visual-design.md](course-visual-design.md) | Readable LMS pages and saved visual checks |
 | [teacher-workflows.md](teacher-workflows.md) | Setup, rollover, weekly work, feedback, end of term |
 | [lms-administration.md](lms-administration.md) | Roles, templates, program-wide work, change control |
 | [accessibility-and-compliance.md](accessibility-and-compliance.md) | Accessibility review, legal/policy limits, sources |
-| [operations-runbook.md](operations-runbook.md) | Governed dispatch and operation recipes |
+| [operations-runbook.md](operations-runbook.md) | Canvas recipes and the separate Moodle command procedure |
 | [api-catalog-guide.md](api-catalog-guide.md) | Catalog discovery and admitted capabilities |
 | [api-patterns-and-errors.md](api-patterns-and-errors.md) | Payloads, pagination, response handling |
 | [troubleshooting-playbook.md](troubleshooting-playbook.md) | Helper, network, profile, authentication, recovery |

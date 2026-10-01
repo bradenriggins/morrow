@@ -44,12 +44,13 @@ they become agent-visible or journaled:
 - Anything the boundary cannot verify fails closed: the op is
   refused rather than surfacing raw learner PII.
 - Morrow cannot intercept what the educator types to Muse: names the
-  educator types reach the Muse model. Morrow keeps every other
-  student identifier from the LMS out.
+  educator types reach the Muse model. Projection covers identities known
+  to the verified roster and supported rules. It does not remove every
+  possible identifier from arbitrary course content; read the limits below.
 
 ## Working by name
 
-The educator names a student; the agent runs `bin/morrow students find
+For Canvas, the educator names a student; the agent runs `bin/morrow students find
 --course C "<name as typed>"` (`learners/find.py`), confirms any
 ambiguous or close-spelling match with the educator (never picks),
 and writes by label. The executor resolves the label to the real
@@ -58,6 +59,12 @@ course the write targets, and relabels everything the agent or the
 journal sees. In that conversation, the named student shows as
 "<name as typed> (Student A3)" (`privacy/name_echo.py`). Full flow:
 SKILL.md "Working by name"; policy: `privacy/FERPA_POLICY.md`.
+
+For Moodle, use [the Moodle skill](../moodle/SKILL.md) and its canonical
+operation schemas. Its source boundary uses complete native roster evidence
+and an encrypted provider/account/course scope. Do not pass a Canvas label
+or numeric identifier to Moodle. Do not use Canvas `students find` as a
+Moodle lookup or recover real identities outside the supported boundary.
 
 ## Honest limitations
 
