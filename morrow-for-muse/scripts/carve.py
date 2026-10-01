@@ -62,6 +62,7 @@ DEV_ONLY = (
     "scripts/install-e2e.sh", "scripts/helper-input-e2e.py",
     "scripts/moodle-browser-e2e.py", "moodle/BROWSER-CONTRACT.md",
     "scripts/moodle-write-readback-e2e.py",
+    "scripts/moodle-capability-probe-e2e.py",
     # rig-only session capture; production never runs it (SKILL.md)
     "session/capture.py",
     # the 2026-09-20 VM deployment record and its userspace scheduler
