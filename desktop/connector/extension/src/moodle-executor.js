@@ -4930,12 +4930,16 @@ export async function executeMoodleInPage(input) {
     if (definition.kind === "list-courses") {
       const response = await ajax(context, "core_course_get_enrolled_courses_by_timeline_classification", { classification: "allincludinghidden", limit: args.limit, offset: args.offset, sort: null, customfieldname: null, customfieldvalue: null, searchvalue: null, requiredfields: [] });
       if (!response.ok || !isObject(response.data) || !Array.isArray(response.data.courses)) return error(response.error || "moodle_courses_invalid", { status: response.status });
-      const courses = response.data.courses.slice(0, args.limit).map((course) => {
+      if (response.data.courses.length > args.limit) return error("moodle_courses_invalid", { status: response.status });
+      const seen = new Set();
+      const courses = response.data.courses.map((course) => {
         const courseId = id(course?.id);
-        const name = typeof course?.fullname === "string" && course.fullname.length > 0 && course.fullname.length <= 4096
+        const name = typeof course?.fullname === "string" && course.fullname.trim().length > 0 && course.fullname.length <= 4096
           ? course.fullname
           : "";
-        return courseId && name ? { id: courseId, name } : null;
+        if (!courseId || !name || seen.has(courseId)) return null;
+        seen.add(courseId);
+        return { id: courseId, name };
       });
       if (courses.some((course) => course === null)) return error("moodle_courses_invalid", { status: response.status });
       const complete = response.data.courses.length < args.limit;
