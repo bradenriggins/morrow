@@ -2,6 +2,8 @@
 
 ## 0.4.8 (2026-09-30)
 
+- Preserve continuation links with multiple relations, URI delimiters, or
+  parameter spacing. Keep quoted header text out of pagination decisions.
 - Add a task-based educator KB and canonical doctrine covering first use,
   Canvas/Moodle concepts, instructional design, visual quality, teacher
   workflows, administration, accessibility, and compliance. Correct stale
