@@ -89,6 +89,10 @@ The bootstrap/discovery layer couples to these deployment details:
   repository. Runtime journals are local to the configured journal
   directory and contain bounded receipts, not cookie or password values.
 - Write IDs also have atomic reservation files under the journal directory.
+  The default directory is `<MORROW_HOME>/journal/moodle`, outside the
+  installed package. Explicit journal directories still work. Older
+  package-local journals and reservations stay intact and are checked
+  before new dispatches, so this migration does not enable replay.
   Each reservation is synced before dispatch. Lost responses and failed
   readback retain it, so another session cannot resend the same write.
   A classified sign-in response releases a reservation only because it
