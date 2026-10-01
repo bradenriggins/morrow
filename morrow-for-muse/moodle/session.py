@@ -17,7 +17,8 @@ Rules from the architecture, enforced here:
     set (best-effort client-side guard, documented as weaker than the
     server-side set). The set is rehydrated from the append-only
     journal at startup, so a process restart cannot replay an op id
-    that was already journaled as dispatched.
+    that was already journaled as dispatched. Atomic reservation files are
+    synced before dispatch and retained after ambiguous failures.
   - Result bounds: an AJAX read over the UTF-8 byte cap is refused as
     incomplete; payloads never land whole in the journal.
   - Expiry classification (see reauth.py): requireloginerror and
@@ -512,10 +513,8 @@ class MoodleSession:
     def _rehydrate_op_ids(self) -> set:
         """Rebuild the used-op-id set from the append-only journal.
 
-        Every journal line carries its op_id, so every id ever
-        journaled is refused again after a restart. Corrupt lines are
-        skipped (a bad line must never kill startup); a missing
-        journal means a fresh set.
+        Every journal line carries its op_id. A missing journal is a fresh
+        set; an unreadable or corrupt journal refuses writes.
         """
         ids = set()
         try:
@@ -526,13 +525,19 @@ class MoodleSession:
                         continue
                     try:
                         rec = json.loads(line)
-                    except ValueError:
-                        continue
+                    except ValueError as exc:
+                        raise MoodleLaneError(
+                            "provider", "Moodle journal is corrupt; refusing writes") from exc
                     op_id = rec.get("op_id") if isinstance(rec, dict) else None
-                    if op_id:
-                        ids.add(str(op_id))
-        except OSError:
+                    if not op_id:
+                        raise MoodleLaneError(
+                            "provider", "Moodle journal is corrupt; refusing writes")
+                    ids.add(str(op_id))
+        except FileNotFoundError:
             pass
+        except OSError as exc:
+            raise MoodleLaneError(
+                "provider", "Moodle journal cannot be read; refusing writes") from exc
         return ids
 
     def journal(self, tool: str, args: Dict[str, Any],
@@ -561,7 +566,42 @@ class MoodleSession:
             raise MoodleLaneError("provider",
                                   "op id %s already used; refusing double dispatch"
                                   % op_id)
+        path = self._reservation_path(op_id)
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError as exc:
+            raise MoodleLaneError(
+                "provider", "op id %s already used; refusing double dispatch" % op_id) from exc
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"op_id": str(op_id), "status": "reserved"}) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            self._sync_reservation_directories()
+        except BaseException:
+            # An incomplete reservation still blocks replay. No provider
+            # request is safe until the reservation is durable.
+            self.used_op_ids.add(op_id)
+            raise
         self.used_op_ids.add(op_id)
+
+    def _reservation_path(self, op_id: str) -> str:
+        name = hashlib.sha256(str(op_id).encode("utf-8")).hexdigest()
+        return os.path.join(self.journal_dir, "reservations", name)
+
+    def _sync_reservation_directories(self) -> None:
+        for path in (os.path.join(self.journal_dir, "reservations"), self.journal_dir):
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+
+    def _release_no_effect(self, op_id: str) -> None:
+        os.unlink(self._reservation_path(op_id))
+        self._sync_reservation_directories()
+        self.used_op_ids.discard(op_id)
 
     # -- write path: frozen plan -> dispatch -> verify -> journal --------
 
@@ -574,15 +614,10 @@ class MoodleSession:
         op_id = plan.get("op_id") or str(uuid.uuid4())
         tool = plan["tool"]
         args = plan.get("args", {})
+        # A halted session cannot claim an operation until verified
+        # resume and fresh per-op approval.
+        self._check_reauth_halt()
         self._reserve(op_id)
-        # W4-P2-1: refuse loudly while the re-auth halt stands; the
-        # reservation is released so the op_id stays reusable after
-        # verified resume and fresh per-op approval.
-        try:
-            self._check_reauth_halt()
-        except MoodleLaneError:
-            self.used_op_ids.discard(op_id)
-            raise
 
         try:
             if tool.startswith("form:"):
@@ -597,7 +632,7 @@ class MoodleSession:
                 # the re-auth lifecycle (halt + quarantine + notify);
                 # engage_reauth_machine raises, so this never falls
                 # through to the journal below.
-                self.used_op_ids.discard(op_id)
+                self._release_no_effect(op_id)
                 self.engage_reauth_machine(op_id, tool, args, exc.detail)
             raise
 

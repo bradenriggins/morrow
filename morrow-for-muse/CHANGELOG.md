@@ -2,6 +2,9 @@
 
 ## 0.4.8 (2026-09-30)
 
+- Reserve Moodle write IDs durably before dispatch. Refuse replay after
+  lost responses, failed readback, or process restart, and refuse writes
+  when the existing journal cannot be trusted.
 - Keep pasted credentials and sign-in tokens out of Canvas tenant validation
   and installer refusal messages.
 - Keep session keys, SSO codes, URL credentials, and fragments out of
