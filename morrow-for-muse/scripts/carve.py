@@ -25,13 +25,15 @@ morrow-for-muse/, then:
      tree (the archive INSTALL.md names).
 
 The zip is what a release publishes, so --zip refuses to start while
-any tracked file under morrow-for-muse/ or a REPO_FILES file differs
+any tracked file under morrow-for-muse/, a shared Moodle asset, or a
+REPO_FILES file differs
 from the commit checked out: the zip then always holds that commit's
 bytes. A tree carve (no --zip, as CI and the tests run it) reads the
 working tree and records in its manifest whether it differed.
 
-The repository's LICENSE (see REPO_FILES) ships at the tree root too:
-the software's license lives outside morrow-for-muse/.
+The repository's LICENSE ships at the tree root. Canonical tracked
+Desktop Moodle adapters and their generated catalog ship unchanged under
+moodle/browser-assets/. Shared files participate in the commit check.
 
 Publication is atomic: the tree is staged beside --out and renamed
 into place only after every check passes. Nothing is ever written
@@ -103,6 +105,9 @@ DEV_ONLY = (
 )
 # Files git tracks at the repository root that ship at the tree root.
 REPO_FILES = ("LICENSE",)
+MOODLE_ASSET_SOURCE = "desktop/connector/extension/src/moodle-*.js"
+MOODLE_CATALOG_SOURCE = "desktop/connector/extension/generated/moodle-browser-catalog.json"
+MOODLE_CORE_SOURCE = "desktop/connector/extension/src/moodle-executor.js"
 # pytest-only test modules: they rely on conftest.py to stay out of the
 # live home, so run from an installed tree they would write the
 # educator's live journal. Only the install suites, which isolate
@@ -168,21 +173,26 @@ def shipped_files():
 
 
 def repo_files():
-    """{rel: source path} for REPO_FILES. Refuses a missing or untracked
-    file, and a file of the same name under morrow-for-muse/."""
+    """Map canonical tracked repository files to their package destinations."""
+    adapters = _git_out("ls-files", "-z", "--", MOODLE_ASSET_SOURCE)
+    paths = {raw.decode("utf-8") for raw in adapters.split(b"\0") if raw}
+    paths.update((MOODLE_CORE_SOURCE, MOODLE_CATALOG_SOURCE))
+    mappings = [(rel, rel) for rel in REPO_FILES]
+    mappings.extend((rel, "moodle/browser-assets/" + os.path.basename(rel))
+                    for rel in sorted(paths))
     out = {}
-    for rel in REPO_FILES:
+    for rel, destination in mappings:
         src = os.path.join(REPO, rel)
         tracked = subprocess.run(
             ["git", "-C", REPO, "ls-files", "--error-unmatch", "--", rel],
             capture_output=True).returncode == 0
-        if not tracked or not os.path.isfile(src):
+        if not tracked or not os.path.isfile(src) or os.path.islink(src):
             raise SystemExit("CARVE FAIL: the repository's %s is missing "
-                             "or not tracked by git" % rel)
-        if os.path.exists(os.path.join(SRC, rel)):
+                             "or not a tracked regular file" % rel)
+        if destination in out or os.path.lexists(os.path.join(SRC, destination)):
             raise SystemExit("CARVE FAIL: morrow-for-muse/%s would shadow "
-                             "the repository's %s" % (rel, rel))
-        out[rel] = src
+                             "the repository's %s" % (destination, rel))
+        out[destination] = src
     return out
 
 
@@ -193,7 +203,8 @@ def _git_out(*args, **kwargs):
 
 def source_state(sources):
     """(commit, changed): the commit checked out, and the repository
-    paths under morrow-for-muse/ or in REPO_FILES that differ from it.
+    paths under morrow-for-muse/, shared Moodle assets, or REPO_FILES that
+    differ from it.
     git diff names edits, staged changes, deleted and added files, and
     mode changes; comparing each source's bytes with the commit's also
     catches a file git was told to stop checking (assume-unchanged,
@@ -204,13 +215,17 @@ def source_state(sources):
     except subprocess.CalledProcessError:
         raise SystemExit("CARVE FAIL: the repository has no commit to "
                          "carve from")
-    scope = ["--", os.path.relpath(SRC, REPO)] + list(REPO_FILES)
+    scope = ["--", os.path.relpath(SRC, REPO), MOODLE_ASSET_SOURCE,
+             MOODLE_CATALOG_SOURCE] + list(REPO_FILES)
     changed = {path.decode("utf-8") for path in _git_out(
         "diff", "--name-only", "--no-renames", "-z", "HEAD",
         *scope).split(b"\0") if path}
     committed = {}
+    tree_scope = ["--", os.path.relpath(SRC, REPO),
+                  os.path.dirname(MOODLE_CORE_SOURCE),
+                  MOODLE_CATALOG_SOURCE] + list(REPO_FILES)
     for entry in _git_out("ls-tree", "-r", "-z", "HEAD",
-                          *scope).split(b"\0"):
+                          *tree_scope).split(b"\0"):
         if entry:
             meta, path = entry.split(b"\t", 1)
             committed[path.decode("utf-8")] = meta.split()[2].decode()

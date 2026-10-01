@@ -1,5 +1,13 @@
 # Changelog
 
+## Release hardening: shared Moodle browser assets
+
+- Package the canonical Desktop Moodle browser adapters and 250-operation
+  catalog unchanged. Include each file in the integrity manifest.
+- Refuse missing or shadowed assets and release ZIPs with changed shared
+  sources. Run Muse gates when those sources or the catalog change.
+- Assets alone do not enable governed Moodle dispatch or native setup.
+
 ## Release hardening: Moodle 4.1 browser identity
 
 - Resolve Moodle 4.1 accounts through the provider's own profile context in

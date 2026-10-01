@@ -53,3 +53,10 @@ test("every root file the Muse carve ships is one the Muse filter watches", () =
   const unwatched = shipped.filter((path) => !ROOT_FILE_READERS[path]?.products.includes("muse") || !productsFor(filters, path).includes("muse"));
   assert.deepEqual(unwatched, [], "a root file the carve ships must run the Muse suite when it changes");
 });
+
+
+test("shared Moodle adapter and catalog changes run the Muse suite", () => {
+  for (const path of ["desktop/connector/extension/src/moodle-executor.js", "desktop/connector/extension/src/moodle-extra-executor.js", "desktop/connector/extension/generated/moodle-browser-catalog.json"]) {
+    assert.deepEqual(productsFor(filters, path), ["desktop", "muse"], path);
+  }
+});

@@ -51,6 +51,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -169,6 +170,12 @@ def mini(tmp_path, monkeypatch):
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
+    shared = Path(TREE).parent / "desktop" / "connector" / "extension"
+    for source in [*sorted((shared / "src").glob("moodle-*.js")),
+                   shared / "generated" / "moodle-browser-catalog.json"]:
+        destination = repo / source.relative_to(Path(TREE).parent)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
     script = repo / "morrow-for-muse" / "scripts" / "carve.py"
     shutil.copy2(os.path.join(HERE, "carve.py"), str(script))
     _mini_git(repo, "init", "-q")
@@ -499,3 +506,90 @@ def test_env_template_promises_only_what_keepalive_honors():
         keepalive = fh.read()
     assert 'export LOGIN_HELPER_PROFILE_DIR="${HELPER_DIR}/profile"' \
         in keepalive
+
+
+# Shared-adapter failure cases precede the carve implementation.
+SHARED_CORE = "desktop/connector/extension/src/moodle-executor.js"
+SHARED_CATALOG = "desktop/connector/extension/generated/moodle-browser-catalog.json"
+
+
+def test_canonical_moodle_assets_ship_byte_for_byte(carved):
+    root = Path(TREE).parent
+    sources = [*sorted((root / "desktop/connector/extension/src").glob("moodle-*.js")),
+               root / SHARED_CATALOG]
+    manifest = json.loads((Path(carved) / "pack/carve-manifest.json").read_text())
+    assert len(sources) == 41
+    for source in sources:
+        rel = "moodle/browser-assets/" + source.name
+        destination = Path(carved) / rel
+        assert destination.is_file(), rel
+        assert destination.read_bytes() == source.read_bytes(), rel
+        assert manifest["files"][rel] == hashlib.sha256(source.read_bytes()).hexdigest()
+    catalog = json.loads((Path(carved) / "moodle/browser-assets/moodle-browser-catalog.json").read_text())
+    assert catalog["provider"] == "moodle"
+    assert len(catalog["operations"]) == 250
+    assert len({row["key"] for row in catalog["operations"]}) == 250
+
+
+@pytest.mark.parametrize("path", [SHARED_CORE, SHARED_CATALOG])
+@pytest.mark.parametrize("failure", ["deleted", "untracked", "shadowed"])
+def test_incomplete_or_shadowed_moodle_assets_refuse_before_publication(mini, path, failure):
+    repo, module = mini
+    if failure == "deleted":
+        (repo / path).unlink()
+    elif failure == "untracked":
+        _mini_git(repo, "rm", "--cached", path)
+    else:
+        shadow = repo / "morrow-for-muse/moodle/browser-assets" / Path(path).name
+        shadow.parent.mkdir(parents=True, exist_ok=True)
+        shadow.write_text("shadow")
+    out = repo / "dist" / module.DIST_NAME
+    with pytest.raises(SystemExit) as refused:
+        module.carve(str(out), make_zip=True, run_gate=False)
+    assert path in str(refused.value)
+    assert not (repo / "dist").exists()
+
+
+@pytest.mark.parametrize("path", [SHARED_CORE, SHARED_CATALOG])
+@pytest.mark.parametrize("change", ["edit", "stage", "mode", "assume", "skip"])
+def test_shared_asset_changes_refuse_release_zip(mini, path, change):
+    repo, module = mini
+    if change in ("assume", "skip"):
+        flag = "--assume-unchanged" if change == "assume" else "--skip-worktree"
+        _mini_git(repo, "update-index", flag, path)
+    if change == "mode":
+        os.chmod(repo / path, 0o755)
+    else:
+        _append(repo / path, "\n ")
+    if change == "stage":
+        _mini_git(repo, "add", path)
+    out = repo / "dist" / module.DIST_NAME
+    with pytest.raises(SystemExit) as refused:
+        module.carve(str(out), make_zip=True, run_gate=False)
+    assert path in str(refused.value)
+    assert not (repo / "dist").exists()
+
+
+def test_new_tracked_moodle_adapter_ships_and_its_change_blocks_zip(mini):
+    repo, module = mini
+    path = "desktop/connector/extension/src/moodle-extra-executor.js"
+    (repo / path).write_text("export function extra() { return 1; }\n")
+    _mini_git(repo, "add", path)
+    _mini_git(repo, "commit", "-q", "-m", "new adapter")
+    out = repo / "dist" / module.DIST_NAME
+    module.carve(str(out), make_zip=True, run_gate=False)
+    with zipfile.ZipFile(repo / "dist" / (module.DIST_NAME + "-9.9.9.zip")) as zf:
+        assert zf.read(module.DIST_NAME + "/moodle/browser-assets/moodle-extra-executor.js") == (repo / path).read_bytes()
+    _append(repo / path)
+    with pytest.raises(SystemExit) as refused:
+        module.carve(str(out), make_zip=True, run_gate=False)
+    assert path in str(refused.value)
+
+
+def test_deleted_additional_moodle_adapter_refuses(mini):
+    repo, module = mini
+    path = "desktop/connector/extension/src/moodle-forum-post-executor.js"
+    (repo / path).unlink()
+    with pytest.raises(SystemExit) as refused:
+        module.carve(str(repo / "dist" / module.DIST_NAME), run_gate=False)
+    assert path in str(refused.value)
