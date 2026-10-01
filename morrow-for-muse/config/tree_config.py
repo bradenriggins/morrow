@@ -22,7 +22,7 @@ embeds an account and password, an http:// address, a private IP
 literal, or an unconfirmed custom domain fails the install with the
 helper's plain reason instead of being sent to the network.
 
-Stdlib only.
+International host spelling uses the locked IDNA dependency when needed.
 """
 
 import ipaddress
@@ -30,6 +30,7 @@ import os
 import urllib.parse
 
 from config.paths import morrow_home
+from config.site_url import canonical_netloc
 
 TREE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_HELPER_PORT = 8901
@@ -165,11 +166,13 @@ def normalize_tenant_base(base_url):
     _normalize_tenant_base is this function (moved here 2026-09-23 so
     install.sh and the helper cannot drift; muse UX audit 3).
     """
+    if any(ord(char) < 32 for char in base_url):
+        raise ValueError("CANVAS_BASE must not contain control characters")
     parsed = urllib.parse.urlsplit(base_url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError(
             "CANVAS_BASE must be an absolute http(s) URL with a host")
-    if parsed.username or parsed.password:
+    if parsed.username is not None or parsed.password is not None:
         raise ValueError(
             "CANVAS_BASE must not embed credentials (userinfo)")
     if parsed.scheme != "https" \
@@ -177,7 +180,8 @@ def normalize_tenant_base(base_url):
         raise ValueError(
             "CANVAS_BASE must be https; set "
             "CANVAS_BASE_ALLOW_HTTP=1 for a documented local-dev override")
-    host = (parsed.hostname or "").lower()
+    netloc = canonical_netloc(parsed)
+    host = urllib.parse.urlsplit(parsed.scheme + "://" + netloc).hostname
     _PLACEHOLDER_HOSTS = frozenset({
         "instructure.com",
         "example.com",
@@ -205,6 +209,14 @@ def normalize_tenant_base(base_url):
             "(loopback, link-local, or private)")
     confirmed = os.environ.get(
         "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", "").strip().lower()
+    if confirmed and not host.endswith(".instructure.com"):
+        confirmation = urllib.parse.urlsplit("https://" + confirmed)
+        if (confirmation.netloc != confirmed or confirmation.path
+                or confirmation.query or confirmation.fragment
+                or confirmation.port is not None):
+            raise ValueError("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED must be an exact host")
+        confirmed = urllib.parse.urlsplit(
+            "https://" + canonical_netloc(confirmation)).hostname
     if not (host == "instructure.com"
             or host.endswith(".instructure.com")
             or (confirmed and host == confirmed)):
@@ -213,4 +225,4 @@ def normalize_tenant_base(base_url):
             "a self-hosted Canvas domain set "
             "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=%s"
             % (host,))
-    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
+    return urllib.parse.urlunsplit((parsed.scheme, netloc, "/", "", ""))

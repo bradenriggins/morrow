@@ -68,11 +68,11 @@ def world(tmp_path):
         "CANVAS_BASE=https://school.instructure.com\n"
         "LOGIN_HELPER_PORT=18911\n")
     # The step-10 tenant gate imports the tree's shared validator
-    # (config.tree_config, which pulls in config.paths), so the fake
+    # (config.tree_config, which pulls in config.paths and config.site_url), so the fake
     # tree carries the real modules.
     cfg = tree / "config"
     cfg.mkdir()
-    for name in ("tree_config.py", "paths.py"):
+    for name in ("tree_config.py", "paths.py", "site_url.py"):
         shutil.copy(os.path.join(TREE, "config", name),
                     str(cfg / name))
     _executable(str(tree / "helper" / "keepalive.sh"),

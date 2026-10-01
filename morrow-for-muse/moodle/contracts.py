@@ -3,6 +3,7 @@ import os
 import re
 from typing import Dict, Optional
 from urllib.parse import urlparse
+from config.site_url import canonical_netloc
 
 
 def normalize_moodle_base(raw):
@@ -19,6 +20,8 @@ def normalize_moodle_base(raw):
     raw = (raw or "").strip()
     if not raw:
         raise ValueError("Moodle base URL is empty")
+    if any(ord(char) < 32 for char in raw):
+        raise ValueError("Moodle base URL must not contain control characters")
     parsed = urlparse(raw if "://" in raw else "https://" + raw)
     try:
         port = parsed.port
@@ -51,7 +54,7 @@ def normalize_moodle_base(raw):
             raise ValueError("Moodle base URL has an unsafe site path")
     else:
         path = ""
-    return parsed.scheme + "://" + parsed.netloc + path
+    return parsed.scheme + "://" + canonical_netloc(parsed) + path
 
 
 
