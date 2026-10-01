@@ -1,6 +1,13 @@
 # Changelog
 
-## Release hardening: browser site identity
+## 0.4.8 (unreleased)
+
+The `morrow-muse-connector-0.4.8.zip` package is not published yet.
+Native Muse onboarding and live Canvas/Moodle qualification must pass before
+publication. Build the candidate from committed source as described in
+`INSTALL.md`.
+
+### Release hardening: browser site identity
 
 - Match Chromium host spelling for uppercase DNS names, international
   domains, IPv6, and default ports. Keep non-default ports and Moodle
@@ -11,7 +18,7 @@
 - Reject credentials, invalid ports, control characters, and ambiguous
   numeric host aliases before starting a provider session.
 
-## Release hardening: account course discovery
+### Release hardening: account course discovery
 
 - Support the canonical account-level course read without selecting a
   course first. Use the same governed path for the public course list.
@@ -20,7 +27,7 @@
 - Reuse a pinned collector with bounded workers and verified requests.
   Recheck the account and session before returning any course results.
 
-## Release hardening: private Moodle files
+### Release hardening: private Moodle files
 
 - Stage exact local file bytes in encrypted private state for the paired
   account, site, and course. Return only the reviewed manifest through
@@ -30,7 +37,7 @@
 - Preserve native draft and saved-byte verification, frozen approval,
   scope, halt, and replay controls.
 
-## Release hardening: ordered web helper input
+### Release hardening: ordered web helper input
 
 - Replace separate key requests with ordered text and control-key batches.
   Keep paste, IME, clicks, and scrolling in input order.
@@ -40,7 +47,7 @@
 - Add field fitting, full-page fitting, zoom, expanded view, and manual pan.
   Keep keyboard focus from moving the header out of view.
 
-## Release hardening: Moodle helper provider setup
+### Release hardening: Moodle helper provider setup
 
 - Select Canvas or Moodle in the installed tree's helper configuration.
   Preserve Moodle site paths and refuse navigation to sibling sites or
@@ -54,7 +61,7 @@
   sign-in wording. Native owner-card qualification remains required before
   publication.
 
-## Release hardening: governed Moodle command path
+### Release hardening: governed Moodle command path
 
 - Pair an installed-Chromium Moodle account once with automatic educator
   identity detection. Page courses without a course-count limit.
@@ -69,7 +76,7 @@
 - Native Moodle helper setup and broader native provider qualification
   remain release requirements.
 
-## Release hardening: canonical Moodle operation routes
+### Release hardening: canonical Moodle operation routes
 
 - Derive all 250 operation routes from the Desktop worker. Bind each
   selected adapter to exact source bytes and a function hash.
@@ -78,7 +85,7 @@
 - Check route generation and shared dependencies in CI and pre-commit.
   Browser execution, admission, and native setup remain release gates.
 
-## Release hardening: shared Moodle browser assets
+### Release hardening: shared Moodle browser assets
 
 - Package the canonical Desktop Moodle browser adapters and 250-operation
   catalog unchanged. Include each file in the integrity manifest.
@@ -86,7 +93,7 @@
   sources. Run Muse gates when those sources or the catalog change.
 - Assets alone do not enable governed Moodle dispatch or native setup.
 
-## Release hardening: Moodle 4.1 browser identity
+### Release hardening: Moodle 4.1 browser identity
 
 - Resolve Moodle 4.1 accounts through the provider's own profile context in
   Chromium. Require matching site/session and pinned account before reads.
@@ -95,7 +102,7 @@
 - The disposable Chromium E2E passes 64 checks. Production Moodle operation
   admission, native setup, and live provider proof are still required.
 
-## 0.4.8 (2026-09-30)
+### Connector and knowledge improvements
 
 - Keep the read-only Moodle capability probe on known read functions.
   Never test mutation support by assuming a large target ID cannot exist.
@@ -103,7 +110,7 @@
   before dispatch and retain failed verification records and replay guards.
 - Add the Moodle browser identity and course-page transport. Keep session
   material inside Chromium and refuse site or account changes. The governed
-  Moodle operation and setup integration remains a release gate.
+  Moodle operation path is integrated; native setup remains a release gate.
 - Refuse unsafe Moodle form paths before sending the session key. Keep
   form query values out of receipts.
 - Store new Moodle journals and write reservations under `MORROW_HOME`.
@@ -124,8 +131,6 @@
   workflows, administration, accessibility, and compliance. Correct stale
   transport, pagination, approval, encryption, and privacy guidance; remove
   agent-visible credential slots from product metadata.
-
-The release package is `morrow-muse-connector-0.4.8.zip` from the `muse/v0.4.8` GitHub release.
 
 - Complete course-only installs when an older optional encryption library is already present. The install checks now use the same library readiness check as the learner vault.
 - Do not label a Chrome network error or unrelated page as a signed-out Canvas session; keepalive requires the configured Canvas login URL.
