@@ -33,7 +33,8 @@ FILES_PROOF = "--private-file-proof" in sys.argv[4:]
 ACCOUNT_COURSE_PROOF = "--account-course-proof" in sys.argv[4:]
 COURSE_DISCOVERY_PRIVACY_PROOF = "--course-discovery-privacy-proof" in sys.argv[4:]
 COURSE_NAME_PROOF = "--masked-course-plan-proof" in sys.argv[4:]
-HELPER_PROVIDER_PROOF = "--moodle-helper-provider-proof" in sys.argv[4:]
+SITE_NORMALIZATION_PROOF = "--site-normalization-proof" in sys.argv[4:]
+HELPER_PROVIDER_PROOF = "--moodle-helper-provider-proof" in sys.argv[4:] or SITE_NORMALIZATION_PROOF
 if CLI_PROOF:
     sys.path.remove(str(TREE))
     TREE = Path(os.environ['MORROW_CLI_TEST_TREE']).resolve()
@@ -301,11 +302,12 @@ try:
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls.load_cert_chain(cert, key)
     provider.tls = tls
-    base = 'https://127.0.0.1:%d/lms' % provider.server_port
+    fixture_host = 'localhost' if SITE_NORMALIZATION_PROOF else '127.0.0.1'
+    base = 'https://%s:%d/lms' % (fixture_host, provider.server_port)
     os.environ['CANVAS_BASE'] = 'https://sandbox.moodledemo.net'
     if HELPER_PROVIDER_PROOF:
         os.environ.pop('CANVAS_BASE', None)
-        os.environ['MOODLE_BASE'] = base
+        os.environ['MOODLE_BASE'] = base.replace('localhost', 'LOCALHOST') if SITE_NORMALIZATION_PROOF else base
         os.environ['MORROW_LMS_PROVIDER'] = 'moodle'
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     with urllib.request.urlopen(base + '/', context=ssl._create_unverified_context(), timeout=3) as response:
@@ -318,9 +320,11 @@ try:
     browser = server.HelperBrowser()
     browser.launcher.extra_args.extend(['--ignore-certificate-errors', '--disable-features=LocalNetworkAccessChecks'])
     if HELPER_PROVIDER_PROOF:
-        check('moodle_helper_configuration_selected', server.DEFAULT_BASE.rstrip('/') == base)
+        if not SITE_NORMALIZATION_PROOF:
+            check('moodle_helper_configuration_selected', server.DEFAULT_BASE.rstrip('/') == base)
         browser.start(server.DEFAULT_BASE)
-        check('moodle_helper_site_subpath_preserved', browser.base_url.rstrip('/') == base)
+        if not SITE_NORMALIZATION_PROOF:
+            check('moodle_helper_site_subpath_preserved', browser.base_url.rstrip('/') == base)
     else:
         browser.launcher.start()
         browser.cdp = browser.launcher.cdp
@@ -333,6 +337,58 @@ try:
         raise
     if not HELPER_PROVIDER_PROOF:
         browser.base_url = base
+    if SITE_NORMALIZATION_PROOF:
+        report['site_normalization'] = {'configured': browser.base_url,
+            'browser_href': browser.cdp.evaluate(browser.tab, 'location.href')}
+        check('browser_canonicalizes_uppercase_host', report['site_normalization']['browser_href'] == base + '/')
+        check('helper_uses_same_canonical_site', browser.base_url == base + '/')
+        from moodle.contracts import normalize_moodle_base
+        from config.tree_config import normalize_tenant_base
+        for index, raw in enumerate(('https://SCHOOL.test:443/Moodle',
+                                     'https://SCHOOL.test:08443/Moodle',
+                                     'https://[2001:0DB8:0:0:0:0:0:1]:443/Moodle',
+                                     'https://Straße.test:443/Moodle')):
+            expected = browser.cdp.evaluate(browser.tab, 'new URL(%s).href' % json.dumps(raw)).rstrip('/')
+            check('moodle_site_browser_equivalence_' + str(index), normalize_moodle_base(raw) == expected)
+        for index, raw in enumerate(('https://SCHOOL.instructure.com:443/path',
+                                     'https://SCHOOL.instructure.com:08443/path',
+                                     'https://SchÖÖl.instructure.com:443/path')):
+            expected = browser.cdp.evaluate(browser.tab, 'new URL(%s).origin + "/"' % json.dumps(raw))
+            check('canvas_site_browser_equivalence_' + str(index), normalize_tenant_base(raw) == expected)
+        confirmed_domain = os.environ.get('CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED')
+        try:
+            os.environ['CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED'] = 'Straße.school.test'
+            raw = 'https://Straße.school.test:443/course'
+            expected = browser.cdp.evaluate(browser.tab, 'new URL(%s).origin + "/"' % json.dumps(raw))
+            normalized = normalize_tenant_base(raw)
+            check('canvas_custom_unicode_browser_equivalence', normalized == expected)
+            check('canvas_custom_unicode_normalization_idempotent', normalize_tenant_base(normalized) == normalized)
+        finally:
+            if confirmed_domain is None:
+                os.environ.pop('CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED', None)
+            else:
+                os.environ['CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED'] = confirmed_domain
+        for index, raw in enumerate(('https://127.1/lms', 'https://0x7f000001/lms',
+                                     'https://0177.0.0.1/lms', 'https://127.0.0.1./lms')):
+            expected_host = browser.cdp.evaluate(browser.tab, 'new URL(%s).hostname' % json.dumps(raw))
+            check('browser_numeric_alias_is_loopback_' + str(index), expected_host == '127.0.0.1')
+            try:
+                normalize_moodle_base(raw)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('moodle_ambiguous_numeric_host_accepted_' + str(index))
+            check('moodle_ambiguous_numeric_host_refused_' + str(index), True)
+        for index, raw in enumerate(('https://@school.instructure.com',
+                                     'https://school.instructure.com:bad',
+                                     'https://school.instructure.com:0')):
+            try:
+                normalize_tenant_base(raw)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('canvas_unsafe_site_accepted_' + str(index))
+            check('canvas_unsafe_site_refused_' + str(index), True)
     server.BROWSER = browser
     helper = server.BoundedThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
     threading.Thread(target=helper.serve_forever, daemon=True).start()

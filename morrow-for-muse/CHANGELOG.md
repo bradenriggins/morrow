@@ -1,5 +1,16 @@
 # Changelog
 
+## Release hardening: browser site identity
+
+- Match Chromium host spelling for uppercase DNS names, international
+  domains, IPv6, and default ports. Keep non-default ports and Moodle
+  site paths intact.
+- Keep confirmed international Canvas domains valid when the installed
+  configuration is read again. Check the canonical host before applying
+  placeholder, address, and custom-domain rules.
+- Reject credentials, invalid ports, control characters, and ambiguous
+  numeric host aliases before starting a provider session.
+
 ## Release hardening: account course discovery
 
 - Support the canonical account-level course read without selecting a
