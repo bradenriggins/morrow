@@ -127,6 +127,7 @@ class MoodleDispatcher:
         if entry['effects'] != 'write':
             raise ValueError('Only Moodle writes need a frozen plan')
         binding = self._binding(arguments.get('course_id'))
+        review = self._review(operation_key, arguments, binding)
         identity = self._private_read(_STATE, {'course_id': arguments['course_id']}, binding, mode='check_course')
         if identity.get('ok') is not True:
             raise MoodleLaneError('provider', 'Moodle course target could not be verified')
@@ -134,9 +135,32 @@ class MoodleDispatcher:
         data = identity['data']
         return executor.FrozenPlan({'op_id': op_id, 'entry_name': entry['name'],
             'params': arguments, 'before_state_digest': arguments['expected_digest'],
-            'frozen_readback': {'course_id': data['id'], 'course_name': data['name']},
+            'frozen_readback': {'course_id': data['id'], 'course_name': data['name'], 'review': review},
             'target_identity': {'course_id': data['id'], 'course_name': data['name']},
             'request': subject, 'request_digest': admission.request_digest(subject)}, '<Moodle browser plan>')
+
+    def _review(self, operation_key, arguments, binding):
+        definition = self.loader.definitions[operation_key]
+        reviewers = [row for row in self.loader.definitions.values()
+                     if row['toolName'] == definition.get('reviewTool') and row['readOnly']]
+        if len(reviewers) != 1:
+            raise executor.MissingFrozenPlan('Moodle write has no canonical review operation')
+        reviewer = reviewers[0]
+        schema = reviewer['inputSchema']
+        params = {key: value for key, value in arguments.items() if key in schema.get('properties', {})}
+        # The event writer reviews exactly the month that contains its start.
+        if definition['toolName'] == 'moodle_create_course_event':
+            params['month_count'] = 1
+        if any(key not in params for key in schema.get('required', [])):
+            raise executor.MissingFrozenPlan('Moodle write is missing its canonical review target')
+        entry = self.descriptor(reviewer['key'], params)
+        admission.check_policy_gates(entry, vault_ready=True)
+        if not moodle_source_history_available(entry['name'], reviewer.get('dataClass')):
+            raise MoodleLaneError('privacy', 'Moodle review needs proven historical learner data')
+        result = self._private_read(reviewer['key'], params, binding)
+        if result.get('ok') is not True or result.get('snapshot_digest') != arguments['expected_digest']:
+            raise executor.StaleBeforeState('Moodle source changed. Read the target again before approving this write.')
+        return result
 
     def dispatch(self, operation_key, arguments, *, op_id, plan=None, approval=None,
                  mode_ctx=None, require_educator_channel=True):
@@ -149,6 +173,8 @@ class MoodleDispatcher:
             approval=approval, op_id=op_id, vault_ready=True,
             mode_ctx=mode_ctx, require_educator_channel=require_educator_channel)
         binding = self._binding(arguments.get('course_id'))
+        if is_write:
+            self._review(operation_key, arguments, binding)
         state = {'claim': None, 'started': False}
         boundary = self._boundary(binding)
 

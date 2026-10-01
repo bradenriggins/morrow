@@ -33,6 +33,12 @@ adapter hashes, site, account, arguments and privacy policy. A durable claim
 precedes invocation. Only a verified provider readback permits success.
 Uncertain outcomes remain reserved and cannot be replayed. The helper proxy
 paces every request below its normal rate limit; its limits stay unchanged.
+The pinned catalog names a read-only review operation for every write. The
+controller reads that target before freezing a plan and again before write
+admission is consumed. A changed digest refuses the write and preserves the
+approval. The frozen readback contains the projected review result. The real
+helper fixture also restarts the Python controller in a new process and
+proves that a fresh approval cannot replay an uncertain operation ID.
 
 The controller is not yet a public CLI entrypoint. Its fixture evidence covers
 course structure and activity visibility. Private file payloads, learner-token
