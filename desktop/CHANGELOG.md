@@ -2,7 +2,7 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
-## 1.0.8 (2026-09-30)
+## 1.0.8 (2026-10-01)
 
 This release includes Morrow Bridge 1.0.130 and unsigned installers for Mac with Apple silicon and Windows x64.
 
