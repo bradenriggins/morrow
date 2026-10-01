@@ -42,7 +42,15 @@ class Handler(BaseHTTPRequestHandler):
         cfg = {"wwwroot": base + ("/other" if state["badroot"] else ""),
                "userId": state["id"], "currentlogin": state["login"],
                "sesskey": secret, "theme": "semicolon; braces } and escaped \\\""}
+        legacy = state["mode"] in ("legacy", "legacyguest", "legacyduplicate")
+        if legacy:
+            cfg.pop("currentlogin")
         html = '<script>var M={}; M.cfg=' + json.dumps(cfg) + ';</script>'
+        if legacy:
+            login = '123456' if state["mode"] == "legacy" else 'null'
+            html += "<script>require(['core/storage_validation'], function(amd) {amd.init(" + login + "); M.util.js_complete('core/storage_validation');});</script>"
+            if state["mode"] == "legacyduplicate":
+                html += "<script>require(['core/storage_validation'], function(amd) {amd.init(123456);});</script>"
         if state["mode"] == "malformed":
             html = '<script>M.cfg={not_json};</script>'
         if state["mode"] == "duplicate":
@@ -113,6 +121,13 @@ try:
         report["fixture_location"] = launcher.cdp.evaluate(tab, "location.href", await_promise=False)
         report["transport_base"] = transport.base
         check("browser_identity_ignores_main_realm", transport.identity() == {"id": "42", "site_url": base})
+        state["mode"] = "legacy"
+        check("moodle45_footer_login_identity", transport.identity() == {"id": "42", "site_url": base})
+        state["mode"] = "legacyguest"
+        refused("moodle45_guest", transport.courses_page, True)
+        state["mode"] = "legacyduplicate"
+        refused("moodle45_duplicate_login_marker", transport.courses_page, True)
+        state["mode"] = "ok"
         result = []
         offset = 0
         while True:

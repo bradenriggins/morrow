@@ -46,9 +46,18 @@ https://github.com/moodle/moodle/blob/main/public/lib/classes/output/requirement
 as JSON through `js_writer::set_variable`. It includes `wwwroot`, `sesskey`,
 `userId`, and `currentlogin`.
 
+Moodle 4.5 exposes `userId` but places `currentlogin` in the exact
+`core/storage_validation` AMD initialization emitted by `js_call_amd`.
+The browser parses this source-defined marker without executing page code.
+Null, missing, and duplicate login markers refuse. A modern `M.cfg` value
+takes precedence, including a null value; it cannot be replaced by a footer.
+https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/lib/classes/output/requirements/page_requirements_manager.php
+Moodle 4.1 does not expose `M.cfg.userId`; its account-identity compatibility
+path remains an open integration requirement.
+
 ## Current evidence
 
-Layer 1 has 30 passing real Chromium checks, including all 257 courses,
+Layer 1 has 35 passing real Chromium checks, including all 257 courses,
 isolated-world fetch, site-prefix tab selection, and fail-closed responses.
 The test is repeatable with:
 

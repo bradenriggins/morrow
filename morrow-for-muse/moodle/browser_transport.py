@@ -77,8 +77,18 @@ _BROWSER_READ = r"""(async () => {
     const cfg = configurations[0];
     if (!cfg || typeof cfg !== 'object' || typeof cfg.wwwroot !== 'string' ||
         cfg.wwwroot.replace(/\/$/, '') !== input.base) return fail('site_mismatch');
+    let currentLogin = cfg.currentlogin;
+    if (!Object.hasOwn(cfg, 'currentlogin')) {
+      const logins = [];
+      for (const script of doc.querySelectorAll('script:not([src])')) {
+        for (const match of (script.textContent || '').matchAll(/require\s*\(\s*\[\s*['"]core\/storage_validation['"]\s*\]\s*,\s*function\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*\{\s*\1\.init\s*\(\s*(null|[0-9]+)\s*\)\s*;/g))
+          logins.push(match[2] === 'null' ? null : Number(match[2]));
+      }
+      if (logins.length !== 1) return fail('session_unavailable');
+      currentLogin = logins[0];
+    }
     if (!Number.isSafeInteger(cfg.userId) || cfg.userId < 1 ||
-        !Number.isSafeInteger(cfg.currentlogin) || cfg.currentlogin < 1 ||
+        !Number.isSafeInteger(currentLogin) || currentLogin < 1 ||
         typeof cfg.sesskey !== 'string' || !cfg.sesskey || cfg.sesskey.length > 512)
       return fail('session_unavailable');
     if (String(cfg.userId) !== input.principal_id) return fail('principal_mismatch');
