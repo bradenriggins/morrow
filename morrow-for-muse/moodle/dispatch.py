@@ -1,4 +1,5 @@
 """Governed execution of pinned Moodle adapters in the owner's Chromium."""
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import re
@@ -90,7 +91,7 @@ class MoodleDispatcher:
         parsed = urlsplit(self.transport.base)
         account = _digest(self.transport.base + '\n' + identity['id'])
         return {'sourceBindingId': 'moodle-' + _digest(account + ':' + str(course_id)),
-                'provider': 'moodle', 'courseId': str(course_id),
+                'provider': 'moodle', 'courseId': str(course_id) if course_id is not None else None,
                 'origin': parsed.scheme + '://' + parsed.netloc,
                 'siteUrl': self.transport.base, 'principalId': identity['id'],
                 'principalFingerprint': _digest(identity['id']),
@@ -217,6 +218,69 @@ class MoodleDispatcher:
             raise executor.StaleBeforeState('Moodle source changed. Read the target again before approving this write.')
         return result
 
+    def _account_courses(self, operation_key, arguments):
+        account = self._binding(None)
+        request = self._request(operation_key, arguments, {key: value for key, value in account.items() if value is not None})
+        tab, context, staged = self.transport._stage_operation(self.loader, operation_key, request)
+        try:
+            slot = json.dumps(staged.slot)
+            expression = '(async () => {const s = globalThis[%s]; if (!s || location.href !== s.href) throw new Error("moodle_context_changed"); return JSON.stringify(await s.fn(s.input));})()' % slot
+            result = json.loads(self.transport.cdp.evaluate(tab, expression, context_id=context,
+                await_promise=True, timeout=90))
+            if not isinstance(result, dict) or result.get('ok') is not True:
+                return {'ok': False, 'error': 'moodle_course_discovery_unconfirmed'}
+            rows = result.get('data', {}).get('courses')
+            if not isinstance(rows, list) or len(rows) > 100:
+                raise MoodleLaneError('provider', 'Moodle course discovery could not be verified')
+            if rows:
+                seed = {**account, 'courseId': rows[0]['id'],
+                        'sourceBindingId': 'moodle-' + _digest(account['accountFingerprint'] + ':' + rows[0]['id'])}
+                roster_request = self._request(_ROSTER, {'course_id': int(seed['courseId'])}, seed)
+                collector = self.loader.stage(self.transport.cdp, tab, context, _ROSTER,
+                                              roster_request, base_url=self.transport.base)
+
+                def project(row):
+                    binding = {**account, 'courseId': row['id'],
+                        'sourceBindingId': 'moodle-' + _digest(account['accountFingerprint'] + ':' + row['id'])}
+
+                    def roster(current):
+                        current_request = self._request(_ROSTER, {'course_id': int(current['courseId'])}, current)
+                        quoted = json.dumps(collector.slot)
+                        raw_payload = json.dumps(current_request, ensure_ascii=False, allow_nan=False)
+                        payload = json.dumps(raw_payload)
+                        expression = '(async () => {const s = globalThis[%s], input = %s; if (!s || location.href !== s.href) throw new Error("moodle_context_changed"); const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input))), b => b.toString(16).padStart(2,"0")).join(""); if (hash !== %s) throw new Error("moodle_stage_integrity_mismatch"); return JSON.stringify(await s.fn(input));})()' % (quoted, payload, json.dumps(_digest(raw_payload)))
+                        private = json.loads(self.transport.cdp.evaluate(tab, expression,
+                            context_id=context, await_promise=True, timeout=90))
+                        if private.get('complete') is not True or private.get('status') != 'complete':
+                            raise MoodleLaneError('privacy', 'Moodle course roster is incomplete')
+                        return private['identities']
+
+                    boundary = SourceMcpPrivacyBoundary({'source': 'moodle',
+                        'learner_vault_path': _source_vault_path(),
+                        'bindings': lambda: [binding], 'load_roster': roster})
+                    projected = boundary.invoke('moodle_list_my_courses',
+                        {'course_id': int(row['id']), '_morrow': {'source_binding_id': binding['sourceBindingId']}}, {},
+                        lambda resolved: {'course_name': row['name']})
+                    name = projected.get('course_name')
+                    if not isinstance(name, str) or not name:
+                        return {'id': row['id'], 'name': 'Course ' + row['id'], 'name_unavailable': True}
+                    return {'id': row['id'], 'name': name}
+
+                # Reuse one pinned collector in the private account world; each
+                # native participant read still proves its own course and account.
+                # The final fresh account check precedes all public egress.
+                with ThreadPoolExecutor(max_workers=4) as workers:
+                    result['data']['courses'] = list(workers.map(project, rows))
+            final = self._binding(None)
+            if final != account:
+                raise MoodleLaneError('principal', 'Moodle account changed during course discovery')
+            return result
+        finally:
+            try:
+                self.transport.cdp.close_tab(tab)
+            except Exception:
+                pass
+
     def dispatch(self, operation_key, arguments, *, op_id, plan=None, approval=None,
                  mode_ctx=None, require_educator_channel=True):
         arguments = _freeze(arguments)
@@ -227,6 +291,8 @@ class MoodleDispatcher:
         audit, signed = admission.admit(entry, arguments, tenant_base=self.transport.base,
             approval=approval, op_id=op_id, vault_ready=True,
             mode_ctx=mode_ctx, require_educator_channel=require_educator_channel)
+        if entry['name'] == 'moodle_list_my_courses' and not is_write:
+            return self._account_courses(operation_key, arguments)
         binding = self._binding(arguments.get('course_id'))
         if is_write:
             self._review(operation_key, arguments, binding)

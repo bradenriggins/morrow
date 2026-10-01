@@ -30,6 +30,8 @@ PREFLIGHT_PROOF = "--preflight-proof" in sys.argv[4:]
 LABEL_PROOF = "--learner-approval-proof" in sys.argv[4:]
 CLI_PROOF = "--public-cli-proof" in sys.argv[4:]
 FILES_PROOF = "--private-file-proof" in sys.argv[4:]
+ACCOUNT_COURSE_PROOF = "--account-course-proof" in sys.argv[4:]
+COURSE_DISCOVERY_PRIVACY_PROOF = "--course-discovery-privacy-proof" in sys.argv[4:]
 COURSE_NAME_PROOF = "--masked-course-plan-proof" in sys.argv[4:]
 HELPER_PROVIDER_PROOF = "--moodle-helper-provider-proof" in sys.argv[4:]
 if CLI_PROOF:
@@ -66,10 +68,12 @@ class Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
         global file_next_draft
         report['fixture_gets'] = report.get('fixture_gets', 0) + 1
+        from urllib.parse import urlsplit, parse_qs
+        selected_course = int(parse_qs(urlsplit(self.path).query).get('id', ['2'])[0])
         course_page = any(path in self.path for path in ('/course/view.php', '/user/index.php', '/course/editsection.php'))
         cfg = {'wwwroot': base, 'userId': 43 if fixture_mode == 'wrong_account' else 42,
-               'sesskey': 'DUMMY_BROWSER_ONLY', 'currentlogin': 123456, 'courseId': 2 if course_page else 1,
-               'courseContextId': 200}
+               'sesskey': 'DUMMY_BROWSER_ONLY', 'currentlogin': 123456, 'courseId': selected_course if course_page else 1,
+               'courseContextId': selected_course * 100 if course_page else 100}
         if fixture_mode == 'guest':
             cfg['currentlogin'] = None
         if fixture_mode.startswith('legacy41'):
@@ -101,7 +105,7 @@ class Fixture(BaseHTTPRequestHandler):
         body_id = 'page-user-profile' if '/user/profile.php' in self.path else 'page-course-view'
         import html
         content = ('<!doctype html><body id="%s" class="course-%s"><h1>%s</h1><script>M.cfg=%s;</script>%s</body>' %
-                   (body_id, cfg['courseId'] if course_page else 2, html.escape(course_name), json.dumps(cfg), footer)).encode()
+                   (body_id, cfg['courseId'], html.escape(course_name), json.dumps(cfg), footer)).encode()
         if '--web-input-proof' in sys.argv[4:]:
             content = content.replace(b'</body>', b'<label>Disposable name <input id="dummy-first" autocomplete="off"></label><label>Disposable code <input id="dummy-second" autocomplete="off"></label><button>Fixture only</button></body>')
         if '/course/editsection.php' in self.path:
@@ -149,7 +153,7 @@ class Fixture(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_POST(self):
-        global effects, section_name, file_uploads, file_saves
+        global effects, section_name, file_uploads, file_saves, fixture_mode
         report["provider_calls"] += 1
         body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
         if FILES_PROOF and '/repository/' in self.path:
@@ -205,7 +209,11 @@ class Fixture(BaseHTTPRequestHandler):
             return
         if '/admin/roles/check.php' in self.path:
             caps = ['moodle/site:accessallgroups', 'moodle/course:enrolreview', 'moodle/course:viewsuspendedusers', 'moodle/user:viewdetails']
-            html = '<form method="post" action="%s/admin/roles/check.php?contextid=200"><select name="reportuser"><option selected value="42">Educator</option></select></form><table id="explaincaps">%s</table>' % (base, ''.join('<tr class="rolecap yes"><td><span class="cap-name">%s</span></td><td>Yes</td></tr>' % cap for cap in caps))
+            from urllib.parse import parse_qs, urlsplit
+            checked_context = parse_qs(urlsplit(self.path).query).get('contextid', ['200'])[0]
+            if fixture_mode == 'course_privacy_unavailable' and checked_context == '200':
+                caps = []
+            html = '<form method="post" action="%s/admin/roles/check.php?contextid=%s"><select name="reportuser"><option selected value="42">Educator</option></select></form><table id="explaincaps">%s</table>' % (base, checked_context, ''.join('<tr class="rolecap yes"><td><span class="cap-name">%s</span></td><td>Yes</td></tr>' % cap for cap in caps))
             payload = html.encode()
             content_type = 'text/html'
         else:
@@ -217,7 +225,15 @@ class Fixture(BaseHTTPRequestHandler):
                 args = call['args']
                 rows = ([{'id': number, 'fullname': 'Course %d' % number} for number in range(1, 258)]
                         if CLI_PROOF else [{'id': 2, 'fullname': 'Fixture course'}])
+                if fixture_mode == 'empty_account':
+                    rows = []
+                elif fixture_mode == 'exact_course_pages':
+                    rows = rows[:6]
+                if COURSE_DISCOVERY_PRIVACY_PROOF and len(rows) > 1:
+                    rows[1]['fullname'] = 'Seminar by Aster Sample'
                 data = {'courses': rows[args['offset']:args['offset'] + args['limit']]}
+                if fixture_mode == 'switch_after_course_discovery':
+                    fixture_mode = 'wrong_account'
             elif method == 'core_courseformat_update_course':
                 effects += 1
                 if effect_mode != 'mismatch':
@@ -229,7 +245,9 @@ class Fixture(BaseHTTPRequestHandler):
                     return
                 data = json.dumps(provider_state)
             elif method == 'core_table_get_dynamic_table_content':
+                table_course = str(call['args'].get('uniqueid', 'user-index-participants-2')).rsplit('-', 1)[-1]
                 data = {'html': '<div data-region="core_table/dynamic" data-table-component="core_user" data-table-handler="participants" data-table-uniqueid="user-index-participants-2" data-table-total-rows="1"><table><tr><td><input class="usercheckbox" name="user%d"></td><td>%s</td><td>%s</td></tr></table></div>' % (learner_row['id'], learner_row['name'], learner_row['email'])}
+                data['html'] = data['html'].replace('user-index-participants-2', 'user-index-participants-' + table_course)
             else:
                 data = {'courses': [{'id': 2, 'fullname': 'Fixture course'}]}
             payload = json.dumps([{"error": False, "data": data}]).encode()
@@ -449,8 +467,10 @@ try:
         browser.launcher._verify_helper_holder(helper.server_port)
         check('native_helper_holder_verified', True)
         def cli(*arguments, success=True):
+            began = time.monotonic()
             response = subprocess.run([sys.executable, str(cli_tree / 'bin/morrow'), 'moodle', *arguments],
                 env=cli_env, capture_output=True, text=True, timeout=120)
+            report.setdefault('cli_timings', []).append({'command': arguments[0], 'seconds': round(time.monotonic() - began, 3)})
             if (response.returncode == 0) != success:
                 report['cli_failure'] = {'stdout': response.stdout, 'stderr': response.stderr}
             check('cli_' + str(len(report['checks'])) + '_exit', (response.returncode == 0) == success)
@@ -567,6 +587,12 @@ print(json.dumps(checks))
         cli('pair', '--site', base, success=False)
         fixture_mode = 'modern'
         check('cli_pair_preserved_after_wrong_account', cli('status').get('principal_id') == '42')
+        if ACCOUNT_COURSE_PROOF:
+            account_courses = cli('read', '--operation', 'moodle.ajax.core_course_get_enrolled_courses_by_timeline_classification.v1', '--arguments', '{"offset":0,"limit":3}')
+            check('account_course_operation_requires_no_course_selection', account_courses.get('ok') is True and len(account_courses.get('data', {}).get('courses', [])) == 3)
+        if COURSE_DISCOVERY_PRIVACY_PROOF:
+            private_courses = cli('courses', '--limit', '3')
+            check('course_discovery_projects_learner_title', 'Aster Sample' not in json.dumps(private_courses) and 'Student A' in json.dumps(private_courses))
         catalog = cli('catalog')
         check('cli_all_public_operations_available', len(catalog['operations']) == 249)
         discovered = []
@@ -656,6 +682,25 @@ print(json.dumps(checks))
                 cli('approve', '--op-id', uncertain_op, '--authorization', 'Approve this disposable file', success=False)
                 check('private_file_' + upload_mode + '_new_process_no_replay', file_uploads == uploads_before + 1 and file_saves == 3)
             file_upload_mode = 'normal'
+        if ACCOUNT_COURSE_PROOF:
+            for values in ({'limit': 0}, {'limit': 101}, {'offset': -1}, {'course_id': 2}, {'limit': True}):
+                cli('read', '--operation', 'moodle.ajax.core_course_get_enrolled_courses_by_timeline_classification.v1', '--arguments', json.dumps(values), success=False)
+            fixture_mode = 'empty_account'
+            empty_courses = cli('courses', '--limit', '3')
+            check('account_course_empty_complete', empty_courses['courses'] == [] and empty_courses['complete'] is True and empty_courses['next_offset'] is None)
+            fixture_mode = 'exact_course_pages'
+            first_page = cli('courses', '--limit', '3')
+            second_page = cli('courses', '--limit', '3', '--offset', str(first_page['next_offset']))
+            final_page = cli('courses', '--limit', '3', '--offset', str(second_page['next_offset']))
+            check('account_course_exact_pages_complete', len(first_page['courses']) == 3 and len(second_page['courses']) == 3 and final_page['courses'] == [] and final_page['complete'] is True and final_page['next_offset'] is None)
+            fixture_mode = 'course_privacy_unavailable'
+            unavailable_courses = cli('courses', '--limit', '3')
+            unavailable = next(row for row in unavailable_courses['courses'] if row['id'] == '2')
+            check('account_course_unavailable_roster_hides_title', unavailable == {'id': '2', 'name': 'Course 2', 'name_unavailable': True} and 'Aster Sample' not in json.dumps(unavailable_courses))
+            fixture_mode = 'switch_after_course_discovery'
+            changed_courses = cli('courses', '--limit', '3', success=False)
+            check('account_course_mid_batch_account_change_no_egress', changed_courses.get('ok') is False and 'Aster Sample' not in json.dumps(changed_courses))
+            fixture_mode = 'modern'
         fixture_mode = 'legacy41'
         check('cli_legacy_account_status', cli('status').get('principal_id') == '42')
         fixture_mode = 'modern'
@@ -682,10 +727,12 @@ print(json.dumps(checks))
     check('staging_does_not_call_provider', report['provider_calls'] == before_staging_calls)
     if not PUBLIC_STAGING:
         # Fixture-only identity seed. Production must derive this inside the browser.
-        proxy.evaluate(tab, 'globalThis.M={cfg:%s}' % json.dumps({'wwwroot': base, 'userId': 42, 'sesskey': 'DUMMY_BROWSER_ONLY', 'courseId': 2}), context_id=context)
+        proxy.evaluate(tab, 'globalThis.M={cfg:%s}' % json.dumps({'wwwroot': base, 'userId': 42, 'sesskey': 'DUMMY_BROWSER_ONLY', 'courseId': 1}), context_id=context)
         result = proxy.evaluate(tab, 'globalThis[%s].fn(globalThis[%s].input)' % (json.dumps(handle.slot), json.dumps(handle.slot)), await_promise=True, context_id=context)
         expected_courses = ([{'id': str(number), 'name': 'Course %d' % number} for number in range(1, 101)]
                             if CLI_PROOF else [{'id': '2', 'name': 'Fixture course'}])
+        if COURSE_DISCOVERY_PRIVACY_PROOF and len(expected_courses) > 1:
+            expected_courses[1]['name'] = 'Seminar by Aster Sample'
         check('shared_adapter_executes_through_strict_csp', result.get('ok') is True and result.get('data', {}).get('courses') == expected_courses)
         check('exactly_one_fixture_provider_call', report['provider_calls'] == before_staging_calls + 1)
     huge = {'text': 'Unicode 🧪 café ' * 18000}

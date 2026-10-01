@@ -1,5 +1,14 @@
 # Changelog
 
+## Release hardening: account course discovery
+
+- Support the canonical account-level course read without selecting a
+  course first. Use the same governed path for the public course list.
+- Project course titles through their own complete private rosters. Keep
+  exact course IDs and pagination when a title cannot be checked safely.
+- Reuse a pinned collector with bounded workers and verified requests.
+  Recheck the account and session before returning any course results.
+
 ## Release hardening: private Moodle files
 
 - Stage exact local file bytes in encrypted private state for the paired

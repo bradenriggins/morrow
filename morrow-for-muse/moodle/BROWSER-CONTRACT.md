@@ -51,6 +51,17 @@ labels in the frozen request and is rechecked before claim and execution.
 The package excludes historical Python HTTPS authentication modules. Shared
 site validation and safe errors live in `moodle/contracts.py`.
 
+The catalog account-level course operation requires no selected course.
+The CLI course list uses that governed operation. One private account
+anchor stages the canonical reader and a pinned roster collector. Each
+course title uses its own complete native roster and vault scope; bounded
+workers preserve row order. Every new roster request is hash-checked in
+Chromium. The native collector proves each target course, principal, and
+source session, and a final fresh account check gates all public egress.
+No raw course title is returned when roster proof is unavailable. The
+course ID stays visible with `name_unavailable`, so discovery keeps its
+pagination and does not silently drop courses.
+
 Mac helper attachment uses exact native process arguments through Apple's
 `KERN_PROCARGS2`; it does not weaken the profile or helper-version checks.
 Linux keeps the `/proc` argument path. Its real CFT helper regression first
