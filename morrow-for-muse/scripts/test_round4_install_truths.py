@@ -157,7 +157,7 @@ def _section(rel, heading):
 
 def test_install_probes_the_address_before_it_starts_the_helper():
     text = _read("install.sh")
-    probe = text.index('fail "tenant" "CANVAS_BASE=${CANVAS_BASE} is unreachable')
+    probe = text.index('fail "tenant" "CANVAS_BASE is unreachable')
     start = text.index('"${TREE}/helper/keepalive.sh" >/dev/null 2>&1')
     assert probe < start
 
