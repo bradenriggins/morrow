@@ -22,6 +22,7 @@ sys.path.insert(0, str(TREE))
 OUT, BINARY, ASSETS = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]).resolve()
 PUBLIC_STAGING = "--public-staging-only" in sys.argv[4:]
 report = {"scope": "public-page adapter staging only" if PUBLIC_STAGING else "private fixture staging and provider read", "test": "morrow.moodle-adapter-loader.real-helper.v1", "checks": {}, "provider_calls": 0}
+fixture_mode = 'modern'
 
 def check(name, value):
     report["checks"][name] = bool(value)
@@ -33,7 +34,30 @@ class Fixture(BaseHTTPRequestHandler):
 
     def do_GET(self):
         report['fixture_gets'] = report.get('fixture_gets', 0) + 1
-        content = b'<!doctype html><body class="course-2"><h1>Fixture course</h1></body>'
+        course_page = '/course/view.php' in self.path
+        cfg = {'wwwroot': base, 'userId': 43 if fixture_mode == 'wrong_account' else 42,
+               'sesskey': 'DUMMY_BROWSER_ONLY', 'currentlogin': 123456, 'courseId': 2 if course_page else 1}
+        if fixture_mode.startswith('legacy41'):
+            cfg.pop('userId')
+        if '/user/profile.php' in self.path:
+            cfg['contextInstanceId'] = 43 if fixture_mode == 'legacy41_wrong_profile' else 42
+        if fixture_mode == 'modern_null':
+            cfg['userId'] = None
+        if course_page and fixture_mode == 'wrong_course':
+            cfg['courseId'] = 3
+        if course_page and fixture_mode == 'changed_course_account':
+            cfg['userId'] = 43
+        if course_page and fixture_mode == 'changed_course_key':
+            cfg['sesskey'] = 'DUMMY_ROTATED_KEY'
+        if course_page and fixture_mode == 'changed_course_login':
+            cfg['currentlogin'] = 123457
+        footer = ''
+        if fixture_mode.startswith('legacy41'):
+            cfg.pop('currentlogin')
+            footer = "<script>require(['core/storage_validation'], function(amd) {amd.init(123456);});</script>"
+        body_id = 'page-user-profile' if '/user/profile.php' in self.path else 'page-course-view'
+        content = ('<!doctype html><body id="%s" class="course-%s"><h1>Fixture course</h1><script>M.cfg=%s;</script>%s</body>' %
+                   (body_id, cfg['courseId'] if course_page else 2, json.dumps(cfg), footer)).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'none'")
@@ -129,7 +153,7 @@ try:
         check('disposable_fixture_loaded', proxy.evaluate(tab, 'location.href') == base + '/')
     context = proxy.create_isolated_world(tab, 'morrow_adapter_loader_e2e')
     check('real_isolated_world', isinstance(context, int))
-    report['source_hashes'] = {str(path.relative_to(TREE)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (TREE / 'helper/server.py', TREE / 'transport/local_chromium.py', TREE / 'moodle/browser_operations.py', Path(__file__))}
+    report['source_hashes'] = {str(path.relative_to(TREE)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (TREE / 'helper/server.py', TREE / 'transport/local_chromium.py', TREE / 'moodle/browser_operations.py', TREE / 'moodle/browser_transport.py', Path(__file__))}
     from moodle.browser_operations import MoodleAdapterLoader
     registry = ASSETS / 'moodle-browser-routes.json'
     digest = hashlib.sha256(registry.read_bytes()).hexdigest()
@@ -204,6 +228,25 @@ try:
     check('partial_load_removed', proxy.evaluate(tab, count_expression, context_id=context) == staged_count)
     proxy.navigate(tab, base + ('/login/index.php' if PUBLIC_STAGING else '/other'))
     refuse('replaced_execution_context_refused', lambda: loader.stage(proxy, tab, context, key_name, request, base_url=base))
+    if not PUBLIC_STAGING:
+        from moodle.browser_transport import MoodleBrowserTransport
+        transport = MoodleBrowserTransport(base, browser.launcher, principal_id='42')
+        transport.cdp = proxy
+        course_request = {**request, 'binding': {**request['binding'], 'courseId': '2'},
+                          'arguments': {'course_id': 2, 'limit': 100, 'offset': 0},
+                          'expiresAt': int(time.time() * 1000) + 60000}
+        for mode in ('modern', 'legacy41'):
+            fixture_mode = mode
+            prepared_tab, prepared_context, prepared = transport._stage_operation(loader, key_name, course_request)
+            values = proxy.evaluate(prepared_tab,
+                '({id:String(M.cfg.userId),course:String(M.cfg.courseId),site:M.cfg.wwwroot})', context_id=prepared_context)
+            check(mode + '_trusted_private_course_identity', values == {'id': '42', 'course': '2', 'site': base})
+            check(mode + '_identity_preparation_no_operation', report['provider_calls'] == before)
+            check(mode + '_no_secret_in_staged_handle', 'DUMMY_BROWSER_ONLY' not in str(prepared))
+        for mode in ('wrong_account', 'modern_null', 'wrong_course', 'legacy41_wrong_profile',
+                     'changed_course_account', 'changed_course_key', 'changed_course_login'):
+            fixture_mode = mode
+            refuse(mode + '_operation_preparation_refused', lambda: transport._stage_operation(loader, key_name, course_request))
     report['passed'] = True
 except Exception as exc:
     report['passed'] = False

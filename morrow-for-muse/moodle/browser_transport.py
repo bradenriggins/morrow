@@ -5,6 +5,7 @@ transport has no write entrypoint. Governed operations are a separate layer.
 """
 import json
 import re
+import time
 from urllib.parse import urlparse
 
 from moodle.session import normalize_moodle_base, MoodleLaneError
@@ -108,6 +109,30 @@ _BROWSER_READ = r"""(async () => {
     }
     if (!Number.isSafeInteger(userId) || userId < 1) return fail('session_unavailable');
     if (String(userId) !== input.principal_id) return fail('principal_mismatch');
+    if (input.mode === 'prepare') {
+      const href = location.href;
+      let operationConfig = cfg;
+      if (input.course_id) {
+        const target = new URL(input.base + '/course/view.php');
+        target.searchParams.set('id', input.course_id);
+        if (href !== target.href) return fail('site_mismatch');
+        const courseDocument = new DOMParser().parseFromString(await request(target.href), 'text/html');
+        const course = parseSession(courseDocument);
+        const bodyCourse = (courseDocument.body.className || '').match(/(?:^|\s)course-([1-9][0-9]*)(?:\s|$)/)?.[1];
+        if (bodyCourse !== input.course_id || String(course.cfg.courseId) !== input.course_id)
+          return fail('course_mismatch');
+        if (course.currentLogin !== currentLogin || course.cfg.sesskey !== cfg.sesskey)
+          return fail('session_unavailable');
+        if (Object.hasOwn(course.cfg, 'userId') && course.cfg.userId !== userId)
+          return fail('principal_mismatch');
+        operationConfig = course.cfg;
+      }
+      if (location.href !== href) return fail('session_unavailable');
+      const prepared = Object.freeze({...operationConfig, userId, currentlogin: currentLogin});
+      Object.defineProperty(globalThis, 'M', {value: Object.freeze({cfg: prepared}), configurable: false});
+      return JSON.stringify({ok: true, data: {id: String(userId), site_url: input.base,
+        course_id: input.course_id || null}});
+    }
     if (input.mode === 'identity') return JSON.stringify({ok: true,
       data: {id: String(userId), site_url: input.base}});
     const url = new URL(input.base + '/lib/ajax/service.php');
@@ -136,7 +161,7 @@ _BROWSER_READ = r"""(async () => {
       complete, next_offset: complete ? null : input.offset + courses.length}});
   } catch (error) {
     const known = ['response_incomplete', 'configuration_invalid', 'site_mismatch',
-      'session_unavailable', 'provider_response_refused'];
+      'session_unavailable', 'provider_response_refused', 'course_mismatch'];
     return fail(known.includes(error?.message) ? error.message : 'session_or_provider_unavailable');
   }
 })()"""
@@ -170,6 +195,50 @@ class MoodleBrowserTransport(LocalChromiumTransport):
 
     def ensure_session(self):
         return self.identity()
+
+    def _stage_operation(self, loader, operation_key, request):
+        """Prepare trusted browser identity and code, without invoking an operation."""
+        binding = request.get('binding') if isinstance(request, dict) else None
+        arguments = request.get('arguments') if isinstance(request, dict) else None
+        if not isinstance(binding, dict) or not isinstance(arguments, dict):
+            raise ValueError('Moodle operation needs a binding and arguments')
+        parsed = urlparse(self.base)
+        if (binding.get('origin') != parsed.scheme + '://' + parsed.netloc
+                or str(binding.get('siteUrl', '')).rstrip('/') != self.base
+                or binding.get('principalId') != self.principal_id):
+            raise MoodleLaneError('principal', 'Moodle operation binding differs from its paired account')
+        course_value = arguments.get('course_id')
+        if course_value is not None and (type(course_value) is not int or not 1 <= course_value <= 9007199254740991):
+            raise ValueError('Moodle operation needs an exact course ID')
+        course = str(course_value) if course_value is not None else None
+        if binding.get('courseId') is not None and binding['courseId'] != course:
+            raise ValueError('Moodle operation course differs from its binding')
+        expiry = request.get('expiresAt')
+        if type(expiry) is not int or expiry <= int(time.time() * 1000):
+            raise ValueError('Moodle operation has expired')
+        tab = self.cdp.new_tab('about:blank')
+        try:
+            target = self.base + ('/course/view.php?id=' + course if course else '/')
+            self.cdp.navigate(tab, target)
+            context = self._new_api_world(tab)
+            argument = {'mode': 'prepare', 'base': self.base, 'principal_id': self.principal_id,
+                        'course_id': course}
+            raw = self.cdp.evaluate(tab, _BROWSER_READ % json.dumps(argument),
+                                    await_promise=True, timeout=60, context_id=context)
+            response = json.loads(raw)
+            expected = {'id': self.principal_id, 'site_url': self.base, 'course_id': course}
+            if not isinstance(response, dict) or response.get('ok') is not True or response.get('data') != expected:
+                raise MoodleLaneError('principal', 'Moodle operation account or course could not be verified')
+            if int(time.time() * 1000) >= expiry:
+                raise ValueError('Moodle operation has expired')
+            staged = loader.stage(self.cdp, tab, context, operation_key, request, base_url=self.base)
+            return tab, context, staged
+        except Exception:
+            try:
+                self.cdp.close_tab(tab)
+            except Exception:
+                pass
+            raise MoodleLaneError('provider', 'Moodle operation preparation refused; no operation was sent') from None
 
     def _read(self, mode, **params):
         tab = self._tenant_tab()
