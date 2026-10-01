@@ -253,7 +253,8 @@ def test_undo_target_comes_only_from_the_journal():
     entry = _create_entry()
     of42 = _forward(entry, 42)
     _set("default_mode", "edit")
-    out, sess = _undo(entry, {}, mode_ctx=_ctx(), of_op_id=of42)
+    out, sess = _undo(entry, {}, mode_ctx=_ctx(destructive_confirmed=AUTH),
+                      of_op_id=of42)
     sent = [(m, u) for m, u, _w, _b in sess.calls if m == "DELETE"]
     assert sent == [("DELETE", BASE + "/api/v1/courses/7/assignments/42")]
 
@@ -314,7 +315,8 @@ def test_undo_dry_run_journals_nothing():
     entry = _create_entry()
     of42 = _forward(entry, 42)
     before = _journal_lines()
-    out, sess = _undo(entry, {"id": 42}, mode_ctx=_ctx(), dry_run=True,
+    out, sess = _undo(entry, {"id": 42},
+                      mode_ctx=_ctx(destructive_confirmed=AUTH), dry_run=True,
                       of_op_id=of42)
     assert out["dry_run"] is True
     assert sess.calls == []
