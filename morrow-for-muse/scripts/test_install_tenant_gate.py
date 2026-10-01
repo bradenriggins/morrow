@@ -60,6 +60,42 @@ def test_server_uses_the_shared_validator():
     assert "_PLACEHOLDER_HOSTS" not in srv
 
 
+@pytest.mark.parametrize("base", [
+    "https://teacher-marker:password-marker@school.instructure.com",
+    "http://school.instructure.com/?code=token-marker#fragment-marker",
+    "https://example.instructure.com/?code=token-marker#fragment-marker",
+    "https://10.0.0.5/?code=token-marker#fragment-marker",
+    "https://school.example.edu/?code=token-marker#fragment-marker",
+    "school.instructure.com/?code=token-marker#fragment-marker",
+])
+def test_refused_tenant_errors_do_not_disclose_authentication_data(base,
+                                                                  monkeypatch):
+    monkeypatch.delenv("CANVAS_BASE_ALLOW_HTTP", raising=False)
+    monkeypatch.delenv("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", raising=False)
+    with pytest.raises(ValueError) as exc:
+        normalize_tenant_base(base)
+    for secret in ("teacher-marker", "password-marker", "token-marker",
+                   "fragment-marker"):
+        assert secret not in str(exc.value)
+
+
+def test_installer_refusal_does_not_disclose_pasted_credentials(tmp_path):
+    block, _launch = _install_step10_probe()
+    stub = ('fail(){ echo "INSTALL FAIL [$1]: $2"; exit 1; }; '
+            'note(){ echo "$1"; }; ENV_FILE=helper/env; '
+            'TREE=%s\n' % TREE)
+    proc = subprocess.run(
+        ["bash", "-c", stub + block], capture_output=True, text=True,
+        env=dict(os.environ,
+                 CANVAS_BASE="https://teacher-marker:password-marker@school.instructure.com",
+                 HOME=str(tmp_path / "home")), timeout=60)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1
+    assert "credentials" in out
+    assert "teacher-marker" not in out
+    assert "password-marker" not in out
+
+
 def _install_step10_probe():
     """The step-10 tenant block as install.sh ships it: everything from
     the 'does not end in .instructure.com' custom-domain note is not

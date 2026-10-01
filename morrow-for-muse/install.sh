@@ -1129,7 +1129,7 @@ except ValueError as exc:
     print(exc)
 " 2>&1)"
   if [ -n "${_TENANT_CHECK}" ]; then
-    fail "tenant" "CANVAS_BASE=${CANVAS_BASE} is not a Canvas address the helper accepts: ${_TENANT_CHECK} Fix it in ${ENV_FILE} and rerun."
+    fail "tenant" "CANVAS_BASE is not a Canvas address the helper accepts: ${_TENANT_CHECK} Fix it in ${ENV_FILE} and rerun."
   fi
   unset _TENANT_CHECK
   # P1-26: probe the tenant before launching the helper against it.
