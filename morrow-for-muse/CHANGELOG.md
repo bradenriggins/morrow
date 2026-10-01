@@ -2,6 +2,8 @@
 
 ## 0.4.8 (2026-09-30)
 
+- Report failed Moodle write readbacks as failures. Validate frozen matches
+  before dispatch and retain failed verification records and replay guards.
 - Add the Moodle browser identity and course-page transport. Keep session
   material inside Chromium and refuse site or account changes. The governed
   Moodle operation and setup integration remains a release gate.
