@@ -297,7 +297,7 @@ def test_dev_only_surface_does_not_ship(carved):
                 "session/capture.py", "requirements-dev.txt",
                 # CI's hash-locked pytest; the install suites need none
                 "requirements-test.txt",
-                "scripts/carve.py", "bin/keepalive-moodle.sh",
+                "scripts/carve.py", "scripts/moodle-adapter-loader-e2e.py", "bin/keepalive-moodle.sh",
                 "bin/keepalive-canvas.sh", "bin/scheduler.py", "DEPLOY.md",
                 # pytest-only: the suite's HOME isolation and its check
                 "conftest.py", "test_suite_isolation.py",
@@ -320,7 +320,7 @@ def test_dev_only_surface_does_not_ship(carved):
 
 def test_moodle_runtime_and_operator_instructions_ship(carved):
     for rel in ("moodle/README.md", "moodle/SKILL.md", "moodle/login.py",
-                "moodle/probe.py", "moodle/reauth.py", "moodle/session.py",
+                "moodle/probe.py", "moodle/reauth.py", "moodle/session.py", "moodle/browser_operations.py",
                 "requirements-optional.txt"):
         assert os.path.isfile(os.path.join(carved, rel)), rel
     assert not os.path.exists(os.path.join(carved, "moodle/session_selftest.py"))

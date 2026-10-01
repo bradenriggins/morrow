@@ -25,7 +25,26 @@ requirement on the Muse VM. The carve refuses stale worker or adapter
 bytes. It does not yet execute those adapters through Muse's governed
 dispatch.
 
-Layer 1 is not proof that layers 2–4 are finished. No raw browser write
+`moodle/browser_operations.py` stages those assets through the authenticated
+helper proxy. It checks the pinned route registry, catalog, module and exact
+callable hashes. It sends bounded chunks into one existing private context,
+requires acknowledgments, and verifies source and request bytes inside the
+browser before compiling. A changed URL or context refuses the load. The URL
+stays inside Chromium. Loading is paced below the helper's normal rate limit.
+Staging does not invoke adapters or send provider requests.
+
+`scripts/moodle-adapter-loader-e2e.py` verifies this with the real packaged
+helper and a disposable HTTPS fixture under strict CSP. It checks every
+canonical callable, Unicode payloads, incomplete acknowledgments, changed
+assets, wrong sites, context replacement, and a dummy URL sesskey. The driver
+is development-only. Run it with a receipt path, a Chromium executable, and
+the carved `moodle/browser-assets` directory. If the VM refuses loopback
+pages through its local-network protection, add `--public-staging-only`.
+That mode loads adapters on the official public Moodle demo and sends no
+provider operation. It proves staging only. The complete fixture read and
+strict-CSP checks still need the full fixture mode on a permitted machine.
+
+Layer 1 and adapter staging are not proof that layers 2–4 are finished. No raw browser write
 interface may be added as a substitute for governed execution.
 
 ## Failure cases, before implementation
