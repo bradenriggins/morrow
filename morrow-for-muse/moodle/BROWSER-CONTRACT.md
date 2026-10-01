@@ -33,6 +33,20 @@ browser before compiling. A changed URL or context refuses the load. The URL
 stays inside Chromium. Loading is paced below the helper's normal rate limit.
 Staging does not invoke adapters or send provider requests.
 
+`MoodleBrowserTransport._stage_operation` prepares a separate operation tab
+and private context. It reads fresh server configuration and binds the
+paired account, exact course page, login timestamp, and sesskey before
+staging. The trusted configuration stays in the private context. Moodle
+4.1 uses the parameter-free own-profile identity check. A modern null or
+conflicting account is refused. A changed course account, login, or sesskey
+also refuses before invocation. The existing page scripts supply no identity
+to this path. The governed executor must close the prepared tab and must
+perform its admission, privacy, and journal checks before invocation.
+
+This preparation does not yet make native form readbacks compatible with
+Moodle 4.1. Shared adapters that require `userId` in returned form HTML still
+need that compatibility check. Preparation is not an operation front door.
+
 `scripts/moodle-adapter-loader-e2e.py` verifies this with the real packaged
 helper and a disposable HTTPS fixture under strict CSP. It checks every
 canonical callable, Unicode payloads, incomplete acknowledgments, changed
