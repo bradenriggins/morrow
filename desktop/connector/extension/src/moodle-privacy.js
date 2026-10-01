@@ -81,6 +81,8 @@ export async function collectMoodleCourseParticipantRoster(input) {
       principalId,
       courseId: currentCourseId,
       sesskey: cfg.sesskey,
+      principalFromOwnProfile: cfg.morrowPrincipalFromOwnProfile === true,
+      currentLogin: cfg.currentlogin,
       basePath,
     };
   };
@@ -164,9 +166,20 @@ export async function collectMoodleCourseParticipantRoster(input) {
     }
     return values;
   };
-  const parseCourseContext = (raw, expectedCourseId, expectedPrincipalId, expectedSiteUrl) => {
-    const matches = parseMConfigObject(raw).filter((cfg) => {
-      if (courseId(cfg.courseId) !== expectedCourseId || courseId(cfg.userId) !== expectedPrincipalId) return false;
+  const parseCourseContext = (raw, expectedCourseId, expectedPrincipalId, expectedSiteUrl, expectedContext) => {
+    const configurations = parseMConfigObject(raw);
+    if (configurations.length !== 1) return "";
+    const matches = configurations.filter((cfg) => {
+      if (courseId(cfg.courseId) !== expectedCourseId) return false;
+      if (Object.hasOwn(cfg, "userId")) {
+        if (courseId(cfg.userId) !== expectedPrincipalId) return false;
+      } else {
+        // The private transport proves this principal through the own profile.
+        const logins = [...raw.matchAll(/require\s*\(\s*\[\s*['"]core\/storage_validation['"]\s*\]\s*,\s*function\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*\{\s*\1\.init\s*\(\s*(null|[0-9]+)\s*\)\s*;/g)];
+        const login = Object.hasOwn(cfg, "currentlogin") ? cfg.currentlogin : logins.length === 1 ? Number(logins[0][2]) : null;
+        if (!expectedContext.principalFromOwnProfile || cfg.sesskey !== expectedContext.sesskey
+          || !Number.isSafeInteger(login) || login < 1 || login !== expectedContext.currentLogin) return false;
+      }
       try { return new URL(cfg.wwwroot).href === expectedSiteUrl; } catch { return false; }
     });
     const contextIds = new Set(matches.map((cfg) => courseId(cfg.courseContextId)).filter(Boolean));
@@ -401,7 +414,7 @@ export async function collectMoodleCourseParticipantRoster(input) {
       perpage: "1",
     });
     if (!coursePage.raw) return { error: coursePage.error };
-    const courseContextId = parseCourseContext(coursePage.raw, requestedCourseId, principalId, context.siteUrl);
+    const courseContextId = parseCourseContext(coursePage.raw, requestedCourseId, principalId, context.siteUrl, context);
     if (!courseContextId) return { error: "moodle_roster_native_course_proof_invalid" };
     // Moodle's check-permissions page is a source read. It receives only the
     // bound principal and the target course context; it does not mutate roles.

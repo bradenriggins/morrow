@@ -22,6 +22,7 @@ sys.path.insert(0, str(TREE))
 OUT, BINARY, ASSETS = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]).resolve()
 PUBLIC_STAGING = "--public-staging-only" in sys.argv[4:]
 GOVERNED = "--governed-execution" in sys.argv[4:]
+LEGACY_GOVERNED = "--legacy-governed" in sys.argv[4:]
 report = {"scope": "public-page adapter staging only" if PUBLIC_STAGING else "private fixture staging and provider read", "test": "morrow.moodle-adapter-loader.real-helper.v1", "checks": {}, "provider_calls": 0}
 fixture_mode = 'modern'
 effect_mode = 'normal'
@@ -60,10 +61,18 @@ class Fixture(BaseHTTPRequestHandler):
             cfg['sesskey'] = 'DUMMY_ROTATED_KEY'
         if course_page and fixture_mode == 'changed_course_login':
             cfg['currentlogin'] = 123457
+        if '/user/index.php' in self.path:
+            if fixture_mode == 'legacy41_native_wrong_key':
+                cfg['sesskey'] = 'DUMMY_CHANGED_NATIVE_KEY'
+            if fixture_mode == 'legacy41_native_wrong_account':
+                cfg['userId'] = 43
+            if fixture_mode == 'legacy41_native_null_account':
+                cfg['userId'] = None
         footer = ''
         if fixture_mode.startswith('legacy41'):
             cfg.pop('currentlogin')
-            footer = "<script>require(['core/storage_validation'], function(amd) {amd.init(123456);});</script>"
+            native_login = 123457 if '/user/index.php' in self.path and fixture_mode == 'legacy41_native_wrong_login' else 123456
+            footer = "<script>require(['core/storage_validation'], function(amd) {amd.init(%d);});</script>" % native_login
         body_id = 'page-user-profile' if '/user/profile.php' in self.path else 'page-course-view'
         content = ('<!doctype html><body id="%s" class="course-%s"><h1>Fixture course</h1><script>M.cfg=%s;</script>%s</body>' %
                    (body_id, cfg['courseId'] if course_page else 2, json.dumps(cfg), footer)).encode()
@@ -288,7 +297,7 @@ try:
             fixture_mode = mode
             refuse(mode + '_operation_preparation_refused', lambda: transport._stage_operation(loader, key_name, course_request))
     if GOVERNED:
-        fixture_mode = 'modern'
+        fixture_mode = 'legacy41' if LEGACY_GOVERNED else 'modern'
         from moodle.dispatch import MoodleDispatcher
         from dispatch.admission import mint_approval, sign_approval
         from dispatch.executor import find_journal_op
@@ -302,6 +311,14 @@ try:
         read_result = dispatcher.dispatch(read_key, {'course_id': 2}, op_id=str(uuid.uuid4()))
         check('governed_read_ok', read_result.get('ok') is True)
         check('governed_read_masks_learner', 'Aster Sample' not in json.dumps(read_result) and 'Student A' in json.dumps(read_result))
+        if LEGACY_GOVERNED:
+            for native_mode in ('legacy41_native_wrong_key', 'legacy41_native_wrong_account', 'legacy41_native_null_account', 'legacy41_native_wrong_login'):
+                fixture_mode = native_mode
+                before_effects = effects
+                refused = dispatcher.dispatch(read_key, {'course_id': 2}, op_id=str(uuid.uuid4()))
+                check(native_mode + '_read_refused', refused.get('ok') is not True)
+                check(native_mode + '_no_effect', effects == before_effects)
+            fixture_mode = 'legacy41'
         args = {'course_id': 2, 'module_id': 19, 'expected_digest': read_result['snapshot_digest']}
         def no_effect(name, action):
             before_effects = effects

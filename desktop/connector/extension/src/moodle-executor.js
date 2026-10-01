@@ -353,6 +353,8 @@ export async function executeMoodleInPage(input) {
         ...(courseName && courseName.length <= 500 ? { courseName } : {}),
       },
       sesskey: cfg.sesskey,
+      principalFromOwnProfile: cfg.morrowPrincipalFromOwnProfile === true,
+      currentLogin: cfg.currentlogin,
       basePath,
     };
   };
@@ -1626,9 +1628,11 @@ export async function executeMoodleInPage(input) {
   };
   const nativeMoodleConfig = (documentValue) => {
     const configs = [];
+    const logins = [];
     for (const script of documentValue.querySelectorAll("script:not([src])")) {
       const source = String(script.textContent || "");
       if (source.length > MAX_BYTES || source.includes("\u0000")) return null;
+      for (const login of source.matchAll(/require\s*\(\s*\[\s*['"]core\/storage_validation['"]\s*\]\s*,\s*function\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*\{\s*\1\.init\s*\(\s*(null|[0-9]+)\s*\)\s*;/g)) logins.push(login[2] === "null" ? null : Number(login[2]));
       const assignments = /\bM\.cfg\s*=\s*/g;
       let match;
       while ((match = assignments.exec(source))) {
@@ -1641,10 +1645,17 @@ export async function executeMoodleInPage(input) {
         assignments.lastIndex += json.length;
       }
     }
-    return configs.length === 1 ? configs[0] : null;
+    if (configs.length !== 1) return null;
+    const config = configs[0];
+    return Object.hasOwn(config, "currentlogin") ? config
+      : { ...config, currentlogin: logins.length === 1 ? logins[0] : null };
   };
   const nativeMoodleSessionMatches = (context, config) => {
-    if (!isObject(config) || typeof config.wwwroot !== "string" || typeof config.sesskey !== "string" || !config.sesskey || id(config.userId) !== context.profile.principalId) return false;
+    if (!isObject(config) || typeof config.wwwroot !== "string" || typeof config.sesskey !== "string" || !config.sesskey) return false;
+    if (Object.hasOwn(config, "userId")) {
+      if (id(config.userId) !== context.profile.principalId) return false;
+    } else if (!context.principalFromOwnProfile || !Number.isSafeInteger(config.currentlogin)
+      || config.currentlogin < 1 || config.currentlogin !== context.currentLogin) return false;
     let root;
     try { root = new URL(config.wwwroot); } catch { return false; }
     return root.protocol === "https:" && !root.search && !root.hash && !root.username && !root.password

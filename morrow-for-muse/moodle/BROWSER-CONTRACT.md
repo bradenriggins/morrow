@@ -57,9 +57,14 @@ also refuses before invocation. The existing page scripts supply no identity
 to this path. The governed executor must close the prepared tab and must
 perform its admission, privacy, and journal checks before invocation.
 
-This preparation does not yet make native form readbacks compatible with
-Moodle 4.1. Shared adapters that require `userId` in returned form HTML still
-need that compatibility check. Preparation is not an operation front door.
+For Moodle 4.1, preparation carries a private own-profile proof marker. The
+shared roster and course-name readers accept a missing returned `userId`
+only with that marker, the same site and session key, and the same source
+login timestamp. A present null or conflicting `userId` still refuses. The
+real-helper fixture verifies structure reads, approved visibility writes,
+changed native sessions, mismatching readback and lost responses in both
+modern and 4.1 configurations. Other operations still need their own proof.
+Preparation is not an operation front door.
 
 `scripts/moodle-adapter-loader-e2e.py` verifies this with the real packaged
 helper and a disposable HTTPS fixture under strict CSP. It checks every
