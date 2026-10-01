@@ -291,6 +291,11 @@ try:
         raise RuntimeError('no disposable browser identity port available')
     (root / 'empty-env').write_text('# disposable fixture\n')
     (root / 'tree').mkdir(mode=0o700)
+    if CLI_PROOF:
+        # The installer mints the identity before the executor binds state.
+        from config.paths import mint_tree_uuid, read_tree_uuid
+        if not read_tree_uuid(TREE):
+            mint_tree_uuid(TREE)
     if GOVERNED:
         from dispatch import executor as fixture_executor
     token = root / 'tree/helper_token'
@@ -973,6 +978,9 @@ print(json.dumps({'replay_refused':result.get('ok') is False,'journal_unchanged'
                 restarted = subprocess.run([sys.executable, '-c', child, str(TREE), base, str(ASSETS), digest,
                     str(browser.launcher.cdp_port), str(helper.server_port), hide_key, json.dumps(args), op_id],
                     capture_output=True, text=True, timeout=90)
+                if restarted.returncode:
+                    report[mode + '_restart_failure'] = {'returncode': restarted.returncode,
+                        'stderr': restarted.stderr[-8000:]}
                 check(mode + '_new_process_finished', restarted.returncode == 0)
                 restart_result = json.loads(restarted.stdout.strip().splitlines()[-1])
                 check(mode + '_new_process_refuses_fresh_approval_replay', restart_result['replay_refused'])
