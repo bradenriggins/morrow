@@ -29,6 +29,7 @@ RESTART_PROOF = "--process-restart-proof" in sys.argv[4:]
 PREFLIGHT_PROOF = "--preflight-proof" in sys.argv[4:]
 LABEL_PROOF = "--learner-approval-proof" in sys.argv[4:]
 CLI_PROOF = "--public-cli-proof" in sys.argv[4:]
+FILES_PROOF = "--private-file-proof" in sys.argv[4:]
 COURSE_NAME_PROOF = "--masked-course-plan-proof" in sys.argv[4:]
 HELPER_PROVIDER_PROOF = "--moodle-helper-provider-proof" in sys.argv[4:]
 if CLI_PROOF:
@@ -39,6 +40,12 @@ report = {"scope": "public-page adapter staging only" if PUBLIC_STAGING else "pr
 fixture_mode = 'modern'
 effect_mode = 'normal'
 effects = 0
+file_drafts = {}
+file_created = {}
+file_next_draft = 100
+file_uploads = 0
+file_saves = 0
+file_upload_mode = 'normal'
 section_name = 'Welcome'
 course_name = 'Fixture course'
 learner_row = {'id': 17, 'name': 'Aster Sample', 'email': 'aster@example.test'}
@@ -57,6 +64,7 @@ class Fixture(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        global file_next_draft
         report['fixture_gets'] = report.get('fixture_gets', 0) + 1
         course_page = any(path in self.path for path in ('/course/view.php', '/user/index.php', '/course/editsection.php'))
         cfg = {'wwwroot': base, 'userId': 43 if fixture_mode == 'wrong_account' else 42,
@@ -100,6 +108,39 @@ class Fixture(BaseHTTPRequestHandler):
             import html
             form = '<form method="post" action="%s/course/editsection.php?id=10"><input type="hidden" name="id" value="10"><input type="hidden" name="course" value="2"><input type="hidden" name="sesskey" value="DUMMY_BROWSER_ONLY"><input name="name" value="%s"><textarea name="summary_editor[text]">Overview</textarea><input type="hidden" name="summary_editor[format]" value="1"><input type="submit" name="submitbutton" value="Save changes"></form>' % (base, html.escape(section_name, quote=True))
             content = content.replace(b'</body>', form.encode() + b'</body>')
+        if FILES_PROOF and '/course/modedit.php' in self.path:
+            from urllib.parse import urlsplit, parse_qs
+            query = parse_qs(urlsplit(self.path).query)
+            creating = query.get('add') == ['resource']
+            if creating:
+                file_next_draft += 1
+                item_id = str(file_next_draft)
+                name = ''
+                identity = '<input name="course" value="2"><input name="add" value="resource"><input name="section" value="0"><input name="return" value="0">'
+                action = base + '/course/modedit.php?add=resource&amp;course=2&amp;sectionid=10&amp;return=0'
+            else:
+                saved = file_created.get(query.get('update', [''])[0])
+                if not saved:
+                    self.send_error(404)
+                    return
+                item_id, name = saved['item_id'], saved['name']
+                identity = '<input name="update" value="%s"><input name="course" value="2">' % saved['id']
+                action = base + '/course/modedit.php?update=%s&amp;return=0' % saved['id']
+            manager = {'target': 'id_files', 'itemid': int(item_id), 'context': {'id': 77}, 'mainfile': True,
+                       'maxfiles': -1, 'maxbytes': -1, 'areamaxbytes': -1, 'accepted_types': '*',
+                       'filepicker': {'repositories': {'17': {'id': '17', 'type': 'upload'}}}}
+            form = '<form method="post" action="%s">%s<input name="modulename" value="resource"><input name="name" value="%s"><input name="visible" value="%s"><input name="revision" value="1"><textarea name="introeditor[text]"></textarea><input name="introeditor[format]" value="1"><input name="introeditor[itemid]" value="6000"><div data-fieldtype="filemanager"><input type="hidden" id="id_files" name="files" value="%s"></div><input type="submit" name="submitbutton2" value="Save changes and return to course"><input name="sesskey" value="DUMMY_BROWSER_ONLY"></form><script>M.form_filemanager.init(Y, %s);</script>' % (action, identity, html.escape(name, quote=True), '1' if creating else '0', item_id, json.dumps(manager))
+            content = content.replace(b'</body>', form.encode() + b'</body>')
+        if FILES_PROOF and ('/draftfile.php/' in self.path or '/pluginfile.php/' in self.path):
+            parts = self.path.split('?')[0].split('/')
+            item_id = parts[6] if '/draftfile.php/' in self.path else next(iter(file_created.values()), {}).get('item_id')
+            content = file_drafts.get(item_id, {}).get('bytes', b'')
+            self.send_response(200 if content else 404)
+            self.send_header('Content-Type', 'application/octet-stream')
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'none'")
@@ -108,9 +149,50 @@ class Fixture(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_POST(self):
-        global effects, section_name
+        global effects, section_name, file_uploads, file_saves
         report["provider_calls"] += 1
         body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        if FILES_PROOF and '/repository/' in self.path:
+            from urllib.parse import parse_qs
+            if '/repository_ajax.php' in self.path:
+                from email import policy
+                from email.parser import BytesParser
+                envelope = ('Content-Type: ' + self.headers['Content-Type'] + '\r\nMIME-Version: 1.0\r\n\r\n').encode() + body
+                fields = {part.get_param('name', header='content-disposition'): part for part in BytesParser(policy=policy.default).parsebytes(envelope).iter_parts()}
+                item_id = fields['itemid'].get_payload(decode=True).decode()
+                incoming = fields['repo_upload_file'].get_payload(decode=True)
+                filename = fields['title'].get_payload(decode=True).decode()
+                file_drafts[item_id] = {'bytes': b'changed' if file_upload_mode == 'mismatch' else incoming, 'filename': filename}
+                file_uploads += 1
+                if file_upload_mode == 'lost_response':
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    self.connection.close()
+                    return
+                data = {'id': int(item_id), 'file': filename, 'url': base + '/draftfile.php/3/user/draft/' + item_id + '/' + filename}
+            else:
+                item_id = parse_qs(body.decode()).get('itemid', [''])[0]
+                draft = file_drafts.get(item_id)
+                data = {'filecount': 1 if draft else 0, 'list': [{'filename': draft['filename'], 'filepath': '/', 'type': 'file', 'size': len(draft['bytes']), 'sortorder': 1, 'mimetype': 'text/plain'}] if draft else [], 'tree': {'children': []}}
+            payload = json.dumps(data).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if FILES_PROOF and '/course/modedit.php' in self.path:
+            from urllib.parse import parse_qs
+            values = parse_qs(body.decode(), keep_blank_values=True)
+            module_id = str(99 + file_saves)
+            saved = {'id': module_id, 'item_id': values['files'][0], 'name': values['name'][0]}
+            file_created[module_id] = saved
+            provider_state['cm'].append({'id': int(module_id), 'module': 'resource', 'sectionid': 10, 'name': saved['name'], 'visible': False})
+            file_saves += 1
+            self.send_response(303)
+            self.send_header('Location', base + '/course/view.php?id=2')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
         if '/course/editsection.php' in self.path:
             from urllib.parse import parse_qs
             form = parse_qs(body.decode())
@@ -350,6 +432,7 @@ try:
         cli_tree = Path(os.environ['MORROW_CLI_TEST_TREE']).resolve()
         check('cli_package_has_no_legacy_auth_modules', not any((cli_tree / 'moodle' / name).exists()
             for name in ('login.py', 'session.py', 'probe.py', 'keepalive.py', 'reauth.py')))
+        check('cli_package_excludes_web_fixture_driver', not (cli_tree / 'scripts/helper-web-input-e2e.py').exists())
         manifest = json.loads((cli_tree / 'pack/carve-manifest.json').read_text())
         report['cli_package_hashes'] = {name: hashlib.sha256((cli_tree / name).read_bytes()).hexdigest()
                                         for name in manifest['files']}
@@ -377,6 +460,109 @@ try:
         check('cli_pair_discovers_educator', paired.get('principal_id') == '42')
         again = cli('pair', '--site', base)
         check('cli_pair_is_one_time', again.get('already_paired') is True)
+        if FILES_PROOF:
+            local_file = root / 'fixture-file.txt'
+            local_file.write_bytes(b'PRIVATE_DISPOSABLE_FILE_BYTES_7c90a40b')
+            manifest = {'filename': 'fixture-file.txt', 'size_bytes': local_file.stat().st_size,
+                        'sha256': hashlib.sha256(local_file.read_bytes()).hexdigest()}
+            staged_file = cli('stage-file', '--course-id', '2', '--path', str(local_file), '--filename', manifest['filename'])
+            check('private_file_stage_returns_only_review_manifest', staged_file == {'ok': True, 'manifest': manifest})
+            check('private_file_stage_has_no_lms_effect', effects == 0)
+            check('private_file_bytes_not_in_cli_result', 'PRIVATE_DISPOSABLE_FILE_BYTES_7c90a40b' not in json.dumps(staged_file))
+            repeat_stage = cli('stage-file', '--course-id', '2', '--path', str(local_file))
+            check('private_file_repeat_is_exact', repeat_stage == staged_file)
+            for name, data in (('empty', b''), ('oversized', b'x' * 1048577)):
+                rejected_file = root / (name + '.txt')
+                rejected_file.write_bytes(data)
+                cli('stage-file', '--course-id', '2', '--path', str(rejected_file), success=False)
+                check('private_file_' + name + '_no_effect', effects == 0)
+            linked_file = root / 'linked.txt'
+            linked_file.symlink_to(local_file)
+            cli('stage-file', '--course-id', '2', '--path', str(linked_file), success=False)
+            cli('stage-file', '--course-id', '2', '--path', str(root), success=False)
+            cli('stage-file', '--course-id', '2', '--path', str(local_file), '--filename', '../unsafe.txt', success=False)
+            check('private_file_rejections_no_effect', effects == 0)
+            alternate_file = root / 'second-private-file.txt'
+            alternate_file.write_bytes(b'PRIVATE_SECOND_FILE_BYTES_b521')
+            second_stage = cli('stage-file', '--course-id', '2', '--path', str(alternate_file))
+            second_manifest = second_stage['manifest']
+            learner_stage = cli('stage-file', '--course-id', '2', '--path', str(local_file), '--filename', 'Aster Sample guide.txt')
+            check('private_file_manifest_masks_learner', learner_stage.get('ok') is True and 'Aster Sample' not in json.dumps(learner_stage) and 'Student A' in learner_stage['manifest']['filename'])
+            local_file.write_bytes(b'CHANGED_LOCAL_FILE_AFTER_STAGING')
+            private_store = cli_state / 'moodle_private_files'
+            for record in private_store.glob('*.file'):
+                check('private_file_record_encrypted', b'PRIVATE_DISPOSABLE_FILE_BYTES_7c90a40b' not in record.read_bytes())
+                check('private_file_record_owner_only', record.stat().st_mode & 0o777 == 0o600)
+            file_probe = root / 'private-file-browser-probe.py'
+            file_probe.write_text("""
+import hashlib, json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from moodle.cli import _account, _launcher, _dispatcher
+from moodle.browser_transport import MoodleBrowserTransport
+from moodle.private_files import PrivateMoodleFiles
+record = _account()
+transport = MoodleBrowserTransport(record['site'], _launcher(), principal_id=record['principal_id'])
+dispatcher = _dispatcher(transport)
+binding = dispatcher._binding(2)
+manifest, second_manifest, learner_manifest = json.loads(sys.argv[2])
+arguments = {'course_id': 2, **manifest}
+files = PrivateMoodleFiles()
+checks = {}
+for name, alternate, args in (
+    ('wrong_course', {**binding, 'courseId': '3'}, arguments),
+    ('wrong_principal', {**binding, 'principalId': '43'}, arguments),
+    ('wrong_site', {**binding, 'siteUrl': binding['siteUrl'] + '/other'}, arguments),
+    ('changed_manifest', binding, {**arguments, 'sha256': '0' * 64}),
+    ('duplicate_set', binding, {'files': [manifest, manifest]})):
+    try:
+        files.attachments(alternate, args, 'multiple' if name == 'duplicate_set' else 'single')
+    except Exception:
+        checks[name] = True
+    else:
+        checks[name] = False
+routes = {key: value for key, value in dispatcher.loader.operations.items() if value.get('attachmentMode') in ('single', 'multiple')}
+checks['nine_routes'] = len(routes) == 9
+checks['immutable_after_source_change'] = files.attachments(binding, arguments, 'single')['privateAttachment']['manifest'] == manifest
+checks['ordered_multiple'] = [row['manifest'] for row in files.attachments(binding, {'files': [second_manifest, manifest]}, 'multiple')['privateAttachments']] == [second_manifest, manifest]
+learner_params = {'course_id': 2, **learner_manifest}
+def private_learner_lookup(resolved):
+    payload = files.attachments(binding, resolved, 'single')
+    return {'ok': payload['privateAttachment']['manifest']['filename'] == 'Aster Sample guide.txt'}
+checks['learner_filename_resolves_privately'] = dispatcher._boundary(binding).invoke('moodle_create_resource_file', {**learner_params, '_morrow': {'source_binding_id': binding['sourceBindingId']}}, {}, private_learner_lookup).get('ok') is True
+scope = {'site': binding['siteUrl'], 'principal': binding['principalId'], 'course': binding['courseId']}
+path = Path(files._path(scope, manifest))
+original = path.read_bytes()
+path.write_bytes(original[:-1] + bytes([original[-1] ^ 1]))
+try:
+    files.attachments(binding, arguments, 'single')
+except Exception:
+    checks['altered_cipher_refused'] = True
+else:
+    checks['altered_cipher_refused'] = False
+finally:
+    path.write_bytes(original)
+for key, route in routes.items():
+    args = {'course_id': 2, 'files': [second_manifest, manifest]} if route['attachmentMode'] == 'multiple' else arguments
+    request = dispatcher._request(key, args, binding)
+    tab, context, staged = transport._stage_operation(dispatcher.loader, key, request)
+    try:
+        expression = '(async()=>{const i=JSON.parse(globalThis[%s].input);const a=i.privateAttachments||[i.privateAttachment];return Promise.all(a.map(async f=>{const raw=Uint8Array.from(atob(f.bytes_base64),c=>c.charCodeAt(0));const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",raw)),v=>v.toString(16).padStart(2,"0")).join("");return {manifest:f.manifest,hash};}));})()' % json.dumps(staged.slot)
+        result = transport.cdp.evaluate(tab, expression, context_id=context, await_promise=True)
+        checks['browser_' + route['toolName']] = result == [{'manifest': value, 'hash': value['sha256']} for value in ([second_manifest, manifest] if route['attachmentMode'] == 'multiple' else [manifest])]
+    finally:
+        transport.cdp.close_tab(tab)
+print(json.dumps(checks))
+""")
+            probe = subprocess.run([sys.executable, str(file_probe), str(cli_tree), json.dumps([manifest, second_manifest, learner_stage['manifest']])], env=cli_env,
+                                   capture_output=True, text=True, timeout=240)
+            report['private_file_probe_exit'] = probe.returncode
+            if probe.returncode:
+                report['private_file_probe_failure'] = probe.stderr[-2000:]
+            check('private_file_real_browser_probe_exit', probe.returncode == 0)
+            for name, passed in json.loads(probe.stdout.strip().splitlines()[-1]).items():
+                check('private_file_' + name, passed)
+            check('private_file_probe_no_effect', effects == 0)
         fixture_mode = 'wrong_account'
         cli('pair', '--site', base, success=False)
         fixture_mode = 'modern'
@@ -418,6 +604,58 @@ try:
         check('cli_revoked_edit_no_effect', effects == before_effects + 1)
         cli('read', '--operation', 'moodle.ajax.core_courseformat_update_course.cm_hide.v1', '--arguments', '{"course_id":2}', success=False)
         cli('read', '--operation', 'unknown', '--arguments', '{"course_id":2}', success=False)
+        if FILES_PROOF:
+            file_catalog = {row['toolName']: row['key'] for row in catalog['operations']}
+            definition = next(row for row in catalog['operations'] if row['toolName'] == 'moodle_create_resource_file')
+            review_key = file_catalog[definition['reviewTool']]
+            file_review = cli('read', '--operation', review_key, '--arguments', '{"course_id":2,"section_id":10}')
+            check('private_file_native_creation_form_reviewed', file_review.get('ok') is True)
+            parameters = {'course_id': 2, 'section_id': 10, 'name': 'Disposable private file', **manifest,
+                          'expected_digest': file_review['snapshot_digest']}
+            file_op = str(uuid.uuid4())
+            cli('plan', '--operation', definition['key'], '--arguments', json.dumps(parameters), '--op-id', file_op)
+            check('private_file_plan_no_upload', file_uploads == 0 and file_saves == 0)
+            saved_result = cli('approve', '--op-id', file_op, '--authorization', 'Approve this exact disposable file in this course')
+            check('private_file_native_saved_bytes_verified', saved_result.get('ok') is True and saved_result.get('verification', {}).get('status') == 'verified')
+            check('private_file_one_upload_one_save', file_uploads == 1 and file_saves == 1)
+            cli('approve', '--op-id', file_op, '--authorization', 'Approve this exact disposable file in this course', success=False)
+            check('private_file_success_never_replayed', file_uploads == 1 and file_saves == 1)
+            check('private_file_plaintext_absent_from_plan_and_result', all('PRIVATE_DISPOSABLE_FILE_BYTES_7c90a40b' not in text for text in (json.dumps(saved_result), (cli_state / 'moodle_pending' / (file_op + '.json')).read_text())))
+            missing_args = {**parameters, 'sha256': '0' * 64}
+            missing_op = str(uuid.uuid4())
+            cli('plan', '--operation', definition['key'], '--arguments', json.dumps(missing_args), '--op-id', missing_op, success=False)
+            check('private_file_missing_stage_cannot_create_approval', not (cli_state / 'moodle_pending' / (missing_op + '.json')).exists() and file_uploads == 1)
+            restored_op = str(uuid.uuid4())
+            cli('plan', '--operation', definition['key'], '--arguments', json.dumps(parameters), '--op-id', restored_op)
+            cache_key = hashlib.sha256(json.dumps({'scope': {'site': base, 'principal': '42', 'course': '2'}, 'manifest': manifest}, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+            cache_record = private_store / (cache_key + '.file')
+            cached_bytes = cache_record.read_bytes()
+            cache_record.write_bytes(cached_bytes[:-1] + bytes([cached_bytes[-1] ^ 1]))
+            cli('approve', '--op-id', restored_op, '--authorization', 'Approve this exact disposable file', success=False)
+            check('private_file_altered_stage_no_upload', file_uploads == 1 and file_saves == 1)
+            cache_record.write_bytes(cached_bytes)
+            restored_result = cli('approve', '--op-id', restored_op, '--authorization', 'Approve this exact disposable file')
+            check('private_file_refusal_preserves_approval', restored_result.get('ok') is True and file_uploads == 2 and file_saves == 2)
+            cli('mode', 'set', 'edit')
+            edit_file_result = cli('execute', '--operation', definition['key'], '--arguments', json.dumps(parameters))
+            check('private_file_edit_saved_bytes_verified', edit_file_result.get('ok') is True and file_uploads == 3 and file_saves == 3)
+            halt = root / 'state' / 'write_halt'
+            halt.parent.mkdir(exist_ok=True)
+            halt.write_text('fixture operator halt')
+            cli('execute', '--operation', definition['key'], '--arguments', json.dumps(parameters), success=False)
+            check('private_file_edit_halt_no_upload', file_uploads == 3 and file_saves == 3)
+            halt.unlink()
+            cli('mode', 'set', 'plan')
+            for upload_mode in ('mismatch', 'lost_response'):
+                file_upload_mode = upload_mode
+                uncertain_op = str(uuid.uuid4())
+                cli('plan', '--operation', definition['key'], '--arguments', json.dumps(parameters), '--op-id', uncertain_op)
+                uploads_before = file_uploads
+                cli('approve', '--op-id', uncertain_op, '--authorization', 'Approve this disposable file', success=False)
+                check('private_file_' + upload_mode + '_save_not_sent', file_uploads == uploads_before + 1 and file_saves == 3)
+                cli('approve', '--op-id', uncertain_op, '--authorization', 'Approve this disposable file', success=False)
+                check('private_file_' + upload_mode + '_new_process_no_replay', file_uploads == uploads_before + 1 and file_saves == 3)
+            file_upload_mode = 'normal'
         fixture_mode = 'legacy41'
         check('cli_legacy_account_status', cli('status').get('principal_id') == '42')
         fixture_mode = 'modern'

@@ -62,6 +62,7 @@ DEV_ONLY = (
     "requirements-dev.txt", "requirements-test.txt",
     "scripts/install-robustness-selftest.sh", "scripts/carve.py",
     "scripts/install-e2e.sh", "scripts/helper-input-e2e.py",
+    "scripts/helper-web-input-e2e.py",
     "scripts/moodle-browser-e2e.py", "moodle/BROWSER-CONTRACT.md",
     "scripts/moodle-write-readback-e2e.py",
     "scripts/moodle-capability-probe-e2e.py",

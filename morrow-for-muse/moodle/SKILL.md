@@ -78,6 +78,32 @@ new ID makes a duplicate safe. A changed account, site, login, or course
 refuses operation preparation. Sign in again through the same private helper
 and verify the pinned account before new work.
 
+## Add reviewed files
+
+Use a local file in the agent VM. Stage it with
+`bin/morrow moodle stage-file --course-id ID --path /absolute/path/file`.
+Use `--filename` to set its LMS file name. The result contains the reviewed
+`filename`, `size_bytes`, and `sha256`. File bytes stay in encrypted private
+state for this account, site, and course. Source paths do not enter the
+plan or response. If a file name contains learner information, use the
+projected name that Morrow returns.
+
+Use the catalog to select the file operation and its review operation.
+Read the native target first. Include the returned manifest and fresh
+`expected_digest` in the write arguments. For a Folder file set, stage each
+file and put the manifests in the requested order in `files`. Each set must
+have unique file names. The current canonical adapters accept one file or
+1–8 files with a total of at most 1 MiB. This is a file transfer bound.
+There is no course-count limit.
+
+Plan and Edit use the same reviewed bytes. Changes to the source file after
+staging do not change those bytes. Stage the changed file and read and
+prepare the target again when the educator asks to use a newer file.
+Morrow refuses missing or altered private records before dispatch. It
+verifies the native draft copy before save and reads the saved file bytes
+before reporting success. A lost upload or save reply remains uncertain;
+inspect provider state before proposing another operation.
+
 ## Capability boundaries
 
 The canonical registry contains 249 public operations and one internal
@@ -85,6 +111,6 @@ privacy roster operation. Presence in the catalog is not proof that a
 school enables that operation. Roles, plugins, site version, native forms,
 and feature settings still control access. Report a provider refusal and
 prepare a draft when needed. Do not bypass the governed path with UI writes.
-Private attachments, broader native provider qualification, and first-use
-Moodle helper setup remain release gates. Historical Python HTTPS proof
+Broader native file/provider qualification and first-use Moodle helper
+setup remain release gates. Historical Python HTTPS proof
 stays in the source repository; its authentication modules do not ship.
