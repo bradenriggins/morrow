@@ -110,7 +110,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(store.get_setting(self.user, "default_mode"), "plan")
         self.assertEqual(store.get_setting(self.user, "verbosity"), "balanced")
         self.assertEqual(
-            store.get_setting(self.user, "confirm_destructive_writes"), False)
+            store.get_setting(self.user, "confirm_destructive_writes"), True)
         self.assertEqual(store.get_setting(self.user, "failure_verbosity"),
                          "detailed")
         self.assertEqual(store.get_setting(self.user, "proactivity"),
@@ -321,10 +321,10 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(store.effective_mode(self.user, self.conv), "plan")
 
     def test_destructive_confirmation_helper(self):
-        self.assertFalse(store.destructive_confirmation_required(self.user))
-        store.set_setting(self.user, "confirm_destructive_writes", True,
-                          educator_confirmed=True)
         self.assertTrue(store.destructive_confirmation_required(self.user))
+        store.set_setting(self.user, "confirm_destructive_writes", False,
+                          educator_confirmed=True)
+        self.assertFalse(store.destructive_confirmation_required(self.user))
 
     # -- persistence ------------------------------------------------------------------
 
@@ -660,18 +660,18 @@ class CommandTest(unittest.TestCase):
         self.assertNotIn(" left", out["message"])
 
     def test_destructive_note_is_true_for_a_new_educator(self):
-        # The default is off, and a new educator never turned it off.
-        out = commands.mode_set(self.user, "edit", self.conv)
-        self.assertNotIn("You have turned off", out["message"])
-        self.assertIn("that is the default", out["message"])
-        store.set_setting(self.user, "confirm_destructive_writes", True,
-                          educator_confirmed=True)
+        # The default is on: a new educator is told deletions ask first.
         out = commands.mode_set(self.user, "edit", self.conv)
         self.assertIn("will still ask you first", out["message"])
+        self.assertNotIn("will not ask", out["message"])
         store.set_setting(self.user, "confirm_destructive_writes", False,
                           educator_confirmed=True)
         out = commands.mode_set(self.user, "edit", self.conv)
         self.assertIn("you turned them off", out["message"])
+        store.set_setting(self.user, "confirm_destructive_writes", True,
+                          educator_confirmed=True)
+        out = commands.mode_set(self.user, "edit", self.conv)
+        self.assertIn("will still ask you first", out["message"])
 
     def test_deletion_confirmations_setting(self):
         out = commands.setting_set(self.user, "confirm_destructive_writes",

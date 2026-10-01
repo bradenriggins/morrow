@@ -37,12 +37,14 @@ Usage (agent / connector UX):
 """
 
 import hashlib
+import html as _html
 import json
 import os
 import re
 import sys
 import urllib.parse
 from datetime import date, datetime, timezone
+from html.parser import HTMLParser
 
 _TREE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TREE not in sys.path:
@@ -541,10 +543,42 @@ def _plain_time(value, zone):
     return text
 
 
+_HTML_TAG_RE = re.compile(r"<[A-Za-z][^<>]*>")
+
+
+class _TextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def _readable_html(value):
+    """The words inside an HTML value, tags removed, nothing dropped.
+
+    The raw value still shows whole above this line (consent needs the
+    exact bytes); this line lets the educator read what students see.
+    Returns None when the value holds no HTML tags.
+    """
+    if not isinstance(value, str) or not _HTML_TAG_RE.search(value):
+        return None
+    parser = _TextExtractor()
+    try:
+        parser.feed(value)
+        parser.close()
+    except Exception:
+        return None
+    text = _html.unescape(" ".join("".join(parser.parts).split()))
+    return text or None
+
+
 def _value_lines(value, indent="", zone=None):
     """Every value in a request body as "Name: value" lines, whole.
     Dates and times are shown in zone ((tzinfo, name)); the audit
-    detail keeps the values exactly as sent."""
+    detail keeps the values exactly as sent. HTML bodies add a
+    "Reads as:" line with the tags removed; the raw value stays."""
     zone = zone or _zone(None)
     lines = []
     if isinstance(value, dict):
@@ -565,12 +599,18 @@ def _value_lines(value, indent="", zone=None):
                     else _plain_value(item)
                 lines.append("%s%s: %s" % (indent, _field_name(str(key)),
                                             shown))
+                reads = _readable_html(item)
+                if reads is not None:
+                    lines.append("%sReads as: %s" % (indent, reads))
     elif isinstance(value, list):
         for n, item in enumerate(value, 1):
             lines.append("%s%d." % (indent, n))
             lines.extend(_value_lines(item, indent + "  ", zone))
     elif value is not None:
         lines.append("%s%s" % (indent, _plain_value(value)))
+        reads = _readable_html(value)
+        if reads is not None:
+            lines.append("%sReads as: %s" % (indent, reads))
     return lines
 
 

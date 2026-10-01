@@ -1266,9 +1266,12 @@ def _purge_write_ceremony_files(tenant_base=None, course_id=None):
 
 def purge_tenant(tenant_base, error_cls=Exception):
     """W4-P2-10: drop every shipped-vault record for one tenant (matched
-    on the scope's exact canvasOrigin), then purge ALL browser transient
+    on the scope's exact canvasOrigin), then purge browser transient
     state (pending envelopes + briefs, W4-P0-4/W4-P0-5: they hold raw
-    payloads and cannot be scoped to a tenant).
+    payloads and cannot be scoped to a tenant). Envelopes still in
+    flight (younger than TTL or under a live journal claim) are kept
+    by design so running ops cannot wedge; they age out, and a later
+    purge removes them. Uninstall forces the full transient purge.
 
     The vault map is rewritten atomically (flock + tmp/rename/fsync);
     other tenants' records and the vault key are untouched. Issued

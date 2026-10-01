@@ -1,6 +1,6 @@
 # Setting up Morrow for Muse with Canvas
 
-*Version 0.4.6. Canvas setup takes about 15 minutes. You set it up by talking
+*Version 0.4.9. Canvas setup takes about 15 minutes. You set it up by talking
 to Muse; there is no software to install on your own computer.*
 
 ## Before you start
@@ -17,7 +17,7 @@ to Muse; there is no software to install on your own computer.*
 
 ## Step 1: Ask Muse to set up Morrow
 
-In Muse, type:
+In Muse, type (or say, if your device types what you say):
 
 > Set up Morrow for Muse with Canvas by following https://meetmorrow.app/morrow-for-muse
 
@@ -25,8 +25,10 @@ If Morrow is already set up, say “Connect my Canvas account.”
 
 ## Step 2: Review how Morrow works
 
-Before the first connection, Muse explains what Morrow can do, where your
-sign-in stays, and how to disconnect. Continue when you are ready.
+Before the first connection, Muse shows the consent page (“Before we
+connect: what you are agreeing to”) and explains what Morrow can do,
+where your sign-in stays, and how to disconnect. Read it in full before
+you agree. Continue when you are ready.
 
 ## Step 3: Name your Canvas site
 
@@ -76,9 +78,12 @@ requires it.
 
 ## Moodle
 
-Ask Muse to work with your Moodle account. Pairing connects your account
-once. Then name a course, give its ID, or share its course link. You can work
-with many courses without pairing each one. Plan mode asks before changes;
+Ask Muse to work with your Moodle account. One-time pairing connects
+your account through a setup command, not through the browser sign-in
+page: the browser sign-in for Moodle is still being qualified, so your
+assistant pairs the account for you and then names the result. Then name
+a course, give its ID, or share its course link. You can work with many
+courses without pairing each one. Plan mode asks before changes;
 Edit mode follows your standing permission. Do not send passwords or
 sign-in details in chat. Your assistant must verify private sign-in setup
 and a first course read before it says the account is ready.

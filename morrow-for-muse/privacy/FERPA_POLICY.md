@@ -91,7 +91,7 @@ email, and a word that only looked like a name ("Brown v. Board" in a
 course with a student named Brown) is restored as written. A label the
 course never issued is refused before anything is sent, and in plan
 mode each label is bound to its vault token as a learner-id label is.
-Without the encrypted vault there are no labels: the roster's forms are
+Without the sealed vault there are no labels: the roster's forms are
 hidden one way (`[hidden: student name]`), and a write whose text still
 carries one is refused.
 
@@ -410,7 +410,7 @@ the wired vault file above.
   learner data and is never de-identified, so principal
   confirmation keeps working.
 - Learner-data operations dispatch only where a projection point
-  exists: the Chromium lane with the encrypted vault. The raw HTTPS
+  exists: the Chromium lane with the sealed vault. The raw HTTPS
   lane, and any lane without the `cryptography` package, refuses them
   (`LearnerDataGated`). Undo of a learner-bearing manifest entry is
   still refused on every lane.

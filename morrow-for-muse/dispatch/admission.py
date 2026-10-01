@@ -1220,7 +1220,7 @@ def op_digest_of(entry_name: str, params: dict, tenant_base: str | None,
 
 
 def mint_approval(entry: dict, params: dict, tenant_base: str | None = None,
-                  ttl_seconds: int = 3600,
+                  ttl_seconds: int = MAX_APPROVAL_TTL_SECONDS,
                   target_identity: dict | None = None) -> dict:
     """Build an UNSIGNED v2 approval record (by=None).
 
@@ -2274,7 +2274,7 @@ def check_mode_authority(entry: dict, params: dict,
         in edit mode: admitted only with a recorded
         educator confirmation for that action
         (mode_ctx["destructive_confirmed"]) while the educator's
-        confirm_destructive_writes setting is on (off by default).
+        confirm_destructive_writes setting is on (on by default).
         Otherwise DestructiveConfirmationRequired.
       - effective mode "plan": delegates to check_write_approval, so
         the existing frozen-plan + educator-signed v2 approval path is

@@ -64,10 +64,10 @@ matter the mode:
    type reach the Muse model.
 2. **Safe operations in Canvas.** Every write runs only through the
    governed dispatcher (live-proven operations only, never-dispatch
-   routes refused). If you also want deletions to ask first while in
-   edit mode, say "always confirm deletions" (off by default: edit
-   mode does not ask per write). Say "stop asking me to confirm
-   deletions" to turn it back off. Either change is journaled.
+   routes refused). Deletions ask first while in edit mode unless you
+   say "stop asking me to confirm deletions" (on by default: a delete
+   without your verbatim yes is refused). Say "always confirm
+   deletions" to turn it back on. Either change is journaled.
 
 And three rules about the agent itself:
 

@@ -1,7 +1,6 @@
 # Before we connect: what you are agreeing to
 
-*A plain summary for a busy educator. This is the whole deal; there is
-read the installation trust notes and platform policies for the details. Muse shows it to you before you sign in.*
+*A plain summary for a busy educator. This is the whole deal, with no fine print beyond it. Muse shows it to you before you sign in.*
 
 ## What Morrow can do
 
@@ -160,13 +159,14 @@ When in doubt, ask your IT help desk before connecting.
 
 ## The part we would rather you hear from us
 
-Muse's platform guidance, checked on 2026-09-30, says conversations contribute
-to AI at Meta development and that you can opt out in **Settings > Data Controls**
-in the Muse app or at muse.ai. It says confidential VM interactions are never
+Muse's platform guidance says conversations may contribute
+to AI at Meta development and that you can opt out in the Muse app's data
+settings or at muse.ai. It says confidential VM interactions are never
 used for AI training; that VM does not show the opt-out row, and the account-wide
 choice can be changed from a standard computer. Do not assume your VM is
-confidential without checking. These controls do not establish school approval
-or a FERPA compliance guarantee.
+confidential without checking. Menu names change over time: if the path above
+does not match your app, search its settings for data sharing. These controls
+do not establish school approval or a FERPA compliance guarantee.
 
 Platform policies are authoritative: [Muse Privacy Policy](https://muse.ai/privacy),
 [Muse Terms](https://muse.ai/terms), and [Meta Privacy Center](https://www.facebook.com/privacy/genai).

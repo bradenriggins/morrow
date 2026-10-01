@@ -969,6 +969,67 @@ def approve_op(op_id, authorization=None):
     return changed
 
 
+def approve_all_awaiting(authorization=None):
+    """The educator's explicit approval to re-dispatch every awaiting op.
+
+    Same safety contract as approve_op, applied to the whole set at
+    once: only ops in status 'awaiting_approval' (verified resume
+    already happened) move, the educator's verbatim authorization is
+    REQUIRED and sealed into every approved entry, and explicit
+    denials refuse the whole batch. Returns the list of approved
+    op_ids, newest entry per op; an empty list when nothing awaits.
+    One atomic rewrite: partial approval is impossible.
+    """
+    if (not isinstance(authorization, str)
+            or len(authorization.strip()) < _REAPPROVAL_AUTH_MIN_LEN):
+        raise ValueError(
+            "approve_all_awaiting requires the educator's verbatim reply "
+            "approving the re-dispatch of the awaiting changes (a "
+            "non-empty approving reply); the agent cannot self-approve")
+    if explicit_nonapproval(authorization):
+        raise ValueError(
+            "approve_all_awaiting refuses an explicit denial or uncertain reply")
+    approved = []
+    with _ledger_locked():
+        tmp = QUAR_PATH + ".mutate"
+        try:
+            secret = _load_or_mint_quarantine_secret()
+            with open(QUAR_PATH) as src, open(tmp, "w") as dst:
+                for line in src:
+                    if line.strip():
+                        op = json.loads(line)  # torn line: fail loud
+                        granted = False
+                        if ((op.get("kind") or "op") == "op"
+                                and op.get("status")
+                                == "awaiting_approval"):
+                            op["status"] = "approved"
+                            op["approved"] = True
+                            op["approved_at"] = _now()
+                            op["approval_authorization"] = authorization.strip()
+                            approved.append(str(op.get("op_id")))
+                            granted = True
+                        if granted:
+                            _seal_ledger_entry(op, secret)
+                        else:
+                            _seal_ledger_entry_for_rewrite(op, secret)
+                        dst.write(json.dumps(op) + "\n")
+                    else:
+                        dst.write(line)
+                dst.flush()
+                os.fsync(dst.fileno())
+        except FileNotFoundError:
+            return []
+        except Exception:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, QUAR_PATH)
+    return approved
+
+
 class PrincipalPinError(Exception):
     """The pinned Canvas principal cannot be trusted or changed.
 
@@ -1590,9 +1651,14 @@ def approval_refusal_evidence(op_id, status):
 
 def cmd_approve():
     op_id = _arg("--op-id", None)
+    all_awaiting = "--all-awaiting" in sys.argv
     authorization = _arg("--authorization", None)
+    if all_awaiting and not op_id:
+        return cmd_approve_all(authorization)
     if not op_id or not (authorization or "").strip():
         print('usage: state_machine.py approve --op-id <op_id> '
+              '--authorization "the educator\'s verbatim approval words"')
+        print('   or: state_machine.py approve --all-awaiting '
               '--authorization "the educator\'s verbatim approval words"')
         print("W6-P2-A5: the educator must actually say the words; the "
               "agent cannot approve on their behalf.")
@@ -1630,6 +1696,48 @@ def cmd_approve():
         print(f"refused: op_id={op_id} is not awaiting_approval "
               f"(status={status})")
     return False
+
+
+def cmd_approve_all(authorization):
+    """Approve every change in awaiting_approval with one authorization.
+
+    The educator names the paused batch in their own words (the agent
+    reads back every paused change first); that verbatim reply is
+    sealed into each approved entry. Changes already sent stay sent:
+    approving them only takes them off the paused list, exactly as
+    the per-op path.
+    """
+    if not (authorization or "").strip():
+        print('usage: state_machine.py approve --all-awaiting '
+              '--authorization "the educator\'s verbatim approval words"')
+        print("W6-P2-A5: the educator must actually say the words; the "
+              "agent cannot approve on their behalf.")
+        return False
+    try:
+        approved = approve_all_awaiting(authorization)
+    except ValueError as exc:
+        exc.nothing_sent = True
+        try:
+            from failures.funnel import agent_error_text
+            print(agent_error_text("approving the paused changes", exc))
+        except Exception:
+            print(f"refused: {exc}")
+        return False
+    if not approved:
+        print("no changes are awaiting approval; nothing was approved")
+        return False
+    seen = set()
+    for op_id in approved:
+        if op_id in seen:
+            continue
+        seen.add(op_id)
+        if _write_was_sent(op_id):
+            print(f"approved op_id={op_id}. This change may already be in "
+                  "Canvas and its op id is used up, so it is never sent "
+                  "again. Read the item back with a live-proven read.")
+        else:
+            print(f"approved op_id={op_id} for re-dispatch")
+    return True
 
 
 def cmd_notify():
