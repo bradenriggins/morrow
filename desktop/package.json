@@ -27,7 +27,7 @@
     "catalog:check": "pnpm catalog:canvas:check && node --test scripts/test/canvas-connector-package.test.mjs",
     "catalog:report": "pnpm catalog:merge",
     "catalog:scan": "node scripts/scan-held-provider-inputs.mjs",
-    "generated:check": "pnpm catalog:canvas:check && pnpm canvas:admission:check && pnpm canvas:classic-question:check && pnpm moodle:identifiers:check",
+    "generated:check": "pnpm catalog:canvas:check && pnpm canvas:admission:check && pnpm canvas:classic-question:check && pnpm moodle:identifiers:check && node scripts/generate-moodle-browser-routes.mjs --check",
     "canvas:readback:sync": "pnpm --dir packages/canvas-api-catalog build && node scripts/sync-canvas-readback-plan.mjs",
     "canvas:readback:check": "pnpm --dir packages/canvas-api-catalog build && node scripts/sync-canvas-readback-plan.mjs --check",
     "canvas:classic-question:sync": "node scripts/sync-classic-quiz-question-contract.mjs",

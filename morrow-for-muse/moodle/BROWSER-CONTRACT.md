@@ -17,8 +17,13 @@ Integration layers:
 
 The carve supplies layer 2's canonical source assets under
 `moodle/browser-assets/`: the Desktop adapters and generated catalog,
-unchanged and covered by the integrity manifest. It does not yet execute
-those adapters through Muse's governed dispatch.
+unchanged and covered by the integrity manifest. The generated route
+registry binds all 250 operations to the worker's adapter choice, private
+attachment mode, exact UTF-8 function byte range, and source/function
+hashes. Route generation runs only during the build; it adds no Node.js
+requirement on the Muse VM. The carve refuses stale worker or adapter
+bytes. It does not yet execute those adapters through Muse's governed
+dispatch.
 
 Layer 1 is not proof that layers 2–4 are finished. No raw browser write
 interface may be added as a substitute for governed execution.

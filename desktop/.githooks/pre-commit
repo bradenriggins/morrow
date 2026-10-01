@@ -24,7 +24,7 @@ if printf '%s\n' "$STAGED" | grep -Eq '^(desktop/|\.github/|\.gitattributes$|doc
   (cd "$REPO_ROOT/desktop" && pnpm check)
 fi
 
-if printf '%s\n' "$STAGED" | grep -Eq '^(morrow-for-muse/|desktop/connector/extension/src/|desktop/connector/extension/generated/moodle-browser-catalog\.json$|\.github/|\.gitattributes$|\.gitignore$|LICENSE$)'; then
+if printf '%s\n' "$STAGED" | grep -Eq '^(morrow-for-muse/|desktop/connector/extension/src/|desktop/connector/extension/generated/moodle-browser-(catalog|routes)\.json$|\.github/|\.gitattributes$|\.gitignore$|LICENSE$)'; then
   # check-muse's four suite steps in order. The learner-privacy pytest tests
   # need 'cryptography' and skip without it; MORROW_MUSE_PYTHON picks a python
   # that has it (pip install -r morrow-for-muse/requirements-optional.txt).

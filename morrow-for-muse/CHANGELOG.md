@@ -1,5 +1,14 @@
 # Changelog
 
+## Release hardening: canonical Moodle operation routes
+
+- Derive all 250 operation routes from the Desktop worker. Bind each
+  selected adapter to exact source bytes and a function hash.
+- Include the route registry in the package manifest. Refuse packaging
+  when the worker, catalog, or adapter source no longer matches it.
+- Check route generation and shared dependencies in CI and pre-commit.
+  Browser execution, admission, and native setup remain release gates.
+
 ## Release hardening: shared Moodle browser assets
 
 - Package the canonical Desktop Moodle browser adapters and 250-operation
