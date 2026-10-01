@@ -949,22 +949,7 @@ class ChromiumSession:
     @staticmethod
     def _parse_next_link(link_header):
         """Extract the rel="next" URL from a Link header, or None."""
-        if not link_header:
-            return None
-        for part in str(link_header).split(","):
-            segments = part.split(";")
-            if len(segments) < 2:
-                continue
-            url_part = segments[0].strip()
-            # Strip quotes anywhere (rel="next" is the standard form;
-            # a naive end-strip leaves rel="next behind and never matches).
-            rels = [s.strip().lower().replace('"', "").replace("'", "")
-                    for s in segments[1:]]
-            if "rel=next" in rels:
-                m = re.match(r"<([^>]+)>", url_part)
-                if m:
-                    return m.group(1)
-        return None
+        return ex._link_next_url(link_header)
 
     def _paginated_get(self, transport, first_path, max_bytes, status,
                        api_headers, body_text, attempts):

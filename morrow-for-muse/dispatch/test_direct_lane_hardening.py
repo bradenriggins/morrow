@@ -508,6 +508,25 @@ def test_complete_pagination_not_marked_truncated():
     assert out["truncated"] is False
 
 
+@pytest.mark.parametrize("header,target", [
+    ('<https://school.instructure.com/api/v1/x?page=2>; rel="next alternate"', BASE + "/api/v1/x?page=2"),
+    ('<https://school.instructure.com/api/v1/x?page=2>; REL = "NEXT"', BASE + "/api/v1/x?page=2"),
+    ('<https://school.instructure.com/api/v1/x?filter=a,b&page=2>; rel="next"', BASE + "/api/v1/x?filter=a,b&page=2"),
+    ('<https://school.instructure.com/api/v1/x;part=1?page=2>; rel="next"', BASE + "/api/v1/x;part=1?page=2"),
+    ('<https://school.instructure.com/api/v1/x>; title="not a next page; rel=next"; rel="prev"', None),
+])
+def test_link_header_preserves_uri_and_relation_tokens(header, target):
+    import chromium_session as cs
+
+    assert ex._link_next_url(header) == target
+    assert cs.ChromiumSession._parse_next_link(header) == target
+    state = ex._pagination_state({"Link": header})
+    assert (state is not None) == (target is not None)
+    if state:
+        assert state["partial"] is True
+        assert state["next_page"] == target
+
+
 def test_chromium_page_bound_marks_partial_with_next_cursor():
     import chromium_session as cs
 
