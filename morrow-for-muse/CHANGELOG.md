@@ -1,5 +1,20 @@
 # Changelog
 
+## Release hardening: governed Moodle command path
+
+- Pair an installed-Chromium Moodle account once with automatic educator
+  identity detection. Page courses without a course-count limit.
+- Expose the canonical public catalog, reads, plans, approvals, and
+  account-specific Plan/Edit mode through `bin/morrow moodle`.
+- Bind approvals to immutable learner tokens and current provider review.
+  Refuse stale source or a reissued label before a write is sent.
+- Preserve helper ownership checks on macOS with exact native process
+  arguments. Linux retains its `/proc` checks.
+- Remove source-only Python HTTPS authentication modules from the package
+  and align current knowledge and operator guidance with the browser path.
+- Native Moodle helper setup, private attachments, and broader provider
+  qualification remain release requirements.
+
 ## Release hardening: canonical Moodle operation routes
 
 - Derive all 250 operation routes from the Desktop worker. Bind each

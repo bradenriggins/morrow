@@ -1,15 +1,11 @@
 # v1 capability scope
 
-The Morrow for Muse connector v1 ships the Canvas connector and a separate
-Moodle session lane. This file is the exact statement of what each lane ships
-and what it does not. Do not imply capabilities beyond it.
-
-Canvas catalog claims below require `live-proven` evidence in
-`proof-battery/OPERATION_CATALOG.md` through the Chromium lane. Moodle uses
-the separate session lane in `moodle/`; site-level capabilities are probed
-before a Moodle operation runs. Moodle operation statuses are recorded in
-`proof-battery/OPERATION_CATALOG.md` and the Moodle lane notes. Do not treat one
-provider's proof as proof for the other.
+Morrow for Muse contains Canvas and Moodle operations through installed
+Chromium. Each provider has separate capability evidence. Canvas claims
+below require its operation-specific live proof. Moodle uses the governed
+public CLI and canonical browser adapters; native first-use, attachments,
+and broader provider qualification remain release gates. Historical Moodle
+HTTPS receipts do not prove the browser path.
 
 ## Ships in v1
 
@@ -115,16 +111,13 @@ provider's proof as proof for the other.
   educator asks and even with a signed approval.
 - The Canvas Login Helper (`helper/`): educator self-sign-in,
   SSO/MFA-capable, with keepalive.
-- The Moodle session lane (`moodle/`): sandbox HTTPS session bootstrap,
-  per-site capability probe, AJAX and form-path transport,
-  session-expiry handling, optional AJAX readback on low-level writes,
-  bounded receipts, and an append-only journal. Its production VM-browser
-  handoff and Plan/Edit approval are not wired into this Python module.
-  Live proof on the official Moodle 5.2 sandbox covers
-  listing courses and a forum-discussion create, verification, and delete
-  lifecycle. Moodle is separate from the Canvas catalog executor; the
-  available methods depend on the school's Moodle deployment. Follow
-  `moodle/SKILL.md` for the lane rules.
+- Moodle browser operations (`bin/morrow moodle`): one-time account pairing,
+  paged course discovery without a course-count limit, pinned adapters,
+  current source review, Plan/Edit admission, encrypted learner privacy,
+  immutable learner approvals, durable claims, and verified-only writes.
+  Native first-use, private attachments, and broader live provider proof
+  remain required. Follow `moodle/SKILL.md`; source-only HTTPS auth modules
+  are excluded from the package.
 
 ### In scope but pending live proof (not shipped v1 claims)
 

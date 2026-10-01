@@ -40,10 +40,10 @@ conditions, grade thresholds, and restrictions before diagnosing a blocked
 learner route. Backups/restores can include learner data and role assignments;
 choose content-only options deliberately and inspect restored links/settings.
 
-The packaged Moodle module uses an in-memory HTTPS session and sesskey.
-Its session handoff and production write governance limits are stated in
-[the Moodle skill](../moodle/SKILL.md). A sesskey is sensitive session material,
-not an agent-visible configuration value. Never persist or reveal it.
+Moodle operations use installed Chromium through `bin/morrow moodle`.
+Read [the Moodle skill](../moodle/SKILL.md) for one-time account pairing,
+course selection, Plan/Edit modes, and recovery. Cookies and sesskeys remain
+in Chromium; they are never agent-visible configuration values.
 
 ## Translate intent, not payloads
 

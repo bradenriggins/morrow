@@ -7,10 +7,10 @@ https://meetmorrow.app/morrow-for-muse", then follow the conversation
 (`content/setup-guide.md` is the educator walkthrough and
 `FIRST_RUN.md` is the agent's first-hour checklist).
 
-This document takes you from a fresh Muse VM to a verified Canvas
-connection. It also installs the separate Moodle HTTPS module, but this
-release does not connect a signed-in Muse browser session to that module.
-The steps below cover Canvas sign-in and readback.
+This document covers Canvas sign-in and readback. The Moodle lane uses
+`bin/morrow moodle` and the same installed Chromium transport. Read
+`moodle/SKILL.md` for one-time account pairing and governed operations.
+Native Moodle helper onboarding still needs release qualification.
 
 ## Prerequisites
 
@@ -25,8 +25,6 @@ The steps below cover Canvas sign-in and readback.
   refuses any file the release does not ship.
 - Python 3.11 or newer (`python3 --version`). (Python 3.10 is refused:
   it reaches security end-of-life in October 2026 per PEP 619.)
-- The Moodle session lane needs `requests`. Install it from the included,
-  hash-locked `requirements-optional.txt` in step 2.
 - Use an HTTPS Moodle address. `MOODLE_BASE_ALLOW_HTTP=1` is for test
   fixtures or LAN-only development, never for a real school account.
 - The Python package `cryptography` for anything that touches student
@@ -39,8 +37,8 @@ The steps below cover Canvas sign-in and readback.
   refused. Step 2 below installs it hash-pinned from the release
   (`python3 -m pip`, so pip must be available). Install step 1 checks
   for it and prints a warning (repeated at the end) when it is missing
-  or older than the pinned version. The Moodle lane uses `requests`;
-  other runtime code uses Python's standard library.
+  or older than the pinned version. The Moodle lane keeps authentication in Chromium. Install the hash-locked
+  runtime dependencies from `requirements-optional.txt`.
 - `unzip`, to unpack the release (step 1).
 - The command-line tools the installer and keepalive use: `curl`, `ss`,
   `pgrep`, `flock`, and `openssl` (the helper's TLS selftest makes a
@@ -348,11 +346,10 @@ for the full field guide.
 
 ## Step 5: sign in to Canvas (you, not the agent)
 
-This helper signs in to Canvas. Moodle uses the separate module in
-`moodle/`; this release does not provide a command that hands a Muse VM
-browser session to `MoodleSession`. See `moodle/SKILL.md` for the
-Moodle lane's exact scope and do not use the sandbox form-login command
-with a school account.
+The steps below cover the Canvas helper. For Moodle, follow
+`moodle/SKILL.md` and qualify the private native helper setup. Use
+`bin/morrow moodle pair` with an authenticated installed-Chromium profile.
+The package excludes the old Python form-login and session modules.
 
 In Muse, ask your assistant to show the private sign-in artifact card.
 The assistant follows `helper/MUSE-SETUP.md`, uses the configured helper
@@ -402,8 +399,7 @@ change in plain words, and runs `approve-write` with their reply
 (`SKILL.md`, "Dispatching operations"). In edit mode, writes run
 without asking (deletions ask only when the educator turned on
 deletion confirmations). The provider scope is declared in `SCOPE.md`.
-Canvas catalog operations and the Moodle session lane have separate
-capability evidence.
+Canvas and Moodle browser operations have separate capability evidence.
 
 ## Disconnect (keep the install)
 

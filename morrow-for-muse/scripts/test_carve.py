@@ -319,11 +319,12 @@ def test_dev_only_surface_does_not_ship(carved):
 
 
 def test_moodle_runtime_and_operator_instructions_ship(carved):
-    for rel in ("moodle/README.md", "moodle/SKILL.md", "moodle/login.py",
-                "moodle/probe.py", "moodle/reauth.py", "moodle/session.py", "moodle/browser_operations.py",
-                "requirements-optional.txt"):
+    for rel in ("moodle/README.md", "moodle/SKILL.md", "moodle/cli.py",
+                "moodle/contracts.py", "moodle/dispatch.py", "moodle/browser_transport.py",
+                "moodle/browser_operations.py", "requirements-optional.txt"):
         assert os.path.isfile(os.path.join(carved, rel)), rel
-    assert not os.path.exists(os.path.join(carved, "moodle/session_selftest.py"))
+    for rel in ("session_selftest.py", "session.py", "login.py", "probe.py", "keepalive.py", "reauth.py"):
+        assert not os.path.exists(os.path.join(carved, "moodle", rel)), rel
 
 
 def test_no_pytest_only_module_ships(carved):

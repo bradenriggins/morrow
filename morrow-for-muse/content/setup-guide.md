@@ -76,14 +76,12 @@ requires it.
 
 ## Moodle
 
-Moodle uses a separate part of Morrow. This package does not move a signed-in
-Muse browser session into that part. The included test sign-in is for Moodle's
-public demo site, not your school. Do not send school passwords or sign-in
-details to Muse chat.
-
-If your Muse VM already has a Moodle connection, use its existing sign-in.
-Confirm how it asks before a change and how it checks the saved result on your
-Moodle site. These Canvas steps do not set up Moodle.
+Ask Muse to work with your Moodle account. Pairing connects your account
+once. Then name a course, give its ID, or share its course link. You can work
+with many courses without pairing each one. Plan mode asks before changes;
+Edit mode follows your standing permission. Do not send passwords or
+sign-in details in chat. Your assistant must verify private sign-in setup
+and a first course read before it says the account is ready.
 
 ## Get help
 

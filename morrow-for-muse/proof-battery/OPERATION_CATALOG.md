@@ -1,6 +1,10 @@
 # Morrow for Muse: Operation Catalog (authoritative)
 
-Date: 2026-09-20. Product: Morrow for Muse (Canvas connector and separate Moodle session lane, no MCP).
+Date: 2026-09-20. This is historical operation evidence. Current Moodle execution
+uses `bin/morrow moodle` and installed Chromium. The Python HTTPS authentication
+modules described below are source-only and do not ship. Their receipts do not
+qualify the native browser path. Follow `moodle/SKILL.md` and `SCOPE.md` for the
+current execution contract and required release qualification.
 Package note (0.4.6): Moodle runtime and agent instructions ship in the release. Moodle claims remain limited to the live-proven rows and lane-level evidence below; catalog status is provider-specific.
 This file is the authoritative operation catalog for the proof battery. It supersedes the older proof ledger (proof-battery/LEDGER.md), which the source repository keeps as-is for history; it is not in the release.
 
@@ -28,11 +32,16 @@ design; they are cited by path, not copied in). Treat these citations
 as provenance records: what happened, where, and with what objects.
 Do not go looking for these files in the tree.
 
-## Transport mechanisms
+## Historical transport mechanisms
+
+These mechanisms record the dated proof runs. Current Canvas operations use
+the authenticated helper proxy and private CDP pipe, with no TCP CDP port.
+Current Moodle operations use `bin/morrow moodle`. Do not follow historical
+browser-task or Python session authentication steps for school work.
 - canvas-batch: transport/batch.py browser-task transport. Mechanism proven live 2026-09-20 (assignment lifecycle 4045368, course read, users/self). Per-operation proof still required. Integrated behind dispatch/executor.py as the default --backend chromium lane (transport/local_chromium.py over CDP on 127.0.0.1:19223); canvas-batch remains the proof-battery reference transport.
 - quiz-api-token: provision/provision.py LTI chain plus dispatch/executor.py. Proven for the banks.build scope (bank lifecycle 4040/4041/4037).
-- moodle-ajax: moodle/session.py AJAX envelope (lib/ajax/service.php). Proven for allowed_from_ajax functions. The Moodle code ships as a separate session lane; use its site-level capability probe and do not infer capability from the Canvas catalog.
-- moodle-form: moodle/session.py form-path fallback. Proven for forum discussion create/delete.
+- moodle-ajax: historical moodle/session.py AJAX envelope (lib/ajax/service.php), source-only and not shipped. Proven for allowed_from_ajax functions in that historical lane; this does not prove the current Chromium lane or a Canvas operation.
+- moodle-form: historical moodle/session.py form-path fallback, source-only and not shipped. Its forum discussion create/delete proof does not qualify the current Chromium path.
 - executor-plain: dispatch/executor.py plain HTTPS. Works with PAT; session-cookie replay is OTP-walled on the CHCP tenant class, so no-PAT proof goes through canvas-batch.
 
 ## Audit corrections vs LEDGER.md

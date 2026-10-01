@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TREE = Path(__file__).resolve().parents[1]
@@ -26,6 +27,11 @@ LEGACY_GOVERNED = "--legacy-governed" in sys.argv[4:]
 RESTART_PROOF = "--process-restart-proof" in sys.argv[4:]
 PREFLIGHT_PROOF = "--preflight-proof" in sys.argv[4:]
 LABEL_PROOF = "--learner-approval-proof" in sys.argv[4:]
+CLI_PROOF = "--public-cli-proof" in sys.argv[4:]
+if CLI_PROOF:
+    sys.path.remove(str(TREE))
+    TREE = Path(os.environ['MORROW_CLI_TEST_TREE']).resolve()
+    sys.path.insert(0, str(TREE))
 report = {"scope": "public-page adapter staging only" if PUBLIC_STAGING else "private fixture staging and provider read", "test": "morrow.moodle-adapter-loader.real-helper.v1", "checks": {}, "provider_calls": 0}
 fixture_mode = 'modern'
 effect_mode = 'normal'
@@ -116,6 +122,11 @@ class Fixture(BaseHTTPRequestHandler):
             method = call['methodname']
             if method == 'core_courseformat_get_state':
                 data = json.dumps(provider_state)
+            elif method == 'core_course_get_enrolled_courses_by_timeline_classification':
+                args = call['args']
+                rows = ([{'id': number, 'fullname': 'Course %d' % number} for number in range(1, 258)]
+                        if CLI_PROOF else [{'id': 2, 'fullname': 'Fixture course'}])
+                data = {'courses': rows[args['offset']:args['offset'] + args['limit']]}
             elif method == 'core_courseformat_update_course':
                 effects += 1
                 if effect_mode != 'mismatch':
@@ -214,13 +225,89 @@ try:
             break
         time.sleep(.05)
     check('real_authenticated_helper_proxy', proxy.evaluate(tab, '1 + 1') == 2)
+    if CLI_PROOF:
+        cli_tree = Path(os.environ['MORROW_CLI_TEST_TREE']).resolve()
+        check('cli_package_has_no_legacy_auth_modules', not any((cli_tree / 'moodle' / name).exists()
+            for name in ('login.py', 'session.py', 'probe.py', 'keepalive.py', 'reauth.py')))
+        manifest = json.loads((cli_tree / 'pack/carve-manifest.json').read_text())
+        report['cli_package_hashes'] = {name: hashlib.sha256((cli_tree / name).read_bytes()).hexdigest()
+                                        for name in manifest['files']}
+        check('cli_package_manifest_exact', report['cli_package_hashes'] == manifest['files'])
+        from config.paths import mint_tree_uuid
+        cli_id = mint_tree_uuid(cli_tree)
+        cli_state = root / 'cli-state'
+        cli_state.mkdir(mode=0o700)
+        (cli_state / '.morrow-tree-binding').write_text(cli_id)
+        (cli_state / 'helper_token').write_text('a' * 64)
+        (cli_state / 'helper_token').chmod(0o600)
+        cli_env = dict(os.environ, LOGIN_HELPER_PORT=str(helper.server_port), MORROW_TREE_STATE_DIR=str(cli_state))
+        cli_env.pop('LOGIN_HELPER_OWN_BROWSER', None)
+        browser.launcher._verify_helper_holder(helper.server_port)
+        check('native_helper_holder_verified', True)
+        def cli(*arguments, success=True):
+            response = subprocess.run([sys.executable, str(cli_tree / 'bin/morrow'), 'moodle', *arguments],
+                env=cli_env, capture_output=True, text=True, timeout=120)
+            if (response.returncode == 0) != success:
+                report['cli_failure'] = {'stdout': response.stdout, 'stderr': response.stderr}
+            check('cli_' + str(len(report['checks'])) + '_exit', (response.returncode == 0) == success)
+            check('cli_' + str(len(report['checks'])) + '_secret_free', 'DUMMY_BROWSER_ONLY' not in response.stdout + response.stderr)
+            return json.loads(response.stdout.strip().splitlines()[-1])
+        paired = cli('pair', '--site', base)
+        check('cli_pair_discovers_educator', paired.get('principal_id') == '42')
+        again = cli('pair', '--site', base)
+        check('cli_pair_is_one_time', again.get('already_paired') is True)
+        fixture_mode = 'wrong_account'
+        cli('pair', '--site', base, success=False)
+        fixture_mode = 'modern'
+        check('cli_pair_preserved_after_wrong_account', cli('status').get('principal_id') == '42')
+        catalog = cli('catalog')
+        check('cli_all_public_operations_available', len(catalog['operations']) == 249)
+        discovered = []
+        offset = 0
+        while True:
+            page = cli('courses', '--offset', str(offset))
+            discovered.extend(page['courses'])
+            if page['complete']:
+                break
+            offset = page['next_offset']
+        check('cli_no_course_count_limit', len(discovered) == 257 and len({row['id'] for row in discovered}) == 257)
+        read = cli('read', '--operation', 'moodle.ajax.core_courseformat_get_state.v1', '--arguments', '{"course_id":2}')
+        check('cli_read_masks_learner', read.get('ok') is True and 'Aster Sample' not in json.dumps(read) and 'Student A' in json.dumps(read))
+        hide_key = 'moodle.ajax.core_courseformat_update_course.cm_hide.v1'
+        write_args = json.dumps({'course_id': 2, 'module_id': 19, 'expected_digest': read['snapshot_digest']})
+        op_id = str(uuid.uuid4())
+        prepared = cli('plan', '--operation', hide_key, '--arguments', write_args, '--op-id', op_id)
+        check('cli_plan_names_course_and_change', prepared.get('target', {}).get('course_name') == 'Fixture course' and 'Hide a Moodle activity' in prepared['review'])
+        check('cli_plan_hides_internal_details', 'function_sha256' not in prepared['review'] and 'registry_sha256' not in prepared['review'])
+        pending = cli_state / 'moodle_pending' / (op_id + '.json')
+        check('cli_plan_record_private', pending.stat().st_mode & 0o777 == 0o600)
+        cli('plan', '--operation', hide_key, '--arguments', write_args, '--op-id', op_id, success=False)
+        before_effects = effects
+        cli('execute', '--operation', hide_key, '--arguments', write_args, success=False)
+        check('cli_unapproved_execute_no_effect', effects == before_effects)
+        check('cli_default_mode_plan', cli('mode', 'status')['mode'] == 'plan')
+        cli('mode', 'set', 'edit')
+        check('cli_mode_edit_persists', cli('mode', 'status')['mode'] == 'edit')
+        edited = cli('execute', '--operation', hide_key, '--arguments', write_args)
+        check('cli_edit_write_verified', edited.get('ok') is True and edited.get('verification', {}).get('status') == 'verified')
+        check('cli_write_returns_recovery_id', str(uuid.UUID(edited['op_id'])) == edited['op_id'])
+        check('cli_edit_write_exactly_one_effect', effects == before_effects + 1)
+        cli('mode', 'set', 'plan')
+        cli('execute', '--operation', hide_key, '--arguments', write_args, success=False)
+        check('cli_revoked_edit_no_effect', effects == before_effects + 1)
+        cli('read', '--operation', 'moodle.ajax.core_courseformat_update_course.cm_hide.v1', '--arguments', '{"course_id":2}', success=False)
+        cli('read', '--operation', 'unknown', '--arguments', '{"course_id":2}', success=False)
+        fixture_mode = 'legacy41'
+        check('cli_legacy_account_status', cli('status').get('principal_id') == '42')
+        fixture_mode = 'modern'
     if PUBLIC_STAGING:
         check('permitted_public_provider_loaded', proxy.evaluate(tab, 'location.origin') == base)
     else:
         check('disposable_fixture_loaded', proxy.evaluate(tab, 'location.href') == base + '/')
     context = proxy.create_isolated_world(tab, 'morrow_adapter_loader_e2e')
     check('real_isolated_world', isinstance(context, int))
-    report['source_hashes'] = {str(path.relative_to(TREE)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (TREE / 'helper/server.py', TREE / 'transport/local_chromium.py', TREE / 'moodle/browser_operations.py', TREE / 'moodle/browser_transport.py', Path(__file__))}
+    report['source_hashes'] = {str(path.relative_to(TREE)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (TREE / 'helper/server.py', TREE / 'transport/local_chromium.py', TREE / 'moodle/browser_operations.py', TREE / 'moodle/browser_transport.py')}
+    report['driver_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     if GOVERNED:
         report['source_hashes']['moodle/dispatch.py'] = hashlib.sha256((TREE / 'moodle/dispatch.py').read_bytes()).hexdigest()
     from moodle.browser_operations import MoodleAdapterLoader
@@ -228,17 +315,20 @@ try:
     digest = hashlib.sha256(registry.read_bytes()).hexdigest()
     report['registry_sha256'] = digest
     loader = MoodleAdapterLoader(ASSETS, registry_sha256=digest)
+    before_staging_calls = report['provider_calls']
     key_name = 'moodle.ajax.core_course_get_enrolled_courses_by_timeline_classification.v1'
     request = {'mode': 'execute', 'operation': {'key': key_name, 'toolName': 'moodle_list_my_courses', 'provider': 'moodle', 'readOnly': True}, 'binding': {'origin': base.split('/lms')[0], 'siteUrl': base, 'principalId': '42'}, 'arguments': {'limit': 100, 'offset': 0}, 'expiresAt': int(time.time() * 1000) + 60000}
     handle = loader.stage(proxy, tab, context, key_name, request, base_url=base)
     check('large_core_adapter_staged_under_proxy_limit', handle.function_sha256 == json.loads(registry.read_text())['operations'][key_name]['functionSha256'])
-    check('staging_does_not_call_provider', report['provider_calls'] == 0)
+    check('staging_does_not_call_provider', report['provider_calls'] == before_staging_calls)
     if not PUBLIC_STAGING:
         # Fixture-only identity seed. Production must derive this inside the browser.
         proxy.evaluate(tab, 'globalThis.M={cfg:%s}' % json.dumps({'wwwroot': base, 'userId': 42, 'sesskey': 'DUMMY_BROWSER_ONLY', 'courseId': 2}), context_id=context)
         result = proxy.evaluate(tab, 'globalThis[%s].fn(globalThis[%s].input)' % (json.dumps(handle.slot), json.dumps(handle.slot)), await_promise=True, context_id=context)
-        check('shared_adapter_executes_through_strict_csp', result.get('ok') is True and result.get('data', {}).get('courses') == [{'id': '2', 'name': 'Fixture course'}])
-        check('exactly_one_fixture_provider_call', report['provider_calls'] == 1)
+        expected_courses = ([{'id': str(number), 'name': 'Course %d' % number} for number in range(1, 101)]
+                            if CLI_PROOF else [{'id': '2', 'name': 'Fixture course'}])
+        check('shared_adapter_executes_through_strict_csp', result.get('ok') is True and result.get('data', {}).get('courses') == expected_courses)
+        check('exactly_one_fixture_provider_call', report['provider_calls'] == before_staging_calls + 1)
     huge = {'text': 'Unicode 🧪 café ' * 18000}
     large = loader.stage(proxy, tab, context, key_name, huge, base_url=base)
     check('chunked_unicode_input_exact', proxy.evaluate(tab, 'JSON.parse(globalThis[%s].input).text.length' % json.dumps(large.slot), context_id=context) == len(huge['text']) + huge['text'].count('🧪'))

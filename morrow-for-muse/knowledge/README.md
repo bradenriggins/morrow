@@ -36,7 +36,7 @@ its boundary. Do not load every document before every call.
 - [SCOPE.md](../SCOPE.md): shipped capability and explicit limits.
 - [Modes](../modes/README.md): Plan/Edit state and commands.
 - [Transport](../transport/README.md): VM-local Chromium and egress contract.
-- [Moodle skill](../moodle/SKILL.md): separate session and governance limits.
+- [Moodle skill](../moodle/SKILL.md): account pairing, browser operations, and governance.
 
 The current executor, admission policy, and dispatch catalog determine whether
 an operation can run. Design advice and platform documentation do not override

@@ -40,10 +40,24 @@ approval. The frozen readback contains the projected review result. The real
 helper fixture also restarts the Python controller in a new process and
 proves that a fresh approval cannot replay an uncertain operation ID.
 
-The controller is not yet a public CLI entrypoint. Its fixture evidence covers
-course structure and activity visibility. Private file payloads, learner-token
-approval binding, broader operation qualification, owner setup and native
-provider proof remain required before release.
+`bin/morrow moodle` is the public command path. It attaches only to the
+private helper's exact profile, discovers the educator automatically,
+persists account pairing, and exposes paged courses, the public catalog,
+reads, plans, approvals, and account-specific Plan/Edit mode. The real-helper
+CLI E2E checks 257 courses across pages, account change refusal, Moodle 4.1,
+private pending plans, learner projection, a verified Edit write, and refusal
+after switching back to Plan. An immutable learner-token map also binds
+labels in the frozen request and is rechecked before claim and execution.
+The package excludes historical Python HTTPS authentication modules. Shared
+site validation and safe errors live in `moodle/contracts.py`.
+
+Mac helper attachment uses exact native process arguments through Apple's
+`KERN_PROCARGS2`; it does not weaken the profile or helper-version checks.
+Linux keeps the `/proc` argument path. Its real CFT helper regression first
+failed the holder proof, then passed after the native argument reader.
+
+Private file payloads, broader operation qualification, owner setup and
+native provider proof remain required before release.
 
 `moodle/browser_operations.py` stages those assets through the authenticated
 helper proxy. It checks the pinned route registry, catalog, module and exact
@@ -146,6 +160,6 @@ launch configuration. Muse VM Chromium still refuses loopback navigation;
 that VM run failed before a provider request. The Mac Chrome for Testing
 153 run passes. VM authenticated-provider proof is still required.
 
-The browser transport exposes identity and paged course reads only. Its
-inherited Canvas API method refuses calls. It does not expose a Moodle
-write path or replace the uncompleted governed operation layer.
+The browser transport exposes identity and paged courses. Its inherited
+Canvas API method refuses calls. The governed controller supplies writes
+through pinned Moodle operations. Native first-use remains a release gate.

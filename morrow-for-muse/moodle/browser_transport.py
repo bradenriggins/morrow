@@ -8,7 +8,7 @@ import re
 import time
 from urllib.parse import urlparse
 
-from moodle.session import normalize_moodle_base, MoodleLaneError
+from moodle.contracts import normalize_moodle_base, MoodleLaneError
 from transport.local_chromium import LocalChromiumTransport, is_tenant_url
 
 
@@ -108,7 +108,9 @@ _BROWSER_READ = r"""(async () => {
         return fail('principal_mismatch');
     }
     if (!Number.isSafeInteger(userId) || userId < 1) return fail('session_unavailable');
-    if (String(userId) !== input.principal_id) return fail('principal_mismatch');
+    if (input.mode !== 'discover_identity' && String(userId) !== input.principal_id) return fail('principal_mismatch');
+    if (input.mode === 'discover_identity') return JSON.stringify({ok: true,
+      data: {id: String(userId), site_url: input.base}});
     if (input.mode === 'prepare') {
       const href = location.href;
       let operationConfig = cfg;
@@ -171,6 +173,12 @@ _BROWSER_READ = r"""(async () => {
 
 
 class MoodleBrowserTransport(LocalChromiumTransport):
+    @classmethod
+    def discover(cls, base_url, launcher):
+        transport = cls(base_url, launcher, principal_id='1')
+        identity = transport._read('discover_identity')
+        return cls(base_url, launcher, principal_id=identity['id'])
+
     def __init__(self, base_url, launcher, *, principal_id):
         base = normalize_moodle_base(base_url)
         if urlparse(base).scheme != "https" and urlparse(base).hostname not in ("127.0.0.1", "::1"):
