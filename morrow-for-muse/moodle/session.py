@@ -693,6 +693,15 @@ class MoodleSession:
         path is relative, e.g. "/mod/forum/post.php". The sesskey goes in
         the form body as required by stock Moodle forms.
         """
+        if (not isinstance(path, str) or not path.startswith("/")
+                or path.startswith("//") or "\\" in path
+                or any(ord(char) < 32 or ord(char) == 127 for char in path)):
+            raise MoodleLaneError("provider", "invalid Moodle form path; no request was sent")
+        parsed = urlparse(path)
+        if (parsed.scheme or parsed.netloc or parsed.fragment or parsed.params
+                or not re.fullmatch(r"/[A-Za-z0-9._~/-]+", parsed.path)
+                or any(segment in (".", "..") for segment in parsed.path.split("/"))):
+            raise MoodleLaneError("provider", "invalid Moodle form path; no request was sent")
         fields = dict(fields)
         fields.setdefault("sesskey", self.sesskey)
         resp = self.session.post(self.base + path, data=fields,
@@ -708,5 +717,5 @@ class MoodleSession:
                                        location=resp.headers.get("Location"))
         if kind != "ok":
             raise MoodleLaneError(kind, detail,
-                                  {"form": path, "http": resp.status_code})
-        return {"form_posted": path, "http": resp.status_code}
+                                  {"form": parsed.path, "http": resp.status_code})
+        return {"form_posted": parsed.path, "http": resp.status_code}

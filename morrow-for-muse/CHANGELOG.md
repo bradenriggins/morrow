@@ -2,6 +2,8 @@
 
 ## 0.4.8 (2026-09-30)
 
+- Refuse unsafe Moodle form paths before sending the session key. Keep
+  form query values out of receipts.
 - Store new Moodle journals and write reservations under `MORROW_HOME`.
   Keep existing package-local records intact and honor them for replay checks.
 - Reserve Moodle write IDs durably before dispatch. Refuse replay after
