@@ -1718,7 +1718,7 @@ function renderConsent() {
       ? "Given. Morrow Bridge reads course data only for your requests."
       : "Not given. Morrow Bridge reads nothing until you agree in the popup or setup guide.";
   withdrawConsentButton.hidden = consent.checking || !consent.given;
-  withdrawConsentButton.textContent = state.consentConfirming ? "Select again to withdraw" : "Withdraw consent";
+  withdrawConsentButton.textContent = state.consentConfirming ? "Withdraw again" : "Withdraw consent";
   withdrawConsentButton.disabled = state.consentBusy || consent.checking === true;
 }
 
@@ -1740,7 +1740,7 @@ async function withdrawCourseDataConsent() {
   if (!state.consentConfirming) {
     state.consentConfirming = true;
     state.consentArmedAt = Date.now();
-    announce("Select Withdraw consent again to disconnect Morrow and remove its saved courses and permissions.");
+    announce("Select Withdraw again to disconnect Morrow and remove its saved courses and permissions.");
     renderConsent();
     return;
   }

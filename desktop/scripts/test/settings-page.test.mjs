@@ -2143,7 +2143,7 @@ test("the consent section states the agreement and withdraws in two deliberate p
   await page.waitFor(() => page.text("#consent-status").includes("Given"), "the consent status never read given");
   assert.equal(page.hidden("#withdraw-consent"), false);
   await page.click("#withdraw-consent");
-  assert.equal(page.text("#withdraw-consent"), "Select again to withdraw");
+  assert.equal(page.text("#withdraw-consent"), "Withdraw again");
   // The other half of a double-click must not confirm.
   await page.click("#withdraw-consent");
   assert.deepEqual(page.messages("morrow_course_data_consent_withdraw"), []);
