@@ -2,6 +2,8 @@
 
 ## 0.4.8 (2026-09-30)
 
+- Keep pasted credentials and sign-in tokens out of Canvas tenant validation
+  and installer refusal messages.
 - Keep session keys, SSO codes, URL credentials, and fragments out of
   refused Moodle redirect errors.
 - Refuse oversized Moodle AJAX reads and malformed response envelopes

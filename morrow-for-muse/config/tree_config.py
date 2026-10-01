@@ -139,18 +139,15 @@ def normalize_tenant_base(base_url):
     parsed = urllib.parse.urlsplit(base_url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError(
-            "CANVAS_BASE must be an absolute http(s) URL with a host, "
-            "got %r" % (base_url,))
+            "CANVAS_BASE must be an absolute http(s) URL with a host")
     if parsed.username or parsed.password:
         raise ValueError(
-            "CANVAS_BASE must not embed credentials (userinfo); got %r"
-            % (base_url,))
+            "CANVAS_BASE must not embed credentials (userinfo)")
     if parsed.scheme != "https" \
             and os.environ.get("CANVAS_BASE_ALLOW_HTTP") != "1":
         raise ValueError(
-            "CANVAS_BASE must be https (got %r); set "
-            "CANVAS_BASE_ALLOW_HTTP=1 for a documented local-dev override"
-            % (base_url,))
+            "CANVAS_BASE must be https; set "
+            "CANVAS_BASE_ALLOW_HTTP=1 for a documented local-dev override")
     host = (parsed.hostname or "").lower()
     _PLACEHOLDER_HOSTS = frozenset({
         "instructure.com",
@@ -168,7 +165,7 @@ def normalize_tenant_base(base_url):
         raise ValueError(
             "CANVAS_BASE looks like a placeholder (%r); set your school's "
             "real Canvas URL, e.g. https://<your-school>.instructure.com "
-            "(got %r)" % (host, base_url))
+            % (host,))
     try:
         literal = ipaddress.ip_address(host)
     except ValueError:
@@ -176,7 +173,7 @@ def normalize_tenant_base(base_url):
     if literal is not None and not literal.is_global:
         raise ValueError(
             "CANVAS_BASE must not point at a non-routable address "
-            "(loopback, link-local, or private); got %r" % (base_url,))
+            "(loopback, link-local, or private)")
     confirmed = os.environ.get(
         "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", "").strip().lower()
     if not (host == "instructure.com"
@@ -185,6 +182,6 @@ def normalize_tenant_base(base_url):
         raise ValueError(
             "CANVAS_BASE must be a Canvas tenant (*.instructure.com); for "
             "a self-hosted Canvas domain set "
-            "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=%s (got %r)"
-            % (host, base_url))
+            "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=%s"
+            % (host,))
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
