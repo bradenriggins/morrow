@@ -16,7 +16,7 @@ from transport.local_chromium import ChromiumLauncher
 out = Path(sys.argv[1])
 binary = sys.argv[2]
 report = {"test": "installed-Chromium-Moodle-browser-session", "checks": {}}
-state = {"id": 42, "login": 123456, "badroot": False, "mode": "ok", "calls": 0}
+state = {"id": 42, "login": 123456, "badroot": False, "mode": "ok", "calls": 0, "profile_calls": 0}
 secret = "DUMMY_BROWSER_ONLY_SESSKEY"
 courses = [{"id": n, "fullname": "Course %d" % n,
             "learner_secret": "DO_NOT_RETURN"} for n in range(1, 258)]
@@ -39,18 +39,49 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Location", "/idp/login")
             self.end_headers()
             return
+        profile = urlparse(self.path).path == "/lms/user/profile.php"
+        if profile:
+            state["profile_calls"] += 1
+            assert not urlparse(self.path).query
+            if state["mode"] == "legacy41redirect":
+                self.send_response(302)
+                self.send_header("Location", "/idp/login")
+                self.end_headers()
+                return
         cfg = {"wwwroot": base + ("/other" if state["badroot"] else ""),
                "userId": state["id"], "currentlogin": state["login"],
                "sesskey": secret, "theme": "semicolon; braces } and escaped \\\""}
-        legacy = state["mode"] in ("legacy", "legacyguest", "legacyduplicate")
+        legacy41 = state["mode"].startswith("legacy41")
+        if legacy41:
+            cfg.pop("userId")
+        if profile:
+            cfg["contextInstanceId"] = 43 if state["mode"] == "legacy41account" else 42
+            if state["mode"] == "legacy41site":
+                cfg["wwwroot"] += "/other"
+            if state["mode"] == "legacy41key":
+                cfg["sesskey"] = "DUMMY_ROTATED_KEY"
+            if state["mode"] == "legacy41modernconflict":
+                cfg["userId"] = 43
+        legacy = legacy41 or state["mode"] in ("legacy", "legacyguest", "legacyduplicate")
         if legacy:
             cfg.pop("currentlogin")
         html = '<script>var M={}; M.cfg=' + json.dumps(cfg) + ';</script>'
         if legacy:
-            login = '123456' if state["mode"] == "legacy" else 'null'
+            login = '123456' if legacy41 or state["mode"] == "legacy" else 'null'
+            if state["mode"] == "legacy41guest":
+                login = 'null'
+            if profile and state["mode"] == "legacy41login":
+                login = '123457'
             html += "<script>require(['core/storage_validation'], function(amd) {amd.init(" + login + "); M.util.js_complete('core/storage_validation');});</script>"
             if state["mode"] == "legacyduplicate":
                 html += "<script>require(['core/storage_validation'], function(amd) {amd.init(123456);});</script>"
+        if profile:
+            body_id = "page-login-index" if state["mode"] == "legacy41pagetype" else "page-user-profile"
+            html = '<body id="' + body_id + '"><a href="/user/profile.php?id=999">Unrelated</a>' + html + '</body>'
+            if state["mode"] == "legacy41duplicate":
+                html += '<script>M.cfg=' + json.dumps(cfg) + ';</script>'
+            if state["mode"] == "legacy41huge":
+                html += 'x' * 2200000
         if state["mode"] == "malformed":
             html = '<script>M.cfg={not_json};</script>'
         if state["mode"] == "duplicate":
@@ -127,7 +158,27 @@ try:
         refused("moodle45_guest", transport.courses_page, True)
         state["mode"] = "legacyduplicate"
         refused("moodle45_duplicate_login_marker", transport.courses_page, True)
+        state["mode"] = "legacy41"
+        check("moodle41_own_profile_identity", transport.identity() == {"id": "42", "site_url": base})
+        check("moodle41_profile_get_executed", state["profile_calls"] > 0)
+        page41 = transport.courses_page(limit=100)
+        check("moodle41_courses_read", len(page41["courses"]) == 100 and page41["complete"] is False)
+        check("moodle41_no_profile_or_secret_output", secret not in json.dumps(page41) and "Unrelated" not in json.dumps(page41))
+        for mode in ("legacy41account", "legacy41site", "legacy41key", "legacy41modernconflict",
+                     "legacy41login", "legacy41pagetype", "legacy41duplicate", "legacy41huge", "legacy41redirect"):
+            state["mode"] = mode
+            refused(mode, transport.courses_page, True)
+        state["mode"] = "legacy41guest"
+        before_profile = state["profile_calls"]
+        refused("moodle41_guest", transport.courses_page, True)
+        check("moodle41_guest_no_profile_fallback", state["profile_calls"] == before_profile)
         state["mode"] = "ok"
+        state["id"] = None
+        before_profile = state["profile_calls"]
+        refused("modern_null_userid_not_replaced", transport.courses_page, True)
+        check("modern_null_userid_no_profile_fallback", state["profile_calls"] == before_profile)
+        state["id"] = 42
+        state["login"] = 123456
         result = []
         offset = 0
         while True:
@@ -160,6 +211,7 @@ try:
             state["mode"] = mode
             refused(mode, transport.courses_page)
         report["provider_calls"] = state["calls"]
+        report["profile_calls"] = state["profile_calls"]
         report["profile_disposable"] = True
 finally:
     if launcher:

@@ -1,5 +1,14 @@
 # Changelog
 
+## Release hardening: Moodle 4.1 browser identity
+
+- Resolve Moodle 4.1 accounts through the provider's own profile context in
+  Chromium. Require matching site/session and pinned account before reads.
+- Refuse guests, redirects, account/session changes, invalid profile pages,
+  oversized responses, and conflicting modern identity fields.
+- The disposable Chromium E2E passes 64 checks. Production Moodle operation
+  admission, native setup, and live provider proof are still required.
+
 ## 0.4.8 (2026-09-30)
 
 - Keep the read-only Moodle capability probe on known read functions.
