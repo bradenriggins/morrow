@@ -163,9 +163,11 @@ def _run(args):
     if args.command == 'status':
         transport.identity()
         return {'ok': True, **record}
-    if args.command == 'courses':
-        return {'ok': True, **transport.courses_page(offset=args.offset, limit=args.limit)}
     dispatcher = _dispatcher(transport)
+    if args.command == 'courses':
+        result = dispatcher.dispatch('moodle.ajax.core_course_get_enrolled_courses_by_timeline_classification.v1',
+            {'offset': args.offset, 'limit': args.limit}, op_id=str(uuid.uuid4()), mode_ctx=_context(record, {}))
+        return {'ok': True, **result['data']} if result.get('ok') is True else result
     if args.command == 'stage-file':
         return dispatcher.stage_file(args.course_id, args.path, args.filename or Path(args.path).name)
     pending = Path(lc.tree_state_dir()) / 'moodle_pending'

@@ -45,6 +45,14 @@ until `complete` is true. The page size is a transport bound; there is no
 course-count limit. Resolve ambiguous names before a write. Do not ask the
 educator to pair each course or manage a course list in the Bridge.
 
+The catalog's `moodle_list_my_courses` operation is also an account read.
+It needs only `limit` and `offset`; do not invent a course ID for it.
+Both course discovery paths project each title through that course's private
+roster. The account and session are checked again before any results return.
+If `name_unavailable` is true, the title could not be checked safely. Morrow
+shows `Course ID` instead. Keep the course ID and explain the access limit;
+do not recover the raw title through a browser or shell bypass.
+
 Read `bin/morrow moodle catalog` to get the pinned public operation schemas.
 Use `read --operation KEY --arguments JSON` for reads. The read command
 refuses writes. Results pass through the complete private roster and
