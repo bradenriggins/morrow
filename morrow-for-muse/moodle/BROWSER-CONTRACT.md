@@ -52,12 +52,19 @@ The browser parses this source-defined marker without executing page code.
 Null, missing, and duplicate login markers refuse. A modern `M.cfg` value
 takes precedence, including a null value; it cannot be replaced by a footer.
 https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/lib/classes/output/requirements/page_requirements_manager.php
-Moodle 4.1 does not expose `M.cfg.userId`; its account-identity compatibility
-path remains an open integration requirement.
+Moodle 4.1 does not expose `M.cfg.userId`. For that version only, the
+browser requests `/user/profile.php` without an `id` parameter. Moodle
+selects the signed-in user, sets the user context, and serializes its
+`contextInstanceId`. The transport requires `page-user-profile`, the same
+site, login timestamp and sesskey as the root, and the pinned educator ID.
+A present modern `userId`, including null, never triggers this fallback.
+Profile content and session secrets remain inside Chromium.
+https://github.com/moodle/moodle/blob/MOODLE_401_STABLE/user/profile.php
+https://github.com/moodle/moodle/blob/MOODLE_401_STABLE/lib/outputrequirementslib.php
 
 ## Current evidence
 
-Layer 1 has 35 passing real Chromium checks, including all 257 courses,
+Layer 1 has 64 passing real Chromium checks, including all 257 courses,
 isolated-world fetch, site-prefix tab selection, and fail-closed responses.
 The test is repeatable with:
 

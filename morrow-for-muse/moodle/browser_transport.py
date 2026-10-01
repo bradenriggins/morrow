@@ -46,54 +46,70 @@ _BROWSER_READ = r"""(async () => {
     return bounded(response);
   };
   try {
-    const html = await request(root.href);
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const configurations = [];
-    for (const script of doc.querySelectorAll('script:not([src])')) {
-      const text = script.textContent || '';
-      const assignments = text.matchAll(/\bM\.cfg\s*=\s*/g);
-      for (const match of assignments) {
-        const start = match.index + match[0].length;
-        if (text[start] !== '{') throw new Error('configuration_invalid');
-        let depth = 0, string = false, escaped = false, end = -1;
-        for (let i = start; i < text.length; i++) {
-          const c = text[i];
-          if (string) {
-            if (escaped) escaped = false;
-            else if (c === '\\') escaped = true;
-            else if (c === '"') string = false;
-          } else if (c === '"') string = true;
-          else if (c === '{' || c === '[') depth++;
-          else if (c === '}' || c === ']') {
-            depth--;
-            if (depth === 0) { end = i + 1; break; }
-          }
-        }
-        if (end < 0 || !/^\s*;/.test(text.slice(end))) throw new Error('configuration_invalid');
-        configurations.push(JSON.parse(text.slice(start, end)));
-      }
-    }
-    if (configurations.length !== 1) return fail('configuration_invalid');
-    const cfg = configurations[0];
-    if (!cfg || typeof cfg !== 'object' || typeof cfg.wwwroot !== 'string' ||
-        cfg.wwwroot.replace(/\/$/, '') !== input.base) return fail('site_mismatch');
-    let currentLogin = cfg.currentlogin;
-    if (!Object.hasOwn(cfg, 'currentlogin')) {
-      const logins = [];
+    const parseSession = doc => {
+      const configurations = [];
       for (const script of doc.querySelectorAll('script:not([src])')) {
-        for (const match of (script.textContent || '').matchAll(/require\s*\(\s*\[\s*['"]core\/storage_validation['"]\s*\]\s*,\s*function\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*\{\s*\1\.init\s*\(\s*(null|[0-9]+)\s*\)\s*;/g))
-          logins.push(match[2] === 'null' ? null : Number(match[2]));
+        const text = script.textContent || '';
+        const assignments = text.matchAll(/\bM\.cfg\s*=\s*/g);
+        for (const match of assignments) {
+          const start = match.index + match[0].length;
+          if (text[start] !== '{') throw new Error('configuration_invalid');
+          let depth = 0, string = false, escaped = false, end = -1;
+          for (let i = start; i < text.length; i++) {
+            const c = text[i];
+            if (string) {
+              if (escaped) escaped = false;
+              else if (c === '\\') escaped = true;
+              else if (c === '"') string = false;
+            } else if (c === '"') string = true;
+            else if (c === '{' || c === '[') depth++;
+            else if (c === '}' || c === ']') {
+              depth--;
+              if (depth === 0) { end = i + 1; break; }
+            }
+          }
+          if (end < 0 || !/^\s*;/.test(text.slice(end))) throw new Error('configuration_invalid');
+          configurations.push(JSON.parse(text.slice(start, end)));
+        }
       }
-      if (logins.length !== 1) return fail('session_unavailable');
-      currentLogin = logins[0];
+      if (configurations.length !== 1) throw new Error('configuration_invalid');
+      const cfg = configurations[0];
+      if (!cfg || typeof cfg !== 'object' || typeof cfg.wwwroot !== 'string' ||
+          cfg.wwwroot.replace(/\/$/, '') !== input.base) throw new Error('site_mismatch');
+      let currentLogin = cfg.currentlogin;
+      if (!Object.hasOwn(cfg, 'currentlogin')) {
+        const logins = [];
+        for (const script of doc.querySelectorAll('script:not([src])')) {
+          for (const match of (script.textContent || '').matchAll(/require\s*\(\s*\[\s*['"]core\/storage_validation['"]\s*\]\s*,\s*function\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)\s*\{\s*\1\.init\s*\(\s*(null|[0-9]+)\s*\)\s*;/g))
+            logins.push(match[2] === 'null' ? null : Number(match[2]));
+        }
+        if (logins.length !== 1) throw new Error('session_unavailable');
+        currentLogin = logins[0];
+      }
+      if (!Number.isSafeInteger(currentLogin) || currentLogin < 1 ||
+          typeof cfg.sesskey !== 'string' || !cfg.sesskey || cfg.sesskey.length > 512)
+        throw new Error('session_unavailable');
+      return {cfg, currentLogin};
+    };
+    const doc = new DOMParser().parseFromString(await request(root.href), 'text/html');
+    const {cfg, currentLogin} = parseSession(doc);
+    let userId = cfg.userId;
+    if (!Object.hasOwn(cfg, 'userId')) {
+      // Moodle 4.1 resolves a parameter-free profile to the signed-in user.
+      const profile = new DOMParser().parseFromString(
+        await request(input.base + '/user/profile.php'), 'text/html');
+      if (profile.body.id !== 'page-user-profile') return fail('session_unavailable');
+      const account = parseSession(profile);
+      if (account.currentLogin !== currentLogin || account.cfg.sesskey !== cfg.sesskey)
+        return fail('session_unavailable');
+      userId = account.cfg.contextInstanceId;
+      if (Object.hasOwn(account.cfg, 'userId') && account.cfg.userId !== userId)
+        return fail('principal_mismatch');
     }
-    if (!Number.isSafeInteger(cfg.userId) || cfg.userId < 1 ||
-        !Number.isSafeInteger(currentLogin) || currentLogin < 1 ||
-        typeof cfg.sesskey !== 'string' || !cfg.sesskey || cfg.sesskey.length > 512)
-      return fail('session_unavailable');
-    if (String(cfg.userId) !== input.principal_id) return fail('principal_mismatch');
+    if (!Number.isSafeInteger(userId) || userId < 1) return fail('session_unavailable');
+    if (String(userId) !== input.principal_id) return fail('principal_mismatch');
     if (input.mode === 'identity') return JSON.stringify({ok: true,
-      data: {id: String(cfg.userId), site_url: input.base}});
+      data: {id: String(userId), site_url: input.base}});
     const url = new URL(input.base + '/lib/ajax/service.php');
     url.searchParams.set('sesskey', cfg.sesskey);
     url.searchParams.set('info', 'core_course_get_enrolled_courses_by_timeline_classification');
@@ -119,7 +135,9 @@ _BROWSER_READ = r"""(async () => {
     return JSON.stringify({ok: true, data: {courses, offset: input.offset, limit: input.limit,
       complete, next_offset: complete ? null : input.offset + courses.length}});
   } catch (error) {
-    return fail(error?.message === 'response_incomplete' ? 'response_incomplete' : 'session_or_provider_unavailable');
+    const known = ['response_incomplete', 'configuration_invalid', 'site_mismatch',
+      'session_unavailable', 'provider_response_refused'];
+    return fail(known.includes(error?.message) ? error.message : 'session_or_provider_unavailable');
   }
 })()"""
 
