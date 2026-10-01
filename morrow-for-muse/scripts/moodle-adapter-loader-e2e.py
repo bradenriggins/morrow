@@ -233,7 +233,7 @@ try:
         transport = MoodleBrowserTransport(base, browser.launcher, principal_id='42')
         transport.cdp = proxy
         course_request = {**request, 'binding': {**request['binding'], 'courseId': '2'},
-                          'arguments': {'course_id': '2', 'limit': 100, 'offset': 0},
+                          'arguments': {'course_id': 2, 'limit': 100, 'offset': 0},
                           'expiresAt': int(time.time() * 1000) + 60000}
         for mode in ('modern', 'legacy41'):
             fixture_mode = mode

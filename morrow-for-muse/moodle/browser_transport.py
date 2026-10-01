@@ -207,10 +207,10 @@ class MoodleBrowserTransport(LocalChromiumTransport):
                 or str(binding.get('siteUrl', '')).rstrip('/') != self.base
                 or binding.get('principalId') != self.principal_id):
             raise MoodleLaneError('principal', 'Moodle operation binding differs from its paired account')
-        course = arguments.get('course_id')
-        if course is not None and (not isinstance(course, str) or not re.fullmatch(r'[1-9][0-9]*', course)
-                                   or int(course) > 9007199254740991):
+        course_value = arguments.get('course_id')
+        if course_value is not None and (type(course_value) is not int or not 1 <= course_value <= 9007199254740991):
             raise ValueError('Moodle operation needs an exact course ID')
+        course = str(course_value) if course_value is not None else None
         if binding.get('courseId') is not None and binding['courseId'] != course:
             raise ValueError('Moodle operation course differs from its binding')
         expiry = request.get('expiresAt')
