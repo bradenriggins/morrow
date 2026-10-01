@@ -135,6 +135,8 @@ _BROWSER_READ = r"""(async () => {
     }
     if (input.mode === 'identity') return JSON.stringify({ok: true,
       data: {id: String(userId), site_url: input.base}});
+    if (input.mode === 'operation_identity') return JSON.stringify({ok: true,
+      data: {id: String(userId), site_url: input.base, session_generation: currentLogin}});
     const url = new URL(input.base + '/lib/ajax/service.php');
     url.searchParams.set('sesskey', cfg.sesskey);
     url.searchParams.set('info', 'core_course_get_enrolled_courses_by_timeline_classification');
@@ -262,6 +264,9 @@ class MoodleBrowserTransport(LocalChromiumTransport):
 
     def identity(self):
         return self._read("identity")
+
+    def operation_identity(self):
+        return self._read("operation_identity")
 
     def courses_page(self, *, offset=0, limit=100):
         if (type(offset) is not int or offset < 0 or offset > 9007199254740991

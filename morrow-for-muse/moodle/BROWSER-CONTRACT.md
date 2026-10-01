@@ -22,8 +22,22 @@ registry binds all 250 operations to the worker's adapter choice, private
 attachment mode, exact UTF-8 function byte range, and source/function
 hashes. Route generation runs only during the build; it adds no Node.js
 requirement on the Muse VM. The carve refuses stale worker or adapter
-bytes. It does not yet execute those adapters through Muse's governed
-dispatch.
+bytes.
+
+`moodle/dispatch.py` supplies the internal governed controller. It derives
+read/write status from the pinned registry, binds the exact site, educator,
+course and session, loads a complete private roster, and projects results
+through the encrypted learner vault. Write admission uses the existing
+Plan/Edit and educator approval gates. The frozen request binds the operation,
+adapter hashes, site, account, arguments and privacy policy. A durable claim
+precedes invocation. Only a verified provider readback permits success.
+Uncertain outcomes remain reserved and cannot be replayed. The helper proxy
+paces every request below its normal rate limit; its limits stay unchanged.
+
+The controller is not yet a public CLI entrypoint. Its fixture evidence covers
+course structure and activity visibility. Private file payloads, learner-token
+approval binding, broader operation qualification, owner setup and native
+provider proof remain required before release.
 
 `moodle/browser_operations.py` stages those assets through the authenticated
 helper proxy. It checks the pinned route registry, catalog, module and exact

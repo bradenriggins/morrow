@@ -21,8 +21,16 @@ TREE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TREE))
 OUT, BINARY, ASSETS = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]).resolve()
 PUBLIC_STAGING = "--public-staging-only" in sys.argv[4:]
+GOVERNED = "--governed-execution" in sys.argv[4:]
 report = {"scope": "public-page adapter staging only" if PUBLIC_STAGING else "private fixture staging and provider read", "test": "morrow.moodle-adapter-loader.real-helper.v1", "checks": {}, "provider_calls": 0}
 fixture_mode = 'modern'
+effect_mode = 'normal'
+effects = 0
+provider_state = {'course': {'id': 2, 'fullname': 'Fixture course'},
+                  'section': [{'id': 10, 'number': 0, 'visible': True, 'hasrestrictions': False, 'component': None, 'cmlist': [19]}],
+                  'cm': [{'id': 19, 'name': 'Essay by Aster Sample', 'module': 'page', 'sectionid': 10,
+                          'visible': True, 'accessvisible': True, 'hascmrestrictions': False,
+                          'allowstealth': True, 'stealth': False}]}
 
 def check(name, value):
     report["checks"][name] = bool(value)
@@ -34,9 +42,10 @@ class Fixture(BaseHTTPRequestHandler):
 
     def do_GET(self):
         report['fixture_gets'] = report.get('fixture_gets', 0) + 1
-        course_page = '/course/view.php' in self.path
+        course_page = '/course/view.php' in self.path or '/user/index.php' in self.path
         cfg = {'wwwroot': base, 'userId': 43 if fixture_mode == 'wrong_account' else 42,
-               'sesskey': 'DUMMY_BROWSER_ONLY', 'currentlogin': 123456, 'courseId': 2 if course_page else 1}
+               'sesskey': 'DUMMY_BROWSER_ONLY', 'currentlogin': 123456, 'courseId': 2 if course_page else 1,
+               'courseContextId': 200}
         if fixture_mode.startswith('legacy41'):
             cfg.pop('userId')
         if '/user/profile.php' in self.path:
@@ -66,10 +75,37 @@ class Fixture(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_POST(self):
+        global effects
         report["provider_calls"] += 1
-        payload = json.dumps([{"error": False, "data": {"courses": [{"id": 2, "fullname": "Fixture course"}]}}]).encode()
+        body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        if '/admin/roles/check.php' in self.path:
+            caps = ['moodle/site:accessallgroups', 'moodle/course:enrolreview', 'moodle/course:viewsuspendedusers', 'moodle/user:viewdetails']
+            html = '<form method="post" action="%s/admin/roles/check.php?contextid=200"><select name="reportuser"><option selected value="42">Educator</option></select></form><table id="explaincaps">%s</table>' % (base, ''.join('<tr class="rolecap yes"><td><span class="cap-name">%s</span></td><td>Yes</td></tr>' % cap for cap in caps))
+            payload = html.encode()
+            content_type = 'text/html'
+        else:
+            call = json.loads(body)[0]
+            method = call['methodname']
+            if method == 'core_courseformat_get_state':
+                data = json.dumps(provider_state)
+            elif method == 'core_courseformat_update_course':
+                effects += 1
+                if effect_mode != 'mismatch':
+                    visible = call['args']['action'] == 'cm_show'
+                    provider_state['cm'][0].update(visible=visible, accessvisible=visible, stealth=False)
+                if effect_mode == 'lost_response':
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    self.connection.close()
+                    return
+                data = json.dumps(provider_state)
+            elif method == 'core_table_get_dynamic_table_content':
+                data = {'html': '<div data-region="core_table/dynamic" data-table-component="core_user" data-table-handler="participants" data-table-uniqueid="user-index-participants-2" data-table-total-rows="1"><table><tr><td><input class="usercheckbox" name="user17"></td><td>Aster Sample</td><td>aster@example.test</td></tr></table></div>'}
+            else:
+                data = {'courses': [{'id': 2, 'fullname': 'Fixture course'}]}
+            payload = json.dumps([{"error": False, "data": data}]).encode()
+            content_type = 'application/json'
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
@@ -105,6 +141,8 @@ try:
         raise RuntimeError('no disposable browser identity port available')
     (root / 'empty-env').write_text('# disposable fixture\n')
     (root / 'tree').mkdir(mode=0o700)
+    if GOVERNED:
+        from dispatch import executor as fixture_executor
     token = root / 'tree/helper_token'
     token.write_text('a' * 64)
     token.chmod(0o600)
@@ -154,6 +192,8 @@ try:
     context = proxy.create_isolated_world(tab, 'morrow_adapter_loader_e2e')
     check('real_isolated_world', isinstance(context, int))
     report['source_hashes'] = {str(path.relative_to(TREE)): hashlib.sha256(path.read_bytes()).hexdigest() for path in (TREE / 'helper/server.py', TREE / 'transport/local_chromium.py', TREE / 'moodle/browser_operations.py', TREE / 'moodle/browser_transport.py', Path(__file__))}
+    if GOVERNED:
+        report['source_hashes']['moodle/dispatch.py'] = hashlib.sha256((TREE / 'moodle/dispatch.py').read_bytes()).hexdigest()
     from moodle.browser_operations import MoodleAdapterLoader
     registry = ASSETS / 'moodle-browser-routes.json'
     digest = hashlib.sha256(registry.read_bytes()).hexdigest()
@@ -247,6 +287,65 @@ try:
                      'changed_course_account', 'changed_course_key', 'changed_course_login'):
             fixture_mode = mode
             refuse(mode + '_operation_preparation_refused', lambda: transport._stage_operation(loader, key_name, course_request))
+    if GOVERNED:
+        fixture_mode = 'modern'
+        from moodle.dispatch import MoodleDispatcher
+        from dispatch.admission import mint_approval, sign_approval
+        from dispatch.executor import find_journal_op
+        import uuid
+        operation_identity = transport.operation_identity()
+        check('operation_identity_has_fresh_session_generation', operation_identity == {'id': '42', 'site_url': base, 'session_generation': 123456})
+        check('operation_identity_has_no_browser_secret', 'DUMMY_BROWSER_ONLY' not in json.dumps(operation_identity))
+        dispatcher = MoodleDispatcher(transport, ASSETS, registry_sha256=digest)
+        read_key = 'moodle.ajax.core_courseformat_get_state.v1'
+        hide_key = 'moodle.ajax.core_courseformat_update_course.cm_hide.v1'
+        read_result = dispatcher.dispatch(read_key, {'course_id': 2}, op_id=str(uuid.uuid4()))
+        check('governed_read_ok', read_result.get('ok') is True)
+        check('governed_read_masks_learner', 'Aster Sample' not in json.dumps(read_result) and 'Student A' in json.dumps(read_result))
+        args = {'course_id': 2, 'module_id': 19, 'expected_digest': read_result['snapshot_digest']}
+        def no_effect(name, action):
+            before_effects = effects
+            try:
+                action()
+            except Exception:
+                check(name, True)
+            else:
+                check(name, False)
+            check(name + '_no_effect', effects == before_effects)
+        no_effect('unapproved_write_refused', lambda: dispatcher.dispatch(hide_key, args, op_id=str(uuid.uuid4())))
+        write_id = str(uuid.uuid4())
+        plan = dispatcher.plan(hide_key, args, op_id=write_id)
+        entry = dispatcher.descriptor(hide_key, args)
+        approval = sign_approval(mint_approval(entry, args, base, target_identity=plan.target_identity),
+                                 'Hide this activity in this disposable fixture.', channel='driver')
+        no_effect('driver_channel_refused_by_default', lambda: dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval))
+        no_effect('changed_approved_arguments_refused', lambda: dispatcher.dispatch(hide_key, {**args, 'module_id': 20}, op_id=write_id, plan=plan, approval=approval))
+        write_result = dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval, require_educator_channel=False)
+        report['approved_write_result'] = write_result
+        report['approved_write_journal'] = find_journal_op(write_id)
+        check('approved_write_verified', write_result.get('ok') is True and write_result.get('verification', {}).get('status') == 'verified')
+        check('exactly_one_approved_effect', effects == 1 and provider_state['cm'][0]['visible'] is False)
+        record = find_journal_op(write_id)
+        check('durable_verified_outcome', record['verification'] == 'verified' and record['uncertain'] is False)
+        check('journal_masks_learner', 'Aster Sample' not in json.dumps(record))
+        no_effect('completed_write_replay_refused', lambda: dispatcher.dispatch(hide_key, args, op_id=write_id, plan=plan, approval=approval))
+        for mode in ('mismatch', 'lost_response'):
+            effect_mode = mode
+            provider_state['cm'][0].update(visible=True, accessvisible=True, stealth=False)
+            current = dispatcher.dispatch(read_key, {'course_id': 2}, op_id=str(uuid.uuid4()))
+            args = {**args, 'expected_digest': current['snapshot_digest']}
+            op_id = str(uuid.uuid4())
+            plan = dispatcher.plan(hide_key, args, op_id=op_id)
+            entry = dispatcher.descriptor(hide_key, args)
+            approval = sign_approval(mint_approval(entry, args, base, target_identity=plan.target_identity),
+                                     'Hide this activity in this disposable fixture.', channel='driver')
+            result = dispatcher.dispatch(hide_key, args, op_id=op_id, plan=plan, approval=approval, require_educator_channel=False)
+            check(mode + '_not_success', result.get('ok') is False)
+            record = find_journal_op(op_id)
+            check(mode + '_durable_uncertain', record['uncertain'] is True)
+            no_effect(mode + '_replay_refused', lambda: MoodleDispatcher(transport, ASSETS, registry_sha256=digest).dispatch(hide_key, args, op_id=op_id, plan=plan, approval=approval))
+        check('all_governed_outputs_secret_free', 'DUMMY_BROWSER_ONLY' not in json.dumps([read_result, write_result, record]))
+        report['fixture_effects'] = effects
     report['passed'] = True
 except Exception as exc:
     report['passed'] = False
