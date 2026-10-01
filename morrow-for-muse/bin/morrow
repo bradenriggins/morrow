@@ -248,6 +248,27 @@ def _render_failure(entry):
     return "\n".join(lines)
 
 
+def _registry_remembers(tree_root):
+    """The id the tree-id registry recorded for this root, or None.
+
+    A light read of dispatch/executor.py's registry (no executor
+    import): doctor uses it to tell a deleted .morrow-tree-id (every
+    command fail-closes) from a legacy tree that never minted one.
+    """
+    try:
+        from config import paths as _paths
+        registry = os.path.join(_paths.morrow_home(), "trees",
+                                ".tree-id-registry.json")
+        with open(registry, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if isinstance(doc, dict):
+            found = doc.get(os.path.realpath(tree_root))
+            return found if isinstance(found, str) else None
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def _doctor(json_mode=False):
     """Read-only health check. No auth material is read or sent; the
     helper /status endpoint is the same read-only check operators use
@@ -261,6 +282,14 @@ def _doctor(json_mode=False):
     try:
         with urllib.request.urlopen(status_url, timeout=10) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        lines.append("helper: UNREACHABLE (%s: %s)"
+                     % (type(exc).__name__, exc))
+        facts["helper"] = {"reachable": False,
+                            "error": "%s: %s" % (type(exc).__name__, exc)}
+        ok = False
+        payload = None
+    if payload is not None:
         logged_in = bool(payload.get("logged_in"))
         alive = bool(payload.get("chromium_alive"))
         lines.append("helper: reachable (%s)" % status_url)
@@ -268,33 +297,61 @@ def _doctor(json_mode=False):
                      % (logged_in, alive))
         facts["helper"] = {"reachable": True, "logged_in": logged_in,
                             "chromium_alive": alive}
-        from config import tree_config
-        if tree_config.lms_provider() == "moodle":
-            expected = tree_config.normalize_lms_base(tree_config.lms_base(), "moodle").rstrip("/")
-            profile = payload.get("profile_dir")
-            wanted_profile = tree_config.setting("LOGIN_HELPER_PROFILE_DIR",
-                os.path.join(DEPLOY_DIR, "helper", "profile"))
-            with open(os.path.join(DEPLOY_DIR, "VERSION"), encoding="utf-8") as version_file:
-                version = version_file.read().strip()
-            identity_ok = (payload.get("lms_provider") == "moodle"
-                           and payload.get("lms_base") == expected
-                           and payload.get("helper_version") == version
-                           and isinstance(profile, str)
-                           and os.path.realpath(os.path.expanduser(profile)) == os.path.realpath(wanted_profile))
-            verified = identity_ok and payload.get("session_verified") is True
-            facts["helper"].update(lms_provider="moodle", lms_base=expected,
-                identity_verified=identity_ok, session_verified=verified,
-                session_state=payload.get("session_state"))
-            if not verified:
+        # The moodle identity check reads local tree files; its failures
+        # are local, never helper reachability, so they get their own
+        # label instead of sharing the UNREACHABLE branch above.
+        try:
+            from config import tree_config
+            if tree_config.lms_provider() == "moodle":
+                expected = tree_config.normalize_lms_base(tree_config.lms_base(), "moodle").rstrip("/")
+                profile = payload.get("profile_dir")
+                wanted_profile = tree_config.setting("LOGIN_HELPER_PROFILE_DIR",
+                    os.path.join(DEPLOY_DIR, "helper", "profile"))
+                with open(os.path.join(DEPLOY_DIR, "VERSION"), encoding="utf-8") as version_file:
+                    version = version_file.read().strip()
+                identity_ok = (payload.get("lms_provider") == "moodle"
+                               and payload.get("lms_base") == expected
+                               and payload.get("helper_version") == version
+                               and isinstance(profile, str)
+                               and os.path.realpath(os.path.expanduser(profile)) == os.path.realpath(wanted_profile))
+                verified = identity_ok and payload.get("session_verified") is True
+                facts["helper"].update(lms_provider="moodle", lms_base=expected,
+                    identity_verified=identity_ok, session_verified=verified,
+                    session_state=payload.get("session_state"))
+                if not verified:
+                    ok = False
+        except Exception as exc:
+            lines.append("helper: local identity check failed (%s: %s)"
+                         % (type(exc).__name__, exc))
+            facts["helper"]["identity_error"] = "%s: %s" % (type(exc).__name__, exc)
+            ok = False
+        # 1c. Version drift, on every provider: the helper must be this
+        # tree's build. (The moodle identity check above already
+        # compares; canvas never did.) A helper that predates the
+        # version report is flagged but not failed.
+        try:
+            with open(os.path.join(DEPLOY_DIR, "VERSION"),
+                      encoding="utf-8") as version_file:
+                tree_version = version_file.read().strip()
+            helper_version = payload.get("helper_version")
+            facts["helper"]["helper_version"] = helper_version
+            facts["helper"]["tree_version"] = tree_version
+            if helper_version is None:
+                lines.append("helper: version unknown (this helper "
+                             "predates the version report)")
+            elif helper_version != tree_version:
+                lines.append("helper: VERSION DRIFT (helper %s, tree %s; "
+                             "rerun install.sh)" % (helper_version,
+                                                    tree_version))
                 ok = False
+        except Exception as exc:
+            lines.append("helper: version check failed (%s: %s)"
+                         % (type(exc).__name__, exc))
+            facts["helper"]["version_error"] = "%s: %s" % (type(exc).__name__,
+                                                           exc)
+            ok = False
         if not (logged_in and alive):
             ok = False
-    except Exception as exc:
-        lines.append("helper: UNREACHABLE (%s: %s)"
-                     % (type(exc).__name__, exc))
-        facts["helper"] = {"reachable": False,
-                            "error": "%s: %s" % (type(exc).__name__, exc)}
-        ok = False
 
     # 1b. Account pin: reads run unpinned, but writes refuse until the
     # account is pinned (FIRST_RUN step 3). A live session without a
@@ -341,6 +398,72 @@ def _doctor(json_mode=False):
             lines.append("entry: %s MISSING (%s)" % (name, script))
             facts["entries"][name] = "MISSING"
             ok = False
+
+    # 4. Tree identity: the stable id every journal path derives from.
+    try:
+        from config import paths as _paths
+        uid = _paths.read_tree_uuid(DEPLOY_DIR)
+        if uid:
+            lines.append("tree-id: minted (%s)" % uid)
+            facts["tree-id"] = {"minted": True, "id": uid}
+        else:
+            remembered = _registry_remembers(DEPLOY_DIR)
+            if remembered:
+                lines.append("tree-id: DELETED (this tree minted %s: "
+                             "restore .morrow-tree-id from backup; "
+                             "commands refuse to run)" % remembered)
+                facts["tree-id"] = {"minted": False, "deleted": True,
+                                    "remembered": remembered}
+                ok = False
+            else:
+                lines.append("tree-id: legacy slug (no .morrow-tree-id; "
+                             "run install.sh to mint a stable id)")
+                facts["tree-id"] = {"minted": False, "legacy": True}
+    except Exception as exc:
+        lines.append("tree-id: UNREADABLE (%s: %s)"
+                     % (type(exc).__name__, exc))
+        facts["tree-id"] = {"error": "%s: %s" % (type(exc).__name__, exc)}
+        ok = False
+
+    # 5. Supervision: what keeps the helper alive. Reported, never
+    # failed: an unsupervised helper still serves; its absence is
+    # degraded, not broken.
+    try:
+        from helper import supervisor as _sup
+        method = _sup.detect()
+        if method == "cron":
+            installed = _sup.cron_entry_installed(DEPLOY_DIR)
+            facts["supervision"] = {"method": "cron",
+                                    "installed": installed}
+            if installed:
+                lines.append("supervision: cron entry installed")
+            else:
+                lines.append("supervision: WARNING: cron runs but no "
+                             "crontab entry keeps this tree's helper up "
+                             "(run install.sh)")
+        else:
+            state = _sup.status(DEPLOY_DIR)
+            facts["supervision"] = {
+                "method": "loop",
+                "installed": bool(state.get("installed")),
+                "running": bool(state.get("running")),
+                "pid": state.get("pid")}
+            if not state.get("installed"):
+                lines.append("supervision: WARNING: no keepalive loop "
+                             "installed for this tree (run install.sh or "
+                             "bin/morrow start)")
+            elif not state.get("running"):
+                lines.append("supervision: WARNING: keepalive loop "
+                             "installed but not running "
+                             "(run bin/morrow start)")
+            else:
+                lines.append("supervision: loop running (pid %s)"
+                             % state.get("pid"))
+    except Exception as exc:
+        lines.append("supervision: UNREADABLE (%s: %s)"
+                     % (type(exc).__name__, exc))
+        facts["supervision"] = {"error": "%s: %s" % (type(exc).__name__,
+                                                     exc)}
 
     if json_mode:
         # Opt-in machine-readable form. Same facts, same exit contract.
@@ -415,7 +538,9 @@ def main(argv=None):
             print("usage: bin/morrow start", file=sys.stderr)
             return 2
         return _start()
-    if name != "disconnect":
+    # doctor is a read-only diagnostic: it must not start supervision as
+    # a side effect (disconnect is exempt for its own opposite reason).
+    if name not in ("disconnect", "doctor"):
         _resume_supervision()
     if name == "doctor":
         if rest and rest != ["--json"]:

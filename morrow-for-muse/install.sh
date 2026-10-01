@@ -105,7 +105,9 @@ MORROW_HOME="${MORROW_HOME:-${HOME}/.morrow}"
 TREE_ENV_FILE="${TREE}/helper/env"
 LEGACY_ENV_FILE="${MORROW_HOME}/env"
 ENV_FILE="${TREE_ENV_FILE}"
-ONBOARDED_SENTINEL="${MORROW_HOME}/onboarded"
+# ONBOARDED_SENTINEL is set beside TREE_STATE_DIR below: onboarding is
+# tree-scoped, so a new tree with a dead session gets the full sign-in
+# notice instead of another tree's short "sign in again".
 INSTALLED_VERSION_FILE="${MORROW_HOME}/installed-version"
 INSTALLED_MANIFEST_FILE="${MORROW_HOME}/installed-manifest.json"
 CRON_MARKER="# morrow-muse-connector-keepalive"
@@ -549,10 +551,12 @@ if [ "${_UPGRADE}" = "1" ]; then
   # P2-1: back up the tree BEFORE the installer's in-place writes
   # (stale-file removal below). The live profile is excluded: it is
   # runtime state, never touched by the migration, and can be 10s of MB.
-  UPGRADE_BACKUP="${TREE}.bak-$(date +%Y%m%d-%H%M%S)"
+  # The backup dir carries this shell's pid plus mktemp uniqueness: two
+  # upgrades in the same second must never share one dir (their tars
+  # would interleave and each run's manifest check would fail).
+  UPGRADE_BACKUP="$(mktemp -d "${TREE}.bak-$(date +%Y%m%d-%H%M%S)-$$.XXXXXX" 2>/dev/null)" \
+    || fail "backup" "cannot create a unique backup dir beside ${TREE}"
   note "backing up the tree to ${UPGRADE_BACKUP} (excluding helper/profile)"
-  mkdir -p "${UPGRADE_BACKUP}" \
-    || fail "backup" "cannot create ${UPGRADE_BACKUP}"
   # pipefail: a producer-side tar failure must fail the pipeline, not
   # hide behind the consumer's exit status.
   set -o pipefail
@@ -681,6 +685,7 @@ fi
 # secrets gate (step 8) and the integrity walk read the tree as release
 # content. Same resolution as helper/keepalive.sh and the transport.
 TREE_STATE_DIR="${MORROW_TREE_STATE_DIR:-${MORROW_HOME}/trees/${TREE_ID}}"
+ONBOARDED_SENTINEL="${TREE_STATE_DIR}/onboarded"
 # An older release wrote keepalive's and the helper's logs (with their
 # rotated archives) and the keepalive loop's state into helper/. Move
 # them to the state dir, loudly, and stop a loop recorded there.
@@ -1210,6 +1215,7 @@ except ValueError as exc:
       # A second keepalive can return 0 because the supervisor owns the
       # lock. Its tick has a 600-second timeout; allow cleanup margin.
       if [ "${KEEP_RC}" = "0" ]; then
+        note "a keepalive tick is still running; waiting up to 610 seconds for its lock (not stuck)"
         flock -w 610 "${TREE_STATE_DIR}/keepalive.lock" true \
           || fail "helper" "another keepalive still holds the lock after 610 seconds; no helper state was accepted. Check ${TREE_STATE_DIR}/keepalive.log and rerun."
       fi

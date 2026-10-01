@@ -741,6 +741,14 @@ def _tree_id():
         if prev != uid:
             registry[tree_root] = uid
             _write_tree_id_registry(registry)
+        others = sorted(root for root, known in registry.items()
+                        if known == uid and root != tree_root)
+        if others:
+            sys.stderr.write(
+                "morrow: WARNING: tree id %s is also recorded for %s: "
+                "those roots share one journal and op-id domain, so an "
+                "op used in one root is consumed in the other. Run only "
+                "one of these roots.\n" % (uid, ", ".join(others)))
         return uid
     remembered = registry.get(tree_root)
     if remembered:
@@ -2458,6 +2466,19 @@ def _journal_restored_marker_path():
     return os.path.join(os.path.dirname(JOURNAL_PATH), "restored_from.json")
 
 
+def _journal_restore_progress_path():
+    """The in-progress restore marker.
+
+    Written by the state-restore tool before it copies anything and
+    removed after the final restore marker lands. A crash mid-restore
+    leaves half-replaced state with this marker and no final marker:
+    the journal refuses it, and journal-reconcile refuses too (only a
+    completed restore is reconcilable; re-run the restore).
+    """
+    return os.path.join(os.path.dirname(JOURNAL_PATH),
+                        "restore_in_progress.json")
+
+
 def _write_index(idx):
     """Atomically replace the sidecar index (tmp file + rename + fsync).
 
@@ -2698,6 +2719,15 @@ def _journal_state_locked():
     were already consumed after the backup was taken, so re-admitting
     them could re-run completed ops."""
     # W6-P1-2: fail closed while a restore marker exists.
+    progress_marker = _journal_restore_progress_path()
+    if os.path.exists(progress_marker):
+        raise JournalIntegrityError(
+            "a state restore was interrupted (marker %s): the live "
+            "state is half-replaced and no restore completed. Fail "
+            "closed: re-run the restore to completion, then reconcile "
+            "in-flight ops against the provider and run "
+            "`python3 dispatch/executor.py journal-reconcile`."
+            % progress_marker)
     restored_marker = _journal_restored_marker_path()
     if os.path.exists(restored_marker):
         raise JournalIntegrityError(
@@ -3983,6 +4013,12 @@ def journal_reconcile():
     anchor.
     """
     with _journal_locked():
+        progress = _journal_restore_progress_path()
+        if os.path.exists(progress):
+            raise JournalIntegrityError(
+                "a state restore was interrupted (marker %s): only a "
+                "completed restore is reconcilable. Re-run the restore "
+                "to completion first." % progress)
         marker = _journal_restored_marker_path()
         records = _scan_journal_file(JOURNAL_PATH)
         idx = _read_index()

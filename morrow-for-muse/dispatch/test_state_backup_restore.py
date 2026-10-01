@@ -182,35 +182,42 @@ def cycle():
              made["backup"], "--yes")
         restored = json.loads(_run(env, "-c", _CHECK.replace(
             "SECOND = None", "SECOND = %r" % (seeded.get("second"),))))
-        yield seeded, manifest, restored
+        journal_dirs = []
+        trees = os.path.join(env["MORROW_HOME"], "trees")
+        if os.path.isdir(trees):
+            for entry in sorted(os.listdir(trees)):
+                candidate = os.path.join(trees, entry, "journal")
+                if os.path.isdir(candidate):
+                    journal_dirs.append(candidate)
+        yield seeded, manifest, restored, home, journal_dirs
     finally:
         shutil.rmtree(home, ignore_errors=True)
 
 
 def test_the_seeded_install_is_in_edit_mode(cycle):
-    seeded, _manifest, _restored = cycle
+    seeded, _manifest, _restored, _home, _journals = cycle
     assert seeded["mode"] == "edit"
 
 
 def test_approvals_work_after_a_restore(cycle):
-    _seeded, manifest, restored = cycle
+    _seeded, manifest, restored, _home, _journals = cycle
     assert restored["approvals"] == "ok"
     assert manifest["sets"]["secrets"]["files"], manifest["sets"]
 
 
 def test_the_pinned_account_comes_back(cycle):
-    _seeded, _manifest, restored = cycle
+    _seeded, _manifest, restored, _home, _journals = cycle
     assert restored["pinned"] == "42"
 
 
 def test_settings_and_edit_mode_come_back(cycle):
-    _seeded, _manifest, restored = cycle
+    _seeded, _manifest, restored, _home, _journals = cycle
     assert restored["confirm_deletions"] is True
     assert restored["mode"] == "edit"
 
 
 def test_restored_state_folders_are_private(cycle):
-    _seeded, _manifest, restored = cycle
+    _seeded, _manifest, restored, _home, _journals = cycle
     assert set(restored["modes"]) == {"secrets", "settings", "modes",
                                       "approvals"}
     for name, mode in restored["modes"].items():
@@ -220,10 +227,34 @@ def test_restored_state_folders_are_private(cycle):
 @pytest.mark.skipif(not HAS_CRYPTOGRAPHY,
                     reason="the learner vault needs 'cryptography'")
 def test_student_labels_and_typed_names_come_back(cycle):
-    seeded, manifest, restored = cycle
+    seeded, manifest, restored, _home, _journals = cycle
     assert restored["vault_restored"] is True
     # A fresh vault would call the first student it meets Student A1.
     assert restored["label_second"] == "Student A2"
     assert restored["echo"] == {"Student A2": seeded["second"]["name"]}
     files = manifest["sets"]["source-vault"]["files"]
     assert {"vault", "vault.key", "vault.echo"} <= set(files)
+
+
+def test_completed_restore_clears_the_in_progress_marker(cycle):
+    _seeded, _manifest, _restored, _home, journals = cycle
+    assert journals, "the cycle restored no journal dir"
+    for journal_dir in journals:
+        assert not os.path.exists(os.path.join(
+            journal_dir, "restore_in_progress.json")), journal_dir
+        assert os.path.exists(os.path.join(
+            journal_dir, "restored_from.json")), journal_dir
+
+
+def test_interrupted_restore_fails_the_journal_closed(tmp_path,
+                                                     monkeypatch):
+    from dispatch import executor as ex
+    journal_dir = tmp_path / "journal"
+    journal_dir.mkdir()
+    (journal_dir / "restore_in_progress.json").write_text("{}\n")
+    monkeypatch.setattr(ex, "JOURNAL_PATH",
+                        str(journal_dir / "ops.jsonl"))
+    with pytest.raises(ex.JournalIntegrityError, match="interrupted"):
+        ex._journal_state_locked()
+    with pytest.raises(ex.JournalIntegrityError, match="interrupted"):
+        ex.journal_reconcile()

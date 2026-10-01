@@ -68,6 +68,8 @@ class MoodleDispatcher:
             raise ValueError('Moodle course ID must be an exact integer')
         if not route['readOnly'] and not re.fullmatch(r'[a-f0-9]{64}', str(arguments.get('expected_digest', ''))):
             raise ValueError('Moodle writes need a fresh provider digest')
+        if not route['readOnly'] and arguments.get('course_id') is None:
+            raise ValueError('Moodle writes need a course ID')
         return {'name': route['toolName'], 'provider': 'moodle',
                 'effects': 'read' if route['readOnly'] else 'write',
                 'request': {'method': 'GET' if route['readOnly'] else 'POST',

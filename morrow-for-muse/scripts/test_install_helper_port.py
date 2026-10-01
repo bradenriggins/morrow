@@ -102,8 +102,9 @@ def world(tmp_path):
         'ENV_FILE="${TREE_ENV_FILE}"',
         'MORROW_HOME="%s"' % home,
         'LEGACY_ENV_FILE="${MORROW_HOME}/env"',
-        'ONBOARDED_SENTINEL="${MORROW_HOME}/onboarded"',
         'TREE_STATE_DIR="${MORROW_HOME}/state"',
+        'ONBOARDED_SENTINEL="${TREE_STATE_DIR}/onboarded"',
+        'mkdir -p "${TREE_STATE_DIR}"',
         'TREE_VERSION="0.4.6"',
     ])
     env = {k: v for k, v in os.environ.items()
@@ -188,7 +189,7 @@ def test_lock_skip_with_verified_signed_out_helper_shows_sign_in(world):
     assert proc.returncode == 0, out
     assert "SIGN-IN NEEDED" in out, out
     assert "helper healthy:" not in out, out
-    assert not (world["home"] / "onboarded").exists()
+    assert not (world["home"] / "state" / "onboarded").exists()
     assert "keepalive.lock" in (world["home"].parent / "flock.log").read_text()
 
 
@@ -209,11 +210,12 @@ def test_install_refuses_lock_wait_timeout_even_with_status(world):
 ])
 def test_install_refuses_lock_skip_without_verified_helper(
         world, status, status_rc):
-    (world["home"] / "onboarded").write_text("previous session\n")
+    (world["home"] / "state").mkdir(parents=True, exist_ok=True)
+    (world["home"] / "state" / "onboarded").write_text("previous session\n")
     before = {p: p.read_bytes() for p in (
         world["home"] / "installed-version",
         world["home"] / "installed-manifest.json",
-        world["home"] / "onboarded",
+        world["home"] / "state" / "onboarded",
         world["home"].parent / "tree" / "helper" / "profile" /
         "prior-state")}
     proc = _run(world, 0, status=status, status_rc=status_rc)
