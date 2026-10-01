@@ -1,7 +1,7 @@
-# Canvas Login Helper (packaged)
+# Morrow Sign-in Helper (packaged)
 
 The sign-in companion for Morrow's local-Chromium lane. The educator signs
-into Canvas **once** in the helper's browser; the persistent profile
+into Canvas or Moodle **once** in the helper's browser; the persistent profile
 keeps the authenticated session across helper and machine restarts, so
 sign-in is repeated only when needed (expiry, cleared session, or account change).
 
@@ -58,8 +58,9 @@ sign-in is repeated only when needed (expiry, cleared session, or account change
   the global file is honored for `CANVAS_BASE` only), pins
   `LOGIN_HELPER_PROFILE_DIR` to the tree's `helper/profile/` and
   `LOGIN_HELPER_CDP_PORT` to the tree's CDP port, then starts the
-  server with an absolute path. Do not hand-launch `server.py` without
-  `CANVAS_BASE` exported: `server.py` sources `<tree>/helper/env`
+  server with an absolute path. Configure `CANVAS_BASE` for Canvas, or
+  `MORROW_LMS_PROVIDER=moodle` and `MOODLE_BASE` for Moodle, in this tree.
+  Preserve the full Moodle site path. `server.py` sources `<tree>/helper/env`
   itself (real environment wins), and the guard treats a bare launch
   on the production ports with the live profile as a config error.
 - Port escape hatches: `LOGIN_HELPER_PORT` (default 8901) and
@@ -80,15 +81,16 @@ sign-in is repeated only when needed (expiry, cleared session, or account change
 - `server.py` - the helper: launches headless Chromium with the persistent
   profile, serves the sign-in UI, and exposes `/status`, `/screenshot`,
   `/input/*`, `/navigate` on `127.0.0.1:8901` (override with
-  `LOGIN_HELPER_PORT` / `LOGIN_HELPER_BIND`). Needs `CANVAS_BASE` (env or
-  first argument); refuses to start without a tenant. Every
+  `LOGIN_HELPER_PORT` / `LOGIN_HELPER_BIND`). Requires the selected LMS
+  provider and exact site in this tree's configuration; refuses to start
+  without a site. Every
   POST/PUT/DELETE/PATCH endpoint and `GET /screenshot` and `GET /page/layout` require the
   `X-Helper-Token` header (see "Token auth" below); `GET /status`,
   `GET /`, and `GET /logo.png` are open.
 - `index.html` - the sign-in UI served by the server.
 - `logo.png` - the Morrow logo used by the UI.
 - `keepalive.sh` - cron supervision (every 5 min). Sources the tree's
-  own `helper/env` for `CANVAS_BASE` (the legacy global `~/.morrow/env`
+  own `helper/env` for the LMS provider and site (the legacy global `~/.morrow/env`
   is honored for `CANVAS_BASE` only), pins `LOGIN_HELPER_PROFILE_DIR`
   (the tree's `helper/profile/`) and `LOGIN_HELPER_CDP_PORT`, then
   starts the server. Tree-gated recovery: it only ever kills this
@@ -174,9 +176,9 @@ password entry) through `/screenshot`.
   `GET /screenshot` and `GET /page/layout`. They require the `X-Helper-Token` header to equal
   the token; anything else gets `403` JSON `{"error":"forbidden"}`.
 - **Open:** `GET /status` (health only), `GET /` (the sign-in UI),
-  `GET /logo.png`. The server injects the token into a
-  `__HELPER_TOKEN__` placeholder when serving the UI, so the page's own
-  fetch calls carry the header.
+  `GET /logo.png`. The server injects the token into the
+  `__HELPER_TOKEN__` placeholder only for a valid single-use page code.
+  A code-less page shows status but cannot drive the browser.
 - **Python consumers:** `transport/local_chromium.py` reads the token
   from `${TREE_STATE_DIR}/helper_token` and sends `X-Helper-Token` on
   every helper request through the single `_helper_request` path
@@ -189,7 +191,8 @@ password entry) through `/screenshot`.
 Honest statement of the security property: the token stops
 blind/off-origin API use and port-forward exposure (the unauthenticated
 tunnel scenario). It does not stop a party that can already read the
-locally served page, since the token is injected into that page.
+authenticated one-time page, since the token is injected into that page.
+A code-less page does not receive the token.
 
 ## Hardening (W3-P2-7)
 
@@ -211,8 +214,8 @@ before anything else, and under the limits the auth matrix is unchanged.
   Why these numbers are safe for the real clients: the sign-in UI polls
   `/status` every 2s and streams `/screenshot` every 500ms (about 2.5
   rps steady state); the Python transport makes sequential helper calls
-  with 10-20s client timeouts; frantic typing bursts (a POST per
-  key-down/up) fit inside the 120 burst. A tight abuse loop at tens of
+  with bounded client timeouts. The web helper coalesces queued text into
+  batches and pauses screenshots while input is pending. A tight abuse loop at tens of
   requests per second exhausts the burst in seconds and then gets 429s.
 - **Thread bound:** at most **16** concurrent request-handler threads
   (up from the old unbounded growth: one thread per connection, no
@@ -341,7 +344,8 @@ the exact response, limits, embedded-frame behavior, and required UI checks.
 The one-time helper page uses the same ordered batch endpoint. It sends
 ordinary text, paste, and committed IME text without a separate request for
 each key. Tab, Enter, and other control keys use paired key operations.
-Pointer and scroll requests share the input queue. An identical batch can
+Pointer and scroll requests share the input queue. A detected page change
+while input is pending discards unsent input and requires a fresh resume. An identical batch can
 be retried once after a lost transport reply. A conflict or unconfirmed
 result stops the queue and discards unsent input.
 

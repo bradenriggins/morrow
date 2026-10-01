@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 TREE = Path(__file__).resolve().parents[1]
 OUT, BINARY = Path(sys.argv[1]), sys.argv[2]
 report = {'test': 'morrow.helper-web-input.rendered.v1', 'scope': 'disposable protocol fixture only', 'checks': {}}
-state = {'epoch': 'a' * 32, 'fault': '', 'calls': [], 'effects': [], 'streams': {}, 'delay': 0}
+state = {'epoch': 'a' * 32, 'fault': '', 'calls': [], 'effects': [], 'streams': {}, 'delay': 0, 'shots': 0, 'url': 'https://fixture.example/login'}
 lock = threading.Lock()
 
 def check(name, value):
@@ -51,8 +51,9 @@ class Fixture(BaseHTTPRequestHandler):
         elif self.path == '/logo.png':
             self.answer(200, (TREE / 'helper/logo.png').read_bytes(), 'image/png')
         elif self.path == '/status':
-            self.answer(200, {'ok': True, 'input_epoch': state['epoch'], 'logged_in': False, 'chromium_alive': True, 'url': 'https://fixture.example/login'})
+            self.answer(200, {'ok': True, 'input_epoch': state['epoch'], 'logged_in': False, 'chromium_alive': True, 'url': state['url']})
         elif self.path == '/screenshot':
+            state['shots'] += 1
             self.answer(200, IMAGE, 'image/png')
         elif self.path == '/page/layout':
             self.answer(200, {'ok': True, 'input_epoch': state['epoch'], 'viewport': {'width': 1200, 'height': 800}, 'fields': [{'x': 760, 'y': 260, 'width': 260, 'height': 42}], 'actions': [{'x': 760, 'y': 330, 'width': 140, 'height': 42}], 'frames': []})
@@ -175,6 +176,17 @@ try:
         evaluate('(() => { const el=document.getElementById("stage"),r=el.getBoundingClientRect(),o={bubbles:true,pointerType:"touch",pointerId:21,isPrimary:true,clientX:r.left+100,clientY:r.top+100}; el.setPointerCapture=()=>{}; el.dispatchEvent(new PointerEvent("pointerdown",o)); el.dispatchEvent(new PointerEvent("pointermove",{...o,clientY:o.clientY-40})); el.dispatchEvent(new PointerEvent("pointerup",{...o,clientY:o.clientY-40})); })()')
         idle()
         check('touch_drag_scrolls_without_click', len(state['effects']) == before + 1 and state['effects'][-1]['type'] == '/input/wheel')
+        focus()
+        state['delay'] = 3
+        text('in flight')
+        text('must discard')
+        state['url'] = 'https://fixture.example/next'
+        check('navigation_discards_queued_input', wait_for('document.getElementById("input-status").dataset.state === "blocked"'))
+        time.sleep(3.1)
+        check('navigation_never_sends_queued_text', not any('must discard' in op.get('text', '') for op in state['effects']))
+        state['delay'] = 0
+        evaluate('document.getElementById("resume").click()')
+        idle()
         focus()
         state['fault'] = 'lost_reply'
         before = len(state['effects'])

@@ -519,11 +519,15 @@
     if (!next || next.ok !== true || next.input_epoch !== expectedEpoch || !Array.isArray(next.fields) || !Array.isArray(next.actions)) throw new Error("Layout is not current");
     return next;
   }
-  async function displayFrame(response) {
+  async function displayFrame(response, expectedGeneration) {
     var blob = await response.blob();
     var objectUrl = URL.createObjectURL(blob), next = new Image();
     next.src = objectUrl;
     try { await next.decode(); } catch (e) { URL.revokeObjectURL(objectUrl); throw e; }
+    if (expectedGeneration !== generation) {
+      URL.revokeObjectURL(objectUrl);
+      throw new Error("Frame changed during refresh");
+    }
     img.src = objectUrl;
     await img.decode();
     if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
@@ -531,8 +535,10 @@
     if (!manualView) fit(true);
   }
   async function refresh() {
+    if (busy || queue.length) { setTimeout(refresh, 100); return; }
+    var expectedGeneration = generation;
     try {
-      await displayFrame(await request("/screenshot"));
+      await displayFrame(await request("/screenshot"), expectedGeneration);
       screenshotError = "";
     } catch (e) {
       screenshotError = e.status === 403 ? "This sign-in link expired. Ask your assistant for a fresh one-time link."
@@ -553,6 +559,9 @@
       unsupported = false; block("The helper restarted. Review the current page, then resume input.");
     }
     if (statusUrl !== st.url) {
+      if (statusUrl && (busy || queue.length || composing || keyboard.value)) {
+        block("The sign-in page changed while input was pending. Review the page before resuming.");
+      }
       statusUrl = st.url || ""; manualView = false; layout = null;
       if (validEpoch(epoch)) void readLayout(epoch).then(function (next) { layout = next; if (!manualView) fit(true); }).catch(function () {});
     }
@@ -579,7 +588,7 @@
       var first = await (await fetch("/status", { cache: "no-store" })).json();
       if (!validEpoch(first.input_epoch) || first.input_epoch !== epoch || exhaustedEpoch === epoch) throw new Error("Status changed");
       var nextLayout = await readLayout(first.input_epoch);
-      await displayFrame(await request("/screenshot"));
+      await displayFrame(await request("/screenshot"), currentGeneration);
       var last = await (await fetch("/status", { cache: "no-store" })).json();
       if (currentGeneration !== generation || last.input_epoch !== first.input_epoch || last.url !== first.url) throw new Error("Page changed");
       layout = nextLayout; queue = []; keyboard.value = "";
