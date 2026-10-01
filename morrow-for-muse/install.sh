@@ -1100,7 +1100,7 @@ else
   }
   if [ -n "${_SHELL_CANVAS_BASE}" ] \
     && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?CANVAS_BASE=' "${ENV_FILE}" 2>/dev/null; then
-    fail "env" "CANVAS_BASE is set in this shell but absent from ${ENV_FILE}; the keepalive cron sources only that file, so helper recovery would fail later. Add CANVAS_BASE=${_SHELL_CANVAS_BASE} to ${ENV_FILE} and rerun."
+    fail "env" "CANVAS_BASE is set in this shell but absent from ${ENV_FILE}; the keepalive cron sources only that file, so helper recovery would fail later. Set CANVAS_BASE to your Canvas tenant URL in ${ENV_FILE} and rerun."
   fi
   # Muse UX audit 3 (2026-09-23): the helper's tenant rule runs BEFORE
   # the network probe, from the shared validator in
@@ -1140,7 +1140,7 @@ except ValueError as exc:
   _TENANT_HOST="$(printf '%s' "${CANVAS_BASE}" | python3 -c 'import sys,urllib.parse; print(urllib.parse.urlparse(sys.stdin.read().strip()).hostname or "")')"
   case "${_TENANT_HOST}" in
     ""|instructure.com|example.com|example.instructure.com|myschool.instructure.com|canvas.instructure.com|your-school.*|yourschool.*|your_school.*)
-      fail "tenant" "CANVAS_BASE=${CANVAS_BASE} looks like a placeholder; set your real tenant in ${ENV_FILE}."
+      fail "tenant" "CANVAS_BASE looks like a placeholder; set your real tenant in ${ENV_FILE}."
       ;;
   esac
   # No -f: an HTTP error status (e.g. 404) still fetches the body, so a
@@ -1149,11 +1149,11 @@ except ValueError as exc:
   _PROBE_BODY="${MORROW_HOME}/.tenant-probe.$$.body"
   if ! curl -s -m 15 -L --max-redirs 3 "${CANVAS_BASE}" -o "${_PROBE_BODY}" 2>/dev/null; then
     rm -f "${_PROBE_BODY}"
-    fail "tenant" "CANVAS_BASE=${CANVAS_BASE} is unreachable; check the URL and your network, then rerun."
+    fail "tenant" "CANVAS_BASE is unreachable; check the URL in ${ENV_FILE} and your network, then rerun."
   fi
   if grep -qi "find your login page\|Page Not Found" "${_PROBE_BODY}" 2>/dev/null; then
     rm -f "${_PROBE_BODY}"
-    fail "tenant" "CANVAS_BASE=${CANVAS_BASE} serves a Canvas error page; fix it in ${ENV_FILE} and rerun."
+    fail "tenant" "CANVAS_BASE serves a Canvas error page; fix it in ${ENV_FILE} and rerun."
   fi
   rm -f "${_PROBE_BODY}"
   note "ok: tenant reachable, no Canvas error page"
