@@ -105,6 +105,7 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
   let draftListingReadable = true;
   let postResponse = "redirect";
   let writeBehavior = "normal";
+  let overRecordsWithoutNewline = false;
   let nextDiscussionId = 1_001;
   let nextPostId = 2_010;
   const discussions = new Map();
@@ -232,7 +233,9 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
         1_700_000_000, 1_700_000_000, 0, post.subject, post.message, 1, 0, 0, 0, 0, 0, 0, "", 0, 0,
       ]));
       response.writeHead(200, { "content-type": "text/csv" });
-      response.end(csv(rows));
+      response.end(overRecordsWithoutNewline ? csv([...rows, ...Array.from({ length: 10_001 - rows.length }, (_, index) => [
+        30_000 + index, 999, 0, 7, "Fixture author", 1_700_000_000, 1_700_000_000, 0, "Other discussion", "Body", 1, 0, 0, 0, 0, 0, 0, "", 0, 0,
+      ])]).trimEnd() : csv(rows));
       return;
     }
     if (request.method === "GET" && target.pathname === "/mod/forum/post.php") {
@@ -433,6 +436,12 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
 
     const forumDigest = forumTarget.snapshot_digest;
     const seedDigest = discussionTarget.snapshot_digest;
+    overRecordsWithoutNewline = true;
+    const beforeOversizedExport = dispatches();
+    assert.deepEqual(await invoke(operations.target, { course_id: 2, module_id: 8, discussion_id: Number(seedId) }),
+      { ok: false, sent: false, complete: false, error: "moodle_forum_post_incomplete" }, "the final unterminated CSV row counts toward the forum-wide limit");
+    assert.equal(dispatches(), beforeOversizedExport);
+    overRecordsWithoutNewline = false;
     const newDiscussion = {
       course_id: 2, module_id: 8, subject: "Week 3 office hours", message_html: "<p>Office hours move to Friday.</p>",
       learner_visibility_confirmed: true, expected_digest: forumDigest,

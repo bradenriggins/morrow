@@ -183,6 +183,7 @@ export async function executeMoodleForumReadInPage(rawInput) {
     }
     if (quoted) return null;
     if (field || row.length) { row.push(field); rows.push(row); }
+    if (rows.length > MAX_RECORDS + 1) return "limit";
     return rows;
   };
   const rows = parseCsv(data);
@@ -193,7 +194,8 @@ export async function executeMoodleForumReadInPage(rawInput) {
   const posts = [];
   for (const row of rows.slice(1)) {
     if (row.length !== rows[0].length) return failed("moodle_forum_export_csv_invalid");
-    const post = { id: id(row[header.get("id")]), discussion: id(row[header.get("discussion")]), parent: id(row[header.get("parent")]) || "0", author: { user_id: id(row[header.get("userid")]), name: row[header.get("userfullname")] }, created: Number(row[header.get("created")]), modified: Number(row[header.get("modified")]), subject: row[header.get("subject")], message: row[header.get("message")] };
+    const parent = row[header.get("parent")];
+    const post = { id: id(row[header.get("id")]), discussion: id(row[header.get("discussion")]), parent: parent === "0" || parent === "" ? "0" : id(parent), author: { user_id: id(row[header.get("userid")]), name: row[header.get("userfullname")] }, created: Number(row[header.get("created")]), modified: Number(row[header.get("modified")]), subject: row[header.get("subject")], message: row[header.get("message")] };
     if (!post.id || !post.discussion || !/^(?:0|[1-9][0-9]{0,18})$/.test(post.parent) || !post.author.user_id || !Number.isSafeInteger(post.created) || !Number.isSafeInteger(post.modified) || post.created < 0 || post.modified < 0 || typeof post.author.name !== "string" || typeof post.subject !== "string" || typeof post.message !== "string") return failed("moodle_forum_export_csv_invalid");
     posts.push(post);
   }

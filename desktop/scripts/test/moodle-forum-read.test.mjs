@@ -15,7 +15,7 @@ test("Moodle Forum reader uses only the native export download and preserves pri
   const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-forum-read-"));
   const key = join(directory, "key.pem"); const certificate = join(directory, "certificate.pem");
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", key, "-out", certificate], { stdio: "ignore" });
-  const requests = []; let origin = ""; let browser; let overRecords = false; let overBytes = false; let listDelayMs = 0; let forumsOverride = null;
+  const requests = []; let origin = ""; let browser; let overRecords = false; let overBytes = false; let listDelayMs = 0; let forumsOverride = null; let csvOverride = null;
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, async (request, response) => {
     const target = new URL(request.url || "/", origin);
     requests.push({ method: request.method, path: target.pathname, search: target.search });
@@ -34,6 +34,7 @@ test("Moodle Forum reader uses only the native export download and preserves pri
       const body = Buffer.concat(chunks).toString();
       assert.match(body, /name="id"\r\n\r\n8/); assert.match(body, /name="sesskey"\r\n\r\nprivate-session/); assert.match(body, /name="format"\r\n\r\ncsv/);
       response.setHeader("content-type", "text/csv");
+      if (csvOverride !== null) return response.end(csvOverride);
       if (overBytes) {
         response.write(csv([[101, 44, 0, 7, "Student Ñame", 1700000000, 1700000001, "Starter", "🙂".repeat(550_000)]]));
         return response.end();
@@ -79,6 +80,13 @@ test("Moodle Forum reader uses only the native export download and preserves pri
     assert.deepEqual(await run(undefined, Date.now() + 1_200), { ok: false, sent: false, error: "moodle_forum_export_context_changed" });
     assert.equal(exportRequests(), beforeLate);
     listDelayMs = 0;
+    for (const parent of ["invalid", "-1", "01", "9007199254740993x"]) {
+      csvOverride = csv([[101, 44, parent, 7, "Student Name", 1700000000, 1700000001, "Starter", "Body"]]);
+      assert.deepEqual(await run(), { ok: false, sent: false, error: "moodle_forum_export_csv_invalid" }, `invalid parent ${JSON.stringify(parent)} must not become a root post`);
+    }
+    csvOverride = csv(Array.from({ length: 10_001 }, (_, index) => [index + 1, 44, 0, 7, "Student Name", 1700000000, 1700000001, "Starter", "Body"])).trimEnd();
+    assert.deepEqual(await run(), { ok: false, sent: false, complete: false, error: "moodle_forum_export_incomplete" }, "record limit also applies without a final newline");
+    csvOverride = null;
     overRecords = true;
     assert.deepEqual(await run(), { ok: false, sent: false, complete: false, error: "moodle_forum_export_incomplete" });
     overRecords = false; overBytes = true;

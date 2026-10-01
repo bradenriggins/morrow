@@ -367,6 +367,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
     }
     if (quoted) return null;
     if (field || row.length) { row.push(field); rows.push(row); }
+    if (rows.length > MAX_FORUM_POSTS + 1) return "limit";
     return rows;
   };
   /**

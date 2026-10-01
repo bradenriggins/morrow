@@ -9124,14 +9124,51 @@ def _pagination_state(resp_headers):
 
 
 def _link_next_url(link_header):
-    for part in str(link_header or "").split(","):
-        segments = part.split(";")
-        rels = [seg.strip().lower().replace('"', "").replace("'", "")
-                for seg in segments[1:]]
-        if "rel=next" in rels:
-            match = re.match(r"\s*<([^>]+)>", segments[0])
-            if match:
-                return match.group(1)
+    source = str(link_header or "")
+    parts = []
+    start = 0
+    quoted = False
+    escaped = False
+    in_uri = False
+    # RFC 8288 delimiters inside a URI or quoted parameter are data.
+    for index, character in enumerate(source):
+        if escaped:
+            escaped = False
+        elif quoted and character == "\\":
+            escaped = True
+        elif not in_uri and character == '"':
+            quoted = not quoted
+        elif not quoted and character == "<":
+            in_uri = True
+        elif not quoted and character == ">":
+            in_uri = False
+        elif not quoted and not in_uri and character == ",":
+            parts.append(source[start:index])
+            start = index + 1
+    parts.append(source[start:])
+    parameter = re.compile(
+        r'''\s*;\s*([!#$%&'*+.^_`|~0-9A-Za-z-]+)\s*'''
+        r'''(?:=\s*("(?:[^"\\]|\\.)*"|[^\s;,"]+))?''')
+    for part in parts:
+        match = re.fullmatch(r"\s*<([^<>]+)>(.*)", part, re.DOTALL)
+        if not match:
+            continue
+        parameters = match.group(2)
+        position = 0
+        relation = None
+        while parameters[position:].strip():
+            item = parameter.match(parameters, position)
+            if not item:
+                relation = None
+                break
+            position = item.end()
+            if item.group(1).lower() == "rel" and relation is None:
+                value = item.group(2) or ""
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                relation = re.sub(r"\\(.)", r"\1", value).lower().split()
+        if relation and "next" in relation:
+            return match.group(1)
     return None
 
 
