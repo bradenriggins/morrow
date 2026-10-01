@@ -154,6 +154,7 @@ import stat
 import sys
 import threading
 import time
+import re
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -811,7 +812,9 @@ def _profile_has_cookies():
         except Exception:
             return True
     return False
-DEFAULT_BASE = os.environ.get("CANVAS_BASE", "")
+from config.tree_config import lms_base, lms_provider, normalize_lms_base
+
+DEFAULT_BASE = lms_base()
 # Large browser window: the helper UI renders this 1:1 up to CSS limits.
 VIEWPORT = (1600, 1000)
 
@@ -1183,6 +1186,8 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
 class HelperBrowser:
     """Owns one Chromium tab pointed at the tenant homepage."""
 
+    provider = "canvas"
+
     def __init__(self):
         proxy = (os.environ.get("https_proxy")
                  or os.environ.get("HTTPS_PROXY")
@@ -1199,13 +1204,23 @@ class HelperBrowser:
         self.tab = None  # the helper's primary tab (CDP tab dict)
         self.base_url = ""
         self._lock = threading.Lock()
+        self.provider = lms_provider()
+        self._session_probe_lock = threading.Lock()
+        self._session_probe_key = None
+        self._session_probe_checked = 0
+        self._session_probe_running = False
+        self._session_verified = False
+        self._session_state = "checking"
 
     def start(self, base_url):
         # P0-7: the tenant base is normalized to exactly scheme://netloc/
         # (paths, queries, and fragments discarded) and stored exactly that
         # way; status() uses a direct prefix check against it, so sibling
         # hostnames like tenant.instructure.com.evil.com can never match.
-        self.base_url = _normalize_tenant_base(base_url)
+        if self.provider == "canvas":
+            self.base_url = _normalize_tenant_base(base_url)
+        else:
+            self.base_url = normalize_lms_base(base_url, self.provider)
         # W6-P2-S3: cookie-expiry metadata read health. A failed CDP
         # read must surface as unknown/warning, never as a silent
         # "no warning".
@@ -1290,7 +1305,7 @@ class HelperBrowser:
             raise ValueError(
                 "refusing navigation target with no host; the helper's "
                 "browser goes to your Canvas sign-in only")
-        if self.base_url and not lc.is_tenant_url(url, self.base_url):
+        if self.base_url and not self._is_site_url(url):
             raise ValueError(
                 "refusing navigation off the Canvas tenant %s; the "
                 "helper's browser goes to your Canvas sign-in only" %
@@ -1385,7 +1400,11 @@ class HelperBrowser:
         # The /login check matches a path segment so legitimate pages like
         # /pages/login-help do not false-negative.
         on_tenant = bool(self.base_url) and href.startswith(self.base_url)
-        login_path = path == "/login" or path.startswith("/login/")
+        relative_path = path
+        if self.provider == "moodle":
+            prefix = urllib.parse.urlparse(self.base_url).path.rstrip("/")
+            relative_path = path[len(prefix):] if path.startswith(prefix + "/") else ""
+        login_path = relative_path == "/login" or relative_path.startswith("/login/")
         # W4-P2-18: no title check. document.title is page-controlled;
         # a hostile page could set an error title and flip logged_in.
         # logged_in rests on the tab's actual document URL only.
@@ -1395,6 +1414,10 @@ class HelperBrowser:
                      and not login_path
                      and href != "about:blank"
                      and not href.startswith("chrome-error://"))
+        session_verified = None
+        if self.provider == "moodle":
+            session_verified = self._moodle_session_status(href, logged_in)
+            logged_in = logged_in and session_verified
         # W2 (2026-09-21, proven live): document.title is page-controlled
         # text -- page JS can copy cookie values into it -- so the title
         # is NEVER read by status(): it is not probed, not returned, and
@@ -1408,7 +1431,11 @@ class HelperBrowser:
         # the query. W3-P2-6: the profile path abbreviates $HOME as ~.
         horizon_days = self._cookie_expiry_horizon_days()
         return {"url": _loggable_url(href) if href else "",
-                "canvas_origin": self.base_url.rstrip("/"),
+                "canvas_origin": self.base_url.rstrip("/") if self.provider == "canvas" else None,
+                "lms_provider": self.provider,
+                "lms_base": self.base_url.rstrip("/"),
+                "session_verified": session_verified,
+                "session_state": self._session_state if self.provider == "moodle" else None,
                 "logged_in": logged_in,
                 "chromium_alive": chromium_alive,
                 "starting": starting,
@@ -1442,7 +1469,59 @@ class HelperBrowser:
                 # W6-P2-A4: the pinned principal's display name, so the
                 # UI shows WHO is signed in. Null when no session is
                 # pinned yet.
-                "principal_name": _educator_principal_name()}
+                "principal_name": _educator_principal_name() if self.provider == "canvas" else None}
+
+    def _moodle_session_status(self, href, eligible):
+        with self._session_probe_lock:
+            if not eligible or self._session_probe_key != href:
+                self._session_probe_key = href if eligible else None
+                self._session_probe_checked = 0
+                self._session_verified = False
+                self._session_state = "checking" if eligible else "signing_in"
+            if not eligible:
+                if urllib.parse.urlparse(href).path.startswith(
+                        urllib.parse.urlparse(self.base_url).path.rstrip("/") + "/login/"):
+                    self._session_state = "signed_out"
+                return False
+            if self._session_probe_running:
+                return self._session_verified
+            if time.monotonic() - self._session_probe_checked < 10:
+                return self._session_verified
+            self._session_probe_running = True
+            self._session_verified = False
+            self._session_state = "checking"
+
+        def verify():
+            verified = False
+            state = "unavailable"
+            try:
+                from moodle.browser_transport import _BROWSER_READ
+                context = self.cdp.create_isolated_world(self.tab, "morrow_moodle_helper_status")
+                raw = self.cdp.evaluate(self.tab, _BROWSER_READ % json.dumps({
+                    "mode": "discover_identity", "base": self.base_url.rstrip("/")}),
+                    context_id=context, await_promise=True, timeout=30)
+                result = json.loads(raw)
+                data = result.get("data", {})
+                principal = data.get("id")
+                verified = (result.get("ok") is True
+                            and data.get("site_url") == self.base_url.rstrip("/")
+                            and isinstance(principal, str)
+                            and re.fullmatch(r"[1-9][0-9]*", principal) is not None
+                            and int(principal) <= 9007199254740991)
+                state = "verified" if verified else (
+                    "signed_out" if result.get("error") == "session_unavailable" else "unavailable")
+            except Exception:
+                pass
+            finally:
+                with self._session_probe_lock:
+                    if self._session_probe_key == href:
+                        self._session_verified = verified
+                        self._session_state = state
+                        self._session_probe_checked = time.monotonic()
+                    self._session_probe_running = False
+
+        threading.Thread(target=verify, daemon=True).start()
+        return False
 
     def screenshot(self):
         # W5-P2-5: CDP.call owns its connection on the private
@@ -1657,7 +1736,20 @@ class HelperBrowser:
         Fails closed when no tenant is configured."""
         if url == "about:blank":
             return True
-        return bool(self.base_url) and lc.is_tenant_url(url, self.base_url)
+        return self._is_site_url(url)
+
+    def _is_site_url(self, url):
+        if not self.base_url or not lc.is_tenant_url(url, self.base_url):
+            return False
+        if self.provider != "moodle":
+            return True
+        try:
+            path = urllib.parse.unquote(urllib.parse.urlsplit(url).path, errors="strict")
+            prefix = urllib.parse.urlsplit(self.base_url).path.rstrip("/")
+            return ("\\" not in path and not any(part in (".", "..") for part in path.split("/"))
+                    and (path == prefix or path.startswith(prefix + "/")))
+        except (ValueError, UnicodeError):
+            return False
 
     def cdp_proxy_call(self, target_id, method, params, timeout):
         if method not in _CDP_PROXY_ALLOWLIST:
@@ -2469,7 +2561,7 @@ def main():
     global BROWSER
     base = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BASE).rstrip("/")
     if not base:
-        print("ERROR: no Canvas tenant. Set CANVAS_BASE or pass the base URL, e.g.",
+        print("ERROR: no LMS address. Set CANVAS_BASE or MOODLE_BASE in helper/env.",
               file=sys.stderr)
         print("  CANVAS_BASE=https://myschool.instructure.com python3 helper/server.py",
               file=sys.stderr)

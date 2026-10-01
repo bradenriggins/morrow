@@ -268,6 +268,25 @@ def _doctor(json_mode=False):
                      % (logged_in, alive))
         facts["helper"] = {"reachable": True, "logged_in": logged_in,
                             "chromium_alive": alive}
+        from config import tree_config
+        if tree_config.lms_provider() == "moodle":
+            expected = tree_config.normalize_lms_base(tree_config.lms_base(), "moodle").rstrip("/")
+            profile = payload.get("profile_dir")
+            wanted_profile = tree_config.setting("LOGIN_HELPER_PROFILE_DIR",
+                os.path.join(DEPLOY_DIR, "helper", "profile"))
+            with open(os.path.join(DEPLOY_DIR, "VERSION"), encoding="utf-8") as version_file:
+                version = version_file.read().strip()
+            identity_ok = (payload.get("lms_provider") == "moodle"
+                           and payload.get("lms_base") == expected
+                           and payload.get("helper_version") == version
+                           and isinstance(profile, str)
+                           and os.path.realpath(os.path.expanduser(profile)) == os.path.realpath(wanted_profile))
+            verified = identity_ok and payload.get("session_verified") is True
+            facts["helper"].update(lms_provider="moodle", lms_base=expected,
+                identity_verified=identity_ok, session_verified=verified,
+                session_state=payload.get("session_state"))
+            if not verified:
+                ok = False
         if not (logged_in and alive):
             ok = False
     except Exception as exc:

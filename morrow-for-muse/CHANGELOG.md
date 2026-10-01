@@ -1,5 +1,19 @@
 # Changelog
 
+## Release hardening: Moodle helper provider setup
+
+- Select Canvas or Moodle in the installed tree's helper configuration.
+  Preserve Moodle site paths and refuse navigation to sibling sites or
+  traversal paths.
+- Verify Moodle sessions inside installed Chromium, including Moodle 4.1
+  own-profile identity. Separate guest, sign-in, pending, and unavailable
+  states. Keep verification off the typing path.
+- Support Moodle in installer launch, keepalive, doctor, and private card
+  instructions while retaining Canvas setup and recovery behavior.
+- Keep the web helper header in view when keyboard focus starts. Use LMS
+  sign-in wording. Native owner-card qualification and ordered web-client
+  input remain required before publication.
+
 ## Release hardening: governed Moodle command path
 
 - Pair an installed-Chromium Moodle account once with automatic educator

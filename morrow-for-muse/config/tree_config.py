@@ -92,6 +92,35 @@ def canvas_base():
     return (setting("CANVAS_BASE") or "").strip().rstrip("/")
 
 
+def lms_provider():
+    explicit = (setting("MORROW_LMS_PROVIDER") or "").strip().lower()
+    if explicit and explicit not in ("canvas", "moodle"):
+        raise ValueError("MORROW_LMS_PROVIDER must be canvas or moodle")
+    canvas = canvas_base()
+    moodle = (setting("MOODLE_BASE") or "").strip()
+    if not explicit and canvas and moodle:
+        raise ValueError("Both LMS addresses are set. Select MORROW_LMS_PROVIDER=canvas or moodle")
+    return explicit or ("moodle" if moodle else "canvas")
+
+
+def lms_base():
+    name = "MOODLE_BASE" if lms_provider() == "moodle" else "CANVAS_BASE"
+    value = (setting(name) or "").strip().rstrip("/")
+    if any(ord(char) < 32 for char in value):
+        raise ValueError("LMS address must not contain control characters")
+    return value
+
+
+def normalize_lms_base(base_url, provider=None):
+    provider = provider or lms_provider()
+    if provider == "canvas":
+        return normalize_tenant_base(base_url)
+    if provider != "moodle":
+        raise ValueError("Unknown LMS provider")
+    from moodle.contracts import normalize_moodle_base
+    return normalize_moodle_base(base_url) + "/"
+
+
 def int_setting(name, default):
     """An integer setting, or default when it is unset or not a number."""
     try:

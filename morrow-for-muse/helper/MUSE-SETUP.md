@@ -1,9 +1,22 @@
-# Private Canvas sign-in in Muse
+# Private LMS sign-in in Muse
 
 The helper runs inside the Muse VM. Its `127.0.0.1` address does not
 refer to that VM when opened directly on the educator's Mac or phone.
 Show the educator a private Muse artifact card with remote browser
 controls. Do not send a bare localhost address as the Muse setup path.
+
+Select the LMS in the installed tree's private `helper/env`. Canvas uses
+`CANVAS_BASE`; Moodle uses `MORROW_LMS_PROVIDER=moodle` and `MOODLE_BASE`.
+Keep a Moodle site path such as `/moodle`. Run `bash install.sh` to validate
+the address and start this tree's helper. Do not configure another tree or
+reuse its profile, port, or card. With both addresses present, set the provider
+explicitly. The assistant handles these steps; the educator only signs in.
+
+For Moodle, require the exact `/status.lms_provider` and `/status.lms_base`,
+then `session_verified=true`. A running browser or site URL alone is not a
+verified session. After sign-in, run `bin/morrow moodle pair --site SITE` once
+and `bin/morrow moodle status --site SITE`. A different educator cannot replace
+that pairing. Course selection happens through conversation after setup.
 
 ## Platform boundary
 
@@ -46,14 +59,14 @@ initial zoom; shared package code must not embed one account's values.
    repair message. A Chrome error page or blank page is not a usable
    sign-in page, even when Chromium is alive. Show the connection error
    and a retry control. Do not show a stale frame as connected.
-   Compare `/status.canvas_origin` with the configured Canvas origin, including
+   For Canvas, compare `/status.canvas_origin` with the configured Canvas origin, including
    scheme and port. Keep that identity separate from the current page URL:
    Canvas can redirect sign-in to an external HTTPS school identity provider.
    Show its current host without counting it as signed-in Canvas. A missing or
    mismatched configured origin blocks controls and requires update or repair.
 4. Proxy only the sign-in controls through private native artifact
    actions: status, screenshot, ordered input batches, mouse, wheel, and navigation to the
-   configured Canvas address. Use the installed
+   configured LMS address. Use the installed
    `transport.local_chromium._helper_request` on the server side. It
    supplies the helper authentication from the protected tree state.
    Never send a launch token to the artifact client, arguments, chat,
@@ -61,6 +74,7 @@ initial zoom; shared package code must not embed one account's values.
    or arbitrary HTTP forwarding as an artifact action.
    Open Canvas returns to the configured Canvas origin root so the school's
    normal SSO flow runs. Do not force the local-password `/login/canvas` route.
+   Open Moodle returns to its configured site root, including its path.
 5. Use the [input batch contract](README.md#ordered-private-input). Coalesce
    ordinary text briefly and send it once with `Input.insertText`; paired
    control keys are ordered on the server. Coalesce unsent text while a native
