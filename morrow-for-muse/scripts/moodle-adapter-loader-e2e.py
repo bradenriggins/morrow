@@ -28,6 +28,7 @@ RESTART_PROOF = "--process-restart-proof" in sys.argv[4:]
 PREFLIGHT_PROOF = "--preflight-proof" in sys.argv[4:]
 LABEL_PROOF = "--learner-approval-proof" in sys.argv[4:]
 CLI_PROOF = "--public-cli-proof" in sys.argv[4:]
+COURSE_NAME_PROOF = "--masked-course-plan-proof" in sys.argv[4:]
 if CLI_PROOF:
     sys.path.remove(str(TREE))
     TREE = Path(os.environ['MORROW_CLI_TEST_TREE']).resolve()
@@ -37,6 +38,7 @@ fixture_mode = 'modern'
 effect_mode = 'normal'
 effects = 0
 section_name = 'Welcome'
+course_name = 'Fixture course'
 learner_row = {'id': 17, 'name': 'Aster Sample', 'email': 'aster@example.test'}
 provider_state = {'course': {'id': 2, 'fullname': 'Fixture course'},
                   'section': [{'id': 10, 'number': 0, 'visible': True, 'hasrestrictions': False, 'component': None, 'cmlist': [19]}],
@@ -85,8 +87,9 @@ class Fixture(BaseHTTPRequestHandler):
             native_login = 123457 if '/user/index.php' in self.path and fixture_mode == 'legacy41_native_wrong_login' else 123456
             footer = "<script>require(['core/storage_validation'], function(amd) {amd.init(%d);});</script>" % native_login
         body_id = 'page-user-profile' if '/user/profile.php' in self.path else 'page-course-view'
-        content = ('<!doctype html><body id="%s" class="course-%s"><h1>Fixture course</h1><script>M.cfg=%s;</script>%s</body>' %
-                   (body_id, cfg['courseId'] if course_page else 2, json.dumps(cfg), footer)).encode()
+        import html
+        content = ('<!doctype html><body id="%s" class="course-%s"><h1>%s</h1><script>M.cfg=%s;</script>%s</body>' %
+                   (body_id, cfg['courseId'] if course_page else 2, html.escape(course_name), json.dumps(cfg), footer)).encode()
         if '/course/editsection.php' in self.path:
             import html
             form = '<form method="post" action="%s/course/editsection.php?id=10"><input type="hidden" name="id" value="10"><input type="hidden" name="course" value="2"><input type="hidden" name="sesskey" value="DUMMY_BROWSER_ONLY"><input name="name" value="%s"><textarea name="summary_editor[text]">Overview</textarea><input type="hidden" name="summary_editor[format]" value="1"><input type="submit" name="submitbutton" value="Save changes"></form>' % (base, html.escape(section_name, quote=True))
@@ -517,6 +520,36 @@ print(json.dumps({'replay_refused':result.get('ok') is False,'journal_unchanged'
                 check(mode + '_new_process_no_effect', effects == before_effects)
         check('all_governed_outputs_secret_free', 'DUMMY_BROWSER_ONLY' not in json.dumps([read_result, write_result, record]))
         report['fixture_effects'] = effects
+        if COURSE_NAME_PROOF:
+            fixture_mode = 'modern'
+            effect_mode = 'normal'
+            course_name = 'Course for Aster Sample'
+            provider_state['course']['fullname'] = course_name
+            current = dispatcher.dispatch(read_key, {'course_id': 2}, op_id=str(uuid.uuid4()))
+            args = {'course_id': 2, 'module_id': 19, 'expected_digest': current['snapshot_digest']}
+            op_id = str(uuid.uuid4())
+            plan = dispatcher.plan(hide_key, args, op_id=op_id)
+            check('course_plan_name_privacy_projected', plan.target_identity['course_name'] == 'Course for Student A1')
+            approval = sign_approval(mint_approval(dispatcher.descriptor(hide_key, args), args, base, target_identity=plan.target_identity), 'Change this disposable activity.', channel='driver')
+            before_effects = effects
+            result = dispatcher.dispatch(hide_key, args, op_id=op_id, plan=plan, approval=approval, require_educator_channel=False)
+            check('approved_masked_course_write_verified', result.get('ok') is True and result.get('verification', {}).get('status') == 'verified')
+            check('approved_masked_course_write_one_effect', effects == before_effects + 1)
+            current = dispatcher.dispatch(read_key, {'course_id': 2}, op_id=str(uuid.uuid4()))
+            args = {**args, 'expected_digest': current['snapshot_digest']}
+            op_id = str(uuid.uuid4())
+            plan = dispatcher.plan(hide_key, args, op_id=op_id)
+            approval = sign_approval(mint_approval(dispatcher.descriptor(hide_key, args), args, base, target_identity=plan.target_identity), 'Change this disposable activity.', channel='driver')
+            course_name = 'Changed course for Aster Sample'
+            before_effects = effects
+            result = dispatcher.dispatch(hide_key, args, op_id=op_id, plan=plan, approval=approval, require_educator_channel=False)
+            check('changed_masked_course_target_refused', result.get('ok') is False)
+            check('changed_masked_course_target_no_effect', effects == before_effects)
+            course_name = 'Course for Aster Sample'
+            result = dispatcher.dispatch(hide_key, args, op_id=op_id, plan=plan, approval=approval, require_educator_channel=False)
+            check('restored_masked_course_target_same_approval_verified', result.get('ok') is True and result.get('verification', {}).get('status') == 'verified')
+            check('restored_masked_course_target_one_effect', effects == before_effects + 1)
+            report['fixture_effects'] = effects
         if LABEL_PROOF:
             fixture_mode = 'modern'
             effect_mode = 'normal'
