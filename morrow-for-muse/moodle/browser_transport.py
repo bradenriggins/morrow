@@ -128,7 +128,8 @@ _BROWSER_READ = r"""(async () => {
         operationConfig = course.cfg;
       }
       if (location.href !== href) return fail('session_unavailable');
-      const prepared = Object.freeze({...operationConfig, userId, currentlogin: currentLogin});
+      const prepared = Object.freeze({...operationConfig, userId, currentlogin: currentLogin,
+        morrowPrincipalFromOwnProfile: !Object.hasOwn(cfg, 'userId')});
       Object.defineProperty(globalThis, 'M', {value: Object.freeze({cfg: prepared}), configurable: false});
       return JSON.stringify({ok: true, data: {id: String(userId), site_url: input.base,
         course_id: input.course_id || null}});
