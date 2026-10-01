@@ -492,6 +492,10 @@
     {
       "version": "1.0.128",
       "releaseManifestSha256": "030a45f2890d702e92c934de07214f498df4b9c39441aebe1feca2d630144940"
+    },
+    {
+      "version": "1.0.129",
+      "releaseManifestSha256": "1441eaab18bc9ca9142b1973f21b2a95fb2685f8ed7133392feefd92800049dc"
     }
   ]
 }
