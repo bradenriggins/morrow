@@ -296,6 +296,26 @@ def _doctor(json_mode=False):
                             "error": "%s: %s" % (type(exc).__name__, exc)}
         ok = False
 
+    # 1b. Account pin: reads run unpinned, but writes refuse until the
+    # account is pinned (FIRST_RUN step 3). A live session without a
+    # pin is not a failure, but saying only "healthy" hides it.
+    try:
+        from transport import state as _lane_state
+        record = _lane_state.load()
+        principal = (record or {}).get("canvas", {}).get("principal") or {}
+        if principal.get("id") is not None:
+            lines.append("pin: pinned (%s)" % principal.get("name", "?"))
+            facts["pin"] = {"pinned": True,
+                            "name": principal.get("name", "?")}
+        else:
+            lines.append("pin: MISSING (reads run; writes refuse until "
+                         "the account is pinned: FIRST_RUN step 3)")
+            facts["pin"] = {"pinned": False}
+    except Exception as exc:
+        lines.append("pin: UNREADABLE (%s: %s)"
+                     % (type(exc).__name__, exc))
+        facts["pin"] = {"pinned": False, "error": str(exc)}
+
     # 2. Tree sanity: the files every command needs must exist and parse.
     for rel in ("VERSION", "failures/catalog.json"):
         path = os.path.join(DEPLOY_DIR, rel)

@@ -29,7 +29,9 @@ RETENTION STATEMENT (simple, no expiry heuristics):
 - Learner names (and the other PII_FIELDS) live at rest in exactly one
   place: ~/.morrow/learner_vault/map.jsonl (0600, inside a 0700 dir),
   keyed by token, namespaced by tenant. The token secret lives beside it
-  in secret.key (0600).
+  in secret.key (0600). The map is integrity-sealed (HMAC), not
+  encrypted: confidentiality at rest comes from the file permissions.
+  Only the per-conversation name echo is AES-256-GCM encrypted.
 - They die when the educator kills them, two ways:
   1. Per-tenant purge: `python3 -m privacy.learner_vault purge --tenant
      <tenant>` drops every record for that tenant. Tokens already handed

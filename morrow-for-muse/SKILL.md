@@ -1,6 +1,6 @@
 # Morrow for Muse: Canvas connector and Moodle module (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.4.8. Canvas and Moodle operations use
+You are operating the Morrow for Muse connector, v0.4.9. Canvas and Moodle operations use
 the VM's installed Chromium and the educator's browser-owned session.
 The private native helper is the sign-in surface. Never ask for, print,
 log, or store a password, cookie, sesskey, or token.
@@ -112,7 +112,11 @@ helper endpoint from `config.tree_config`, not a hardcoded port. Show the
 private sign-in helper for first onboarding or verified reauthentication.
 `logged_in=false` alone does not prove expiry: inspect page/network state,
 profile identity, and the supported users/self read. A healthy session needs
-no sign-in page. See `knowledge/troubleshooting-playbook.md`.
+no sign-in page. See `knowledge/troubleshooting-playbook.md`. When `doctor`
+reports `session_expiry_warning` true, tell the educator before starting
+work: their sign-in expires within days (name the horizon) and they will
+need to sign in again soon. Never let the first sign of expiry be a
+failed task.
 
 1. Write the educator's Canvas address to the tree's `helper/env` as
    `CANVAS_BASE=https://...` (e.g. `https://myschool.instructure.com`),
@@ -271,13 +275,20 @@ run stops loudly instead of writing through a half-dead session:
    the educator's approval) and clears it. Tell the educator what it
    says in plain words. With nothing waiting, resume clears the notice
    itself and `notify` prints that none is pending.
-5. **Per-op re-approval.** Each quarantined op needs the educator's
-   explicit approval (`reauth/state_machine.py approve --op-id <id>
-   --authorization "<educator's verbatim approval words>"`; the
-   authorization is required, the agent cannot self-approve, W6-P2-A5)
-   before it may be re-dispatched; the executor refuses quarantined and
-   awaiting-approval ops. Ops never approved stay quarantined forever.
-   Nothing auto-resumes, ever. A Plan-mode write (plan-write and
+5. **Re-approval.** Each quarantined op needs the educator's
+   explicit approval before it may be re-dispatched; the executor
+   refuses quarantined and awaiting-approval ops. Ops never approved
+   stay quarantined forever. Nothing auto-resumes, ever. Read back
+   every paused change first, then take one of two paths. Per op:
+   `reauth/state_machine.py approve --op-id <id> --authorization
+   "<educator's verbatim approval words>"`. Whole batch:
+   `reauth/state_machine.py approve --all-awaiting --authorization
+   "<educator's verbatim approval words>"` approves every change in
+   awaiting_approval at once; the educator's reply must name the
+   paused batch in their own words (repeat the count and the changes
+   back first). The authorization is required on both paths, the agent
+   cannot self-approve (W6-P2-A5), and a denial approves nothing.
+   A Plan-mode write (plan-write and
    approve-write) is retried as a new write instead: after `resume`,
    run plan-write again for the same change, show the educator the new
    `approval_display`, and ask them to approve it. approve-write on the
@@ -361,8 +372,8 @@ a frozen plan, an approval record, or a course resolution by hand:
 3. When the educator approves, in any words ("Yes" is enough), run
    `approve-write` with their reply verbatim. It signs that reply, then
    sends the write through every gate and prints the result. An
-   approval is single use and expires (at most 24 hours; plan-write
-   sets 1 hour). If the educator declines or changes anything, run
+   approval is single use and expires after 24 hours. If the educator
+   declines or changes anything, run
    `plan-write` again with the new request. A prepared write that is
    never approved is deleted when it expires, and every purge deletes
    prepared writes and approval records.

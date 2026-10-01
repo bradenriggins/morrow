@@ -31,7 +31,11 @@ before every Morrow shell command. Expected:
 ## 2. Connect Canvas (conversational)
 
 1. Educator says "Connect my Canvas account."
-2. Agent shows `content/consent.md` and waits for agreement.
+2. Agent speaks a short summary first (what Morrow can do, where the
+   sign-in stays, that the school network may read traffic, how to
+   disconnect), then shows `content/consent.md` whole and waits for
+   agreement. Never skip the full page: the summary prepares, it does
+   not replace.
 3. Agent asks for the school's Canvas URL only if it cannot determine
    it safely; confirms it with the educator otherwise.
 4. Agent writes `CANVAS_BASE=<address>` to the tree's `helper/env`
@@ -51,15 +55,18 @@ before every Morrow shell command. Expected:
    on their own device. The educator signs in on the login helper page, exactly as they
    normally would, including MFA. The agent never sees the password.
 2. Agent verifies immediately and pins the account:
-   `python3 reauth/state_machine.py pin --first-signin`. It checks the
-   helper `/status` shows a live session, reads GET
+   `PYTHONDONTWRITEBYTECODE=1 python3 reauth/state_machine.py pin --first-signin`.
+   It checks the helper `/status` shows a live session, reads GET
    /api/v1/users/self, and pins that principal id and name into the
    lane state (`~/.morrow/browser_lane.json`). Confirm the printed
    name with the educator. (keepalive also runs this on its first
    healthy tick, so a pin exists even if this step is skipped.) A
-   failure here means the sign-in did not stick: ask once more, then
-   stop and report. Later re-sign-ins lift the pause on changes only
-   for this pinned account.
+   failure here means the sign-in did not stick: say "Your sign-in did
+   not stick, so nothing is connected yet. Please sign in once more on
+   the helper page, exactly as you normally would, and tell me when you
+   are done." If the second pin also fails, stop and report the helper
+   `/status` output to the operator. Later re-sign-ins lift the pause
+   on changes only for this pinned account.
 3. The sign-in notice stops repeating only when a genuinely
    authenticated session with stored cookies is confirmed
    (`logged_in=true`, `profile_has_cookies=true`).

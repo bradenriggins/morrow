@@ -171,7 +171,7 @@ plan-mode approval path.
   `AmbiguousCourseWriteRefused`.
 - Destructive writes (HTTP DELETE, or entries explicitly marked
   destructive) in edit mode: when the educator's
-  `confirm_destructive_writes` setting is on (off by default), the write is
+  `confirm_destructive_writes` setting is on (on by default), the write is
   refused as `DestructiveConfirmationRequired` unless `mode_ctx`
   carries `destructive_confirmed` with the educator's verbatim yes.
   When the setting is off, destructive writes proceed under edit

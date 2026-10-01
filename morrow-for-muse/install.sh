@@ -1287,14 +1287,17 @@ else:
           "================================================================" \
           "SIGN-IN NEEDED (this notice repeats until you are signed in)" \
           "" \
-          "The helper is running. Ask your agent for a one-time sign-in" \
-          "link and open THAT (it reaches http://127.0.0.1:${HELPER_PORT}/;" \
-          "the bare address loads no token, each link works once), then" \
-          "sign in to ${LMS_PROVIDER} yourself, SSO and MFA included." \
+          "The helper is running. Ask your agent to show the private" \
+          "sign-in card (Muse shows it inside the chat) or a one-time" \
+          "sign-in link, and open THAT. It reaches the helper at" \
+          "http://127.0.0.1:${HELPER_PORT}/; the bare address loads no" \
+          "token, and each card or link works once. Then sign in to" \
+          "${LMS_PROVIDER} yourself, SSO and MFA included." \
           "" \
           "If your school offers \"Stay signed in\" or \"Remember me\", leave it ON. That" \
           "is what keeps your session alive across helper and machine" \
-          "restarts, so this is the only sign-in. Your agent never sees" \
+          "restarts. Sessions still expire: when yours does, sign in" \
+          "again the same way. Your agent never sees" \
           "your password: keystrokes go straight into the page." \
           "================================================================"
       else

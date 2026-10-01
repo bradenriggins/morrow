@@ -172,6 +172,24 @@ def scrub_secrets(text) -> str:
     return scrubbed
 
 
+_EMAIL_RE = re.compile(
+    r"[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+
+
+def scrub_pii(text) -> str:
+    """Mask learner-PII shapes inside agent-visible detail text.
+
+    Email addresses lose their local part but keep the domain, so a
+    throw site that interpolates "no user jane@school.edu" reads "no
+    user [redacted]@school.edu": routable for debugging, naming no
+    one. Bare names cannot be scrubbed without roster context; throw
+    sites must stay PII-free by discipline (see dispatch/executor.py).
+    """
+    if not isinstance(text, str) or not text:
+        return text if isinstance(text, str) else ""
+    return _EMAIL_RE.sub(r"[redacted]@\1", text)
+
+
 def _evidence_summary(evidence: dict, limit=_EVIDENCE_LIMIT) -> str:
     """Compact agent-visible evidence summary: structural keys only.
 
@@ -220,8 +238,8 @@ def _payload(operation, translated, raw_error) -> dict:
         "next_step": translated.next_step,
         "auto_action": translated.auto_action,
         "escalate": bool(translated.escalate),
-        "engineering_detail": _detail_label(raw_error) + scrub_secrets(
-            _raw_text(raw_error, _ENGINEERING_LIMIT)),
+        "engineering_detail": _detail_label(raw_error) + scrub_pii(
+            scrub_secrets(_raw_text(raw_error, _ENGINEERING_LIMIT))),
     }
 
 
@@ -245,8 +263,8 @@ def _degraded_payload(operation, raw_error) -> dict:
         "auto_action": ("Park the op; never blind-retry; give the "
                         "educator the support address."),
         "escalate": True,
-        "engineering_detail": _detail_label(raw_error) + scrub_secrets(
-            _raw_text(raw_error, _ENGINEERING_LIMIT)),
+        "engineering_detail": _detail_label(raw_error) + scrub_pii(
+            scrub_secrets(_raw_text(raw_error, _ENGINEERING_LIMIT))),
     }
 
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.9 (unreleased)
+
+The `morrow-muse-connector-0.4.9.zip` package is not published yet.
+Build the candidate from committed source as described in
+`INSTALL.md`.
+
+### Adversarial audit fixes
+
+- Ask before destructive writes by default, even in edit mode.
+- Re-approve a whole dead batch with one verbatim authorization.
+- Plan-write approvals last 24 hours instead of 1 hour.
+- Surface session-expiry warnings to the educator before sign-in dies.
+- Approval displays open with plain words; the full payload still follows.
+- Purge accounting states in-flight retention honestly.
+- Setup, consent, and guide copy corrected and de-duplicated.
+
 ## 0.4.8 (2026-10-01)
 
 Install `morrow-muse-connector-0.4.8.zip` from the `muse/v0.4.8`

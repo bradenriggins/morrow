@@ -162,3 +162,24 @@ def test_failure_labels_for_batch_changes_are_plain():
     assert approval_display.describe_operation(
         "PUT", "/api/v1/courses/{id}", 'the course "Bio 101"') \
         == 'changing the course "Bio 101"'
+
+
+def test_html_body_adds_readable_line_and_keeps_raw_whole():
+    body = {"wiki_page": {"title": "Week 2",
+                          "body": "<p>Hello <b>class</b>, read &amp; reply.</p>"}}
+    record = mint_approval(_entry(body), PARAMS, BASE,
+                           target_identity=TARGET)
+    text = approval_display.render_educator_display(record, PARAMS,
+                                                    entry=_entry(body))
+    assert "Content: <p>Hello <b>class</b>, read &amp; reply.</p>" in text
+    assert "Reads as: Hello class, read & reply." in text
+
+
+def test_plain_values_gain_no_reads_as_line():
+    body = {"assignment": {"name": "Essay 1", "points_possible": 10,
+                           "due_at": "2026-10-01T23:59:00Z"}}
+    record = mint_approval(_entry(body), PARAMS, BASE,
+                           target_identity=TARGET)
+    text = approval_display.render_educator_display(record, PARAMS,
+                                                    entry=_entry(body))
+    assert "Reads as:" not in text

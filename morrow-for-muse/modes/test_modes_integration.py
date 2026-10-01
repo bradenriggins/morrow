@@ -280,10 +280,16 @@ class IntegrationCase(unittest.TestCase):
                                         self._ctx())
         self.assertEqual(audit["mode"], "edit")
 
-    def test_destructive_write_default_no_confirmation(self):
-        # Default (Braden's model): edit mode does not ask per write,
-        # including destructive writes.
+    def test_destructive_write_default_requires_confirmation(self):
+        # Default: destructive writes in edit mode need the educator's
+        # verbatim yes unless they turned confirmations off.
         self._grant()
+        with self.assertRaises(mode_errors.DestructiveConfirmationRequired):
+            check_mode_authority(self._delete_entry(),
+                                 {"course_id": "89585"}, None,
+                                 self._ctx())
+        settings.set_setting(self.user, "confirm_destructive_writes",
+                             False, educator_confirmed=True)
         audit, _ = check_mode_authority(self._delete_entry(),
                                         {"course_id": "89585"}, None,
                                         self._ctx())

@@ -218,14 +218,15 @@ SETTINGS_SCHEMA = {
             "with you."),
     },
     "confirm_destructive_writes": {
-        "default": False,
+        "default": True,
         "validate": _bool_validator,
         "consequential": True,
         "description": (
             "When true, deletes ask for confirmation even in edit "
-            "mode. Defaults to false: edit mode does not ask per "
-            "write; that is the entire difference from plan mode. Turn "
-            "it on only if you want the extra guardrail."),
+            "mode. Defaults to true: a delete is refused as "
+            "DestructiveConfirmationRequired unless the request "
+            "carries the educator's verbatim yes. Turn it off only "
+            "if you accept silent deletes."),
     },
     "failure_verbosity": {
         "default": "detailed",

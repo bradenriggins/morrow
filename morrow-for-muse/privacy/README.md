@@ -10,8 +10,9 @@ read-only sources; nothing was modified there.
 
 ## Files
 
-- `core.py`: exact learner scopes, canonical JSON, AES-256-GCM
-  learner vault, persistent encrypted mappings, exact-scope roster,
+- `core.py`: exact learner scopes, canonical JSON, HMAC-sealed
+  learner vault (AES-256-GCM name echo), persistent sealed mappings,
+  exact-scope roster,
   alias machinery (full-name, given-name, reversed forms),
   Unicode/HTML-entity/percent-escape-aware matching, structural
   egress redaction, write-direction label resolution, secure
@@ -78,7 +79,7 @@ byte-identical; the selftest pins both directions.
 `dispatch_entry`'s success path (and every verification detail and
 failure-journal receipt) through
 `executor_wire.project_learner_result`. People-bearing operations
-dispatch only on the Chromium lane with the encrypted vault; the raw
+dispatch only on the Chromium lane with the sealed vault; the raw
 HTTPS lane, and any lane without `cryptography`, refuses them
 (`LearnerDataGated`). `transport/browser_backend.py::_project_learner_result`
 delegates to the same function for the proof-battery lane. Working by

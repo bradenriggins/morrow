@@ -342,3 +342,51 @@ def test_every_hint_names_the_command_as_bin_morrow(cli, capsys, argv,
              if line.lstrip().startswith("usage:")]
     assert all(re.match(r"\s*usage:\s+bin/morrow\b", line)
                for line in usage), usage
+
+
+def _stub_helper(monkeypatch, cli, logged_in=True, alive=True):
+    monkeypatch.setattr(
+        cli.urllib.request, "urlopen",
+        lambda url, timeout=10: _FakeResp(
+            {"logged_in": logged_in, "chromium_alive": alive}))
+
+
+def _pin_state(monkeypatch, tmp_path, principal):
+    from transport import state as lane_state
+    path = tmp_path / "browser_lane.json"
+    if principal is not None:
+        path.write_text(json.dumps(
+            {"canvas": {"base": "https://x.instructure.com",
+                        "principal": principal,
+                        "lane": "browser_task"}}),
+                        encoding="utf-8")
+        os.chmod(path, 0o600)
+    monkeypatch.setattr(lane_state, "STATE_PATH", str(path))
+
+
+def test_doctor_names_missing_pin_without_failing(cli, monkeypatch, capsys,
+                                                  tmp_path):
+    # A live session without a pin reads fine but refuses writes; doctor
+    # must say so instead of reading only "healthy".
+    _stub_helper(monkeypatch, cli)
+    _pin_state(monkeypatch, tmp_path, None)
+    assert cli.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "pin: MISSING" in out
+    assert "FIRST_RUN step 3" in out
+
+
+def test_doctor_names_pinned_account(cli, monkeypatch, capsys, tmp_path):
+    _stub_helper(monkeypatch, cli)
+    _pin_state(monkeypatch, tmp_path, {"id": 7, "name": "Test Educator"})
+    assert cli.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "pin: pinned (Test Educator)" in out
+
+
+def test_doctor_json_carries_pin_fact(cli, monkeypatch, capsys, tmp_path):
+    _stub_helper(monkeypatch, cli)
+    _pin_state(monkeypatch, tmp_path, None)
+    assert cli.main(["doctor", "--json"]) == 0
+    facts = json.loads(capsys.readouterr().out)
+    assert facts["pin"] == {"pinned": False}
