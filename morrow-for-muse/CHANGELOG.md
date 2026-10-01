@@ -1,11 +1,10 @@
 # Changelog
 
-## 0.4.8 (unreleased)
+## 0.4.8 (2026-10-01)
 
-The `morrow-muse-connector-0.4.8.zip` package is not published yet.
-Native Muse onboarding and live Canvas/Moodle qualification must pass before
-publication. Build the candidate from committed source as described in
-`INSTALL.md`.
+Install `morrow-muse-connector-0.4.8.zip` from the `muse/v0.4.8`
+release and verify it with `SHA256SUMS` before unzipping, as described
+in `INSTALL.md`.
 
 ### Release hardening: browser site identity
 
