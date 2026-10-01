@@ -38,6 +38,20 @@
     form.append(input);
   };
 
+  // A signing failure names its cause: no answer (the worker is gone),
+  // a missing key (the connection restarted or the review ended), or a
+  // stale page (anything else, including an unknown code). The codes
+  // match signReviewApproval in review-approval.js.
+  const signFailureText = (path, code, silent) => {
+    const closing = /\/close$/.test(path);
+    const kept = closing ? "Nothing was closed." : "Nothing was approved.";
+    const act = closing ? "this click" : "this approval";
+    if (silent) return `Morrow Bridge did not answer. Check that Morrow Bridge is connected, reload this page, and select the button again. ${kept}`;
+    if (code === "review_approval_key_missing") return `Morrow Bridge no longer holds this review's approval key: the connection restarted or the review ended. Reload this page for a fresh review, then select the button again. ${kept}`;
+    if (code === "review_approval_sender_refused" || code === "review_approval_request_invalid") return `This review page is stale. Reload it and select the button again. ${kept}`;
+    return `Morrow Bridge could not confirm ${act}. Check that Morrow Bridge is connected, reload this page, and select the button again. ${kept}`;
+  };
+
   const LABEL = /\bStudent A[1-9][0-9]{0,5}\b/g;
   const SKIP = "pre, code, script, style, textarea, select, option, input, template, noscript, [data-morrow-learner-label]";
   let learnerNames = new Map();
@@ -141,9 +155,7 @@
         if (!response?.ok || typeof response.presence !== "string") {
           delete form.dataset.morrowApproving;
           buttons.forEach((button) => { button.disabled = false; });
-          showProblem(form, /\/close$/.test(path)
-            ? "Morrow Bridge could not confirm this click. Check that Morrow Bridge is connected, reload this page, and select the button again. Nothing was closed."
-            : "Morrow Bridge could not confirm this approval. Check that Morrow Bridge is connected, reload this page, and select the button again. Nothing was approved.");
+          showProblem(form, signFailureText(path, response?.code, response === null || response === undefined));
           return;
         }
         form.querySelectorAll('input[name="presence"], input[data-morrow-submitter]').forEach((input) => input.remove());

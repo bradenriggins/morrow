@@ -626,7 +626,7 @@ scenario("W5", "course pages and foreign senders cannot control setup or the sav
     const before = await profile.state();
     let refusals = 0;
     for (const sender of ["course", "otherExtension", "alteredPopup"]) {
-      for (const type of ["morrow_course_data_consent_accept", "morrow_open_setup", "morrow_open_platform", "morrow_detect_course_platform", "morrow_connect_course_prepare", "morrow_connect_course_complete", "morrow_connect_course_cancel", "morrow_connect_course", "morrow_status", "morrow_disconnect"]) {
+      for (const type of ["morrow_course_data_consent_accept", "morrow_course_data_consent_withdraw", "morrow_open_setup", "morrow_open_platform", "morrow_detect_course_platform", "morrow_connect_course_prepare", "morrow_connect_course_complete", "morrow_connect_course_cancel", "morrow_connect_course", "morrow_status", "morrow_disconnect"]) {
         const result = await within(profile.call({ type, tabId: 2, siteAnchorId: ANCHOR.siteAnchorId, sourceBindingId: BINDING.sourceBindingId, intentId: "untrusted-intent" }, sender), 3_000, type);
         assert.equal(result.ok, false, `${sender}: ${type}`);
         assert.equal(result.code, "bridge_extension_page_sender_refused", `${sender}: ${type}`);

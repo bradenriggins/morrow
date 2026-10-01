@@ -451,6 +451,8 @@ test("the relative native Canvas Item Banks tab resolves to the exact course lau
   });
   const foreign = absoluteItemBankTabUrls([{ ...tabs[0], html_url: "//evil.example/courses/89585/banks" }], origin);
   assert.equal(itemBankLaunchFromCourseTabs(foreign, origin, "89585"), null);
+  assert.deepEqual(absoluteItemBankTabUrls([{ id: "context_external_tool_1", html_url: "/courses/1/banks" }], "not a url"), []);
+  assert.deepEqual(absoluteItemBankTabUrls("not an array", origin), []);
 });
 
 test("the native Canvas Item Banks page keeps its token private and completes a bank read", async () => {

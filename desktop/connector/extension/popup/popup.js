@@ -28,6 +28,7 @@ const notice = document.querySelector("#notice");
 const editAccess = document.querySelector(".edit-access");
 const editingSettings = document.querySelector("#editing-settings");
 const setupGuide = document.querySelector("#setup-guide");
+const reloadBridge = document.querySelector("#reload-bridge");
 const editAccessBanner = document.querySelector("#edit-access-banner");
 const editAccessBannerText = document.querySelector("#edit-access-banner-text");
 const askFirstAllCoursesButton = document.querySelector("#ask-first-all-courses");
@@ -163,6 +164,10 @@ function render(status) {
   }
   editAccess.hidden = status?.paired !== true || !runtimeReady || chooseCourses || (!binding && !anchor);
   setupGuide.hidden = runtimeNeedsReload(status);
+  // A stale Bridge worker is the common version mismatch, and one press restarts it with the
+  // installed code. When the Morrow app itself is the older side, reloading changes nothing and
+  // the setup guide above stays the way forward.
+  reloadBridge.hidden = !runtimeNeedsReload(status);
   // WI-5.8: one primary action for the present tab. Reopening the saved course (closed) already has
   // its own control above, and an already-connected course needs none, so primary is hidden in both,
   // leaving "Pair Canvas account" as the only text it ever shows.
@@ -194,12 +199,13 @@ function updateControls(status = current) {
   primary.setAttribute("aria-busy", String(controls.primaryBusy));
   canvasAction.disabled = controls.secondaryDisabled;
   openPlatformAction.disabled = controls.secondaryDisabled;
+  reloadBridge.disabled = controls.secondaryDisabled;
   disconnect.disabled = controls.secondaryDisabled;
   askFirstAllCoursesButton.disabled = controls.secondaryDisabled || editActive.length === 0;
 }
 
 function focusFirstConnectionAction() {
-  for (const control of [primary, canvasAction, openPlatformAction, disconnect, editingSettings, setupGuide]) {
+  for (const control of [reloadBridge, primary, canvasAction, openPlatformAction, disconnect, editingSettings, setupGuide]) {
     if (!control.hidden && !control.disabled) {
       control.focus();
       return;
@@ -454,6 +460,10 @@ allCoursesButton.addEventListener("click", () => {
 
 setupGuide.addEventListener("click", () => {
   void message("morrow_open_setup").catch((cause) => reportError("action", cause));
+});
+
+reloadBridge.addEventListener("click", () => {
+  chrome.runtime.reload();
 });
 
 disconnect.addEventListener("click", async () => {

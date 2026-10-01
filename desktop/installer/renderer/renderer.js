@@ -279,8 +279,8 @@ function renderUpdates(current) {
   }
   if (updates.status === "ready") {
     if (updates.reason === "active_or_uncertain_operations") {
-      updatesCopy.textContent = "Morrow will restart after course work finishes or its current state is clear.";
-      renderUpdateActions("");
+      updatesCopy.textContent = `${updates.availableVersion ? `Version ${updates.availableVersion} is ready` : "An update is ready"}, but Morrow is busy with course work and cannot restart yet. Try again when course work is idle.`;
+      renderUpdateActions('<button class="secondary-button" type="button" data-action="install-update">Try again</button>');
       return;
     }
     if (updates.reason === "update_install_failed") {
@@ -578,7 +578,11 @@ function render(current) {
   if (!chosenAssistantId && current?.selectedAssistantId) chosenAssistantId = current.selectedAssistantId;
   const view = current ? actionView(current, { chosenAssistantId, platform: API?.platform || null, bridgeWaitExpired: bridgeWaitExpired(current) }) : loadAttempted ? setupUnavailableView() : null;
   headerStatus.textContent = view ? view.summary : statusSummary(current);
-  loading.hidden = Boolean(view);
+  // While an action runs (repair, a connection check, an update install), the panel it acts on
+  // stays on screen with its controls disabled, and this line says so: a silent, disabled panel
+  // reads as stuck, not as working.
+  loading.hidden = Boolean(view) && !busy;
+  loading.textContent = busy && view ? "Working…" : "Checking Morrow setup…";
   actionContent.hidden = !view;
   renderWelcome(current);
   renderProgress(current);

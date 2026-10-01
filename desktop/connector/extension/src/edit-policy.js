@@ -170,6 +170,35 @@ const ITEM_BANK_DESTRUCTIVE_REASON = "This Item Bank change cannot be undone, an
 // operation is added, and the change would silently become a standing grant.
 const itemBankDestructive = (operation) => String(operation?.toolName || "").startsWith("canvas_item_bank_")
   && destructiveOperation(operation);
+// Every Canvas DELETE route removes what it names (destructiveOperation), so every admitted
+// DELETE is approved change by change - except the listed personal preference changes, which
+// touch only the educator's own bookmarks, planner, favorites, stream, subscriptions, read
+// state, and AI chats, and are instantly re-doable. The exemption list fails closed: a DELETE
+// that is not listed here is review-only, so a new route can never silently become a standing
+// grant the way an enumerated review-only list would allow.
+const CANVAS_DELETE_REVIEW_REASON = "Deleting this removes it and what it holds, and Morrow cannot undo it. Morrow prepares each deletion on its own, with the exact item, so you approve them one at a time.";
+const CANVAS_DELETE_STANDING_GRANT_TOOLS = new Set([
+  "canvas_delete_bookmark",
+  "canvas_delete_planner_note",
+  "canvas_delete_planner_override",
+  "canvas_delete_ai_conversation",
+  "canvas_delete_ai_experience",
+  "canvas_clear_course_nicknames",
+  "canvas_remove_course_nickname",
+  "canvas_reset_course_favorites",
+  "canvas_remove_group_from_favorites",
+  "canvas_reset_group_favorites",
+  "canvas_hide_stream_item",
+  "canvas_hide_all_stream_items",
+  "canvas_unsubscribe_from_topic_courses",
+  "canvas_unsubscribe_from_topic_groups",
+  "canvas_mark_entry_as_unread_courses",
+  "canvas_mark_entry_as_unread_groups",
+  "canvas_mark_all_entries_as_unread_courses",
+  "canvas_mark_all_entries_as_unread_groups",
+  "canvas_mark_topic_as_unread_courses",
+  "canvas_mark_topic_as_unread_groups",
+]);
 const CHECKED = Object.freeze({ verification: "checked" });
 
 export const CURATED_CATEGORY_SPECS = Object.freeze([
@@ -676,6 +705,10 @@ function operationAvailability(operation, canvasReads) {
     }
     if (NEW_QUIZ_DELETE_TOOL === operation.toolName) return { availability: "review", reviewReason: NEW_QUIZ_DELETE_REVIEW_REASON };
     if (itemBankDestructive(operation)) return { availability: "review", reviewReason: ITEM_BANK_DESTRUCTIVE_REASON };
+    if (String(operation.method || "").toUpperCase() === "DELETE"
+      && !CANVAS_DELETE_STANDING_GRANT_TOOLS.has(operation.toolName || "")) {
+      return { availability: "review", reviewReason: CANVAS_DELETE_REVIEW_REASON };
+    }
     return { availability: "edit" };
   }
   if (MOODLE_ACTIVITY_DELETE_TOOLS.has(operation.toolName || "")) {

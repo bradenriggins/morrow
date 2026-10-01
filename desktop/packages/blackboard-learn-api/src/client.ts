@@ -238,35 +238,52 @@ export class BlackboardLearnClient {
 
   private async accessToken(signal?: AbortSignal): Promise<TokenRecord> {
     if (this.token && this.token.expiresAt > Date.now() + 30_000) return this.token;
-    if (this.tokenRequest) return this.tokenRequest;
-    this.tokenRequest = (async () => {
-      const url = new URL("/learn/api/public/v1/oauth2/token", this.tenant.baseUrl);
-      try {
-        this.requests += 1;
-        const response = await this.fetcher(url, {
-          method: "POST",
-          redirect: "manual",
-          headers: {
-            authorization: `Basic ${Buffer.from(`${this.tenant.applicationKey}:${this.tenant.clientSecret}`, "utf8").toString("base64")}`,
-            "content-type": "application/x-www-form-urlencoded",
-            accept: "application/json",
-          },
-          body: "grant_type=client_credentials",
-          signal,
-        });
-        if (response.status !== 200) throw responseError(response, this.diagnosticHeaders);
-        const payload = await jsonResponse(response, signal);
-        if (!payload || typeof payload.access_token !== "string" || !payload.access_token || typeof payload.expires_in !== "number" || !Number.isFinite(payload.expires_in) || payload.expires_in < 1) {
-          throw new ApiError("blackboard_response_invalid", "Blackboard returned an invalid OAuth response.");
-        }
-        const token = { accessToken: payload.access_token, expiresAt: Date.now() + Math.min(payload.expires_in, 3_600) * 1_000 };
-        this.generation += 1;
-        this.token = token;
-        return token;
-      } catch (error) { throw abortError(error) || error; }
-      finally { this.tokenRequest = undefined; }
-    })();
-    return this.tokenRequest;
+    if (!this.tokenRequest) {
+      // The exchange is shared by every concurrent waiter, so it carries no
+      // caller's signal: one caller aborting must not cancel the credential
+      // for the rest. Each waiter races the shared exchange against only its
+      // own signal below.
+      this.tokenRequest = (async () => {
+        const url = new URL("/learn/api/public/v1/oauth2/token", this.tenant.baseUrl);
+        try {
+          this.requests += 1;
+          const response = await this.fetcher(url, {
+            method: "POST",
+            redirect: "manual",
+            headers: {
+              authorization: `Basic ${Buffer.from(`${this.tenant.applicationKey}:${this.tenant.clientSecret}`, "utf8").toString("base64")}`,
+              "content-type": "application/x-www-form-urlencoded",
+              accept: "application/json",
+            },
+            body: "grant_type=client_credentials",
+          });
+          if (response.status !== 200) throw responseError(response, this.diagnosticHeaders);
+          const payload = await jsonResponse(response);
+          if (!payload || typeof payload.access_token !== "string" || !payload.access_token || typeof payload.expires_in !== "number" || !Number.isFinite(payload.expires_in) || payload.expires_in < 1) {
+            throw new ApiError("blackboard_response_invalid", "Blackboard returned an invalid OAuth response.");
+          }
+          const token = { accessToken: payload.access_token, expiresAt: Date.now() + Math.min(payload.expires_in, 3_600) * 1_000 };
+          this.generation += 1;
+          this.token = token;
+          return token;
+        } catch (error) { throw abortError(error) || error; }
+        finally { this.tokenRequest = undefined; }
+      })();
+    }
+    const pending = this.tokenRequest;
+    if (!signal) return pending;
+    if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+    return await new Promise<TokenRecord>((resolve, reject) => {
+      const onAbort = (): void => {
+        signal.removeEventListener("abort", onAbort);
+        reject(new DOMException("The operation was aborted.", "AbortError"));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      pending.then(
+        (token) => { signal.removeEventListener("abort", onAbort); resolve(token); },
+        (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+      );
+    });
   }
 
   /**

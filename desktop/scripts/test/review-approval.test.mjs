@@ -89,7 +89,7 @@ test("accepts only a loopback review origin and a 32-byte key", () => {
 const CONTENT_SOURCE = readFileSync(new URL("../../connector/extension/src/review-approval-content.js", import.meta.url), "utf8");
 
 /** A small DOM with one approve form and one cancel form, enough for the content script's submit handler. */
-function reviewTab(response) {
+function reviewTab(response, sendImpl = null) {
   class Element {
     constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.attributes = {}; this.parentElement = null; }
     setAttribute(name, value) { this.attributes[name] = value; }
@@ -150,6 +150,7 @@ function reviewTab(response) {
           return { ok: true, names: {} };
         }
         messages.push(message);
+        if (sendImpl) return await sendImpl(message);
         return response;
       },
       onMessage: { addListener: () => undefined },
@@ -200,7 +201,7 @@ test("signs a person's own click on the close form, and says a failed close clos
   refused.form.setAttribute("action", `${pagePath}/close`);
   await refused.submit(refused.form, { isTrusted: true });
   assert.deepEqual(refused.posted, []);
-  assert.match(refused.container.querySelector(".review-approval-problem").textContent, /^Morrow Bridge could not confirm this click\..*Nothing was closed\.$/);
+  assert.match(refused.container.querySelector(".review-approval-problem").textContent, /^Morrow Bridge no longer holds this review's approval key.*Nothing was closed\.$/);
   const scripted = reviewTab({ ok: true, presence: "signed-close" });
   scripted.form.setAttribute("action", `${pagePath}/close`);
   await scripted.submit(scripted.form, { isTrusted: false });
@@ -212,5 +213,26 @@ test("says so in the page and sends nothing when the Bridge cannot sign", async 
   await tab.submit(tab.form, { isTrusted: true });
   assert.deepEqual(tab.posted, []);
   const note = tab.container.querySelector(".review-approval-problem");
-  assert.match(note.textContent, /^Morrow Bridge could not confirm this approval\..*Nothing was approved\.$/);
+  assert.match(note.textContent, /^Morrow Bridge no longer holds this review's approval key.*Nothing was approved\.$/);
+});
+
+test("a signing failure names its cause: silence, a stale page, or a failure it cannot tell apart", async () => {
+  const silent = reviewTab(null, async () => { throw new Error("no worker"); });
+  await silent.submit(silent.form, { isTrusted: true });
+  assert.deepEqual(silent.posted, []);
+  assert.match(silent.container.querySelector(".review-approval-problem").textContent, /^Morrow Bridge did not answer\..*Nothing was approved\.$/);
+
+  for (const code of ["review_approval_sender_refused", "review_approval_request_invalid"]) {
+    const stale = reviewTab({ ok: false, code });
+    await stale.submit(stale.form, { isTrusted: true });
+    assert.deepEqual(stale.posted, []);
+    assert.match(stale.container.querySelector(".review-approval-problem").textContent, /^This review page is stale\..*Nothing was approved\.$/, code);
+  }
+
+  for (const response of [{ ok: false, code: "review_approval_failed" }, { ok: false, code: "review_approval_future_code" }, { ok: false }]) {
+    const generic = reviewTab(response);
+    await generic.submit(generic.form, { isTrusted: true });
+    assert.deepEqual(generic.posted, []);
+    assert.match(generic.container.querySelector(".review-approval-problem").textContent, /^Morrow Bridge could not confirm this approval\..*Nothing was approved\.$/, JSON.stringify(response));
+  }
 });

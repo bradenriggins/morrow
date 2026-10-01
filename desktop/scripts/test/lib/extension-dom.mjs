@@ -495,6 +495,7 @@ function createChromeStub({ handlers = {}, storage = {}, permission = {}, tabs =
   const tabsCreated = [];
   const tabsUpdated = [];
   let optionsPageOpens = 0;
+  let runtimeReloads = 0;
   let nextTabId = 9000;
   const stored = { ...storage };
   const listeners = { storage: [], message: [], permissionAdded: [], permissionRemoved: [] };
@@ -511,6 +512,9 @@ function createChromeStub({ handlers = {}, storage = {}, permission = {}, tabs =
       openOptionsPage() {
         optionsPageOpens += 1;
         return Promise.resolve();
+      },
+      reload() {
+        runtimeReloads += 1;
       },
       onMessage: { addListener: (listener) => listeners.message.push(listener) },
     },
@@ -564,7 +568,7 @@ function createChromeStub({ handlers = {}, storage = {}, permission = {}, tabs =
       },
     },
   };
-  return { chrome, messages, permissionCalls, tabsCreated, tabsUpdated, storage: stored, listeners, optionsPageOpens: () => optionsPageOpens };
+  return { chrome, messages, permissionCalls, tabsCreated, tabsUpdated, storage: stored, listeners, optionsPageOpens: () => optionsPageOpens, runtimeReloads: () => runtimeReloads };
 }
 
 // --- Loading a page ---------------------------------------------------------------------------
@@ -627,6 +631,10 @@ export async function loadExtensionPage(pagePath, options = {}) {
     /** How many times the page has opened Plan and Edit settings. */
     get optionsPageOpens() {
       return stub.optionsPageOpens();
+    },
+    /** How many times the page has reloaded the extension runtime. */
+    get runtimeReloads() {
+      return stub.runtimeReloads();
     },
     query,
     queryAll: (selector) => document.querySelectorAll(selector),

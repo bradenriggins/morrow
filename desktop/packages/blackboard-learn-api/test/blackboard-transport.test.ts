@@ -466,4 +466,28 @@ describe("Blackboard configuration path", () => {
     await chmod(shared, 0o700);
     await expect(loadBlackboardLearnConfig(environment)).resolves.toHaveLength(1);
   });
+
+  it("shares one credential exchange without sharing one caller's cancellation", async () => {
+    let tokens = 0;
+    let releaseToken!: () => void;
+    const tokenGate = new Promise<void>((resolve) => { releaseToken = resolve; });
+    const fetcher = (async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === tokenPath) {
+        tokens += 1;
+        await tokenGate;
+        return new Response(JSON.stringify({ access_token: "shared-token", expires_in: 3600 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ id: contentId }), { status: 200 });
+    }) as typeof fetch;
+    const client = new BlackboardLearnClient(tenant, fetcher);
+    const first = new AbortController();
+    const doomed = client.get(contentPath, first.signal);
+    const kept = client.get(contentPath);
+    first.abort();
+    await expect(doomed).rejects.toMatchObject({ code: "blackboard_request_cancelled" });
+    releaseToken();
+    await expect(kept).resolves.toEqual({ id: contentId });
+    expect(tokens).toBe(1);
+  });
 });
