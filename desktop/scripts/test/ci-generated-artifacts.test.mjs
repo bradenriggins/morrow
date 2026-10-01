@@ -26,7 +26,7 @@ test("the exact pull-request CI command rejects stale generated provider artifac
   assert.equal(manifest.scripts.check, "pnpm audit:dependencies && pnpm generated:check && pnpm test");
   assert.equal(
     manifest.scripts["generated:check"],
-    "pnpm catalog:canvas:check && pnpm canvas:admission:check && pnpm canvas:classic-question:check && pnpm moodle:identifiers:check",
+    "pnpm catalog:canvas:check && pnpm canvas:admission:check && pnpm canvas:classic-question:check && pnpm moodle:identifiers:check && node scripts/generate-moodle-browser-routes.mjs --check",
   );
   assert.match(manifest.scripts["catalog:canvas:check"], /generate-canvas-api-catalog\.mjs --check/);
   assert.match(manifest.scripts["canvas:readback:check"], /sync-canvas-readback-plan\.mjs --check/);

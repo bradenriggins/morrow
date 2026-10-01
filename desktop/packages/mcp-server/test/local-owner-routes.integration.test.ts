@@ -19,6 +19,8 @@ const FIRST = Object.freeze({ id: "6f1c1c1e-2b9a-4d4e-9c1a-0f5e5d7b8a21", genera
 const SECOND = Object.freeze({ id: "0d4b6a3e-5c2f-4f1a-8e9b-7a6c5d4e3f21", generation: "B".repeat(43) });
 const FIRST_NEXT = Object.freeze({ id: FIRST.id, generation: "C".repeat(43) });
 
+const observedOwners = new Map<string, { pid: number; nonce: string }>();
+
 interface Connected {
   readonly client: Client;
   readonly transport: StdioClientTransport;
@@ -89,6 +91,10 @@ async function connect(
     stderr: "pipe",
   });
   await client.connect(transport);
+  const config = JSON.parse(await readFile(configPath, "utf8")) as { operationJournal: { path: string } };
+  const ownerPath = `${config.operationJournal.path}.local-owner.json`;
+  const owner = JSON.parse(await readFile(ownerPath, "utf8")) as { pid: number; nonce: string };
+  observedOwners.set(ownerPath, owner);
   return { client, transport };
 }
 
@@ -104,13 +110,30 @@ async function routes(journalPath: string, workspaceRoot: string): Promise<reado
 }
 
 async function stopOwner(ownerPath: string): Promise<void> {
+  const observed = observedOwners.get(ownerPath);
+  if (!observed) throw new Error("fixture owner identity was not observed");
   try {
     await waitUntil(() => !existsSync(ownerPath), "the owner's cleanup");
   } catch {
-    const descriptor = JSON.parse(await readFile(ownerPath, "utf8")) as { pid: number };
+    const descriptor = JSON.parse(await readFile(ownerPath, "utf8")) as { pid: number; nonce: string };
+    if (descriptor.pid !== observed.pid || descriptor.nonce !== observed.nonce) throw new Error("fixture owner identity changed");
     process.kill(descriptor.pid, "SIGTERM");
     await waitUntil(() => !existsSync(ownerPath), "the owner's bounded stop");
   }
+  await waitUntil(async () => {
+    try {
+      const stat = await readFile(`/proc/${observed.pid}/stat`, "utf8");
+      if (stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z ")) return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    try { process.kill(observed.pid, 0); return false; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+      throw error;
+    }
+  }, "the observed fixture owner's process exit");
+  observedOwners.delete(ownerPath);
 }
 
 describe("local-owner installed routes", () => {

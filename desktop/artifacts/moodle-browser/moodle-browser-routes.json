@@ -1,0 +1,3299 @@
+{
+  "schema": "morrow.moodle-browser-routes.v1",
+  "sources": {
+    "moodle-activity-content-executor.js": "15e52ac189e8175323b38429af37f078a33da9ad447d4b771d0f368a421d98f6",
+    "moodle-activity-content-read.js": "147edaee215de529aaf170153b8aa546e113bbecdd570b5525fcadac007eff3c",
+    "moodle-activity-lifecycle-executor.js": "3540bcd934405c60c9c4cca28b2db39cd6e248b3c34b2c06807e795b1105c28a",
+    "moodle-assignment-submission-read.js": "7ed9bb986fd2d260727ebe1626ca02e824e860be43f16d43873796f1571819f8",
+    "moodle-backup-executor.js": "20706383ee2aeafd953c804fe689ef020c2c3c3899cc5dc78a61fcee8c7bd71a",
+    "moodle-bbb-executor.js": "f361f803041eb817d8d363a5e3abb7e2593386e7286625730d868663ae818eb1",
+    "moodle-browser-catalog.json": "67a5942ba3701d1aface73cd2ff9ee3936b3f741d170ca2e1a80e4ea53411228",
+    "moodle-calendar-executor.js": "1dedb408f1fc300d788ea2d05246f3d532dcc2fc04c3e92bfa29235db48746d8",
+    "moodle-completion-executor.js": "cc5e88fba0add29c8a262b7c66cd7bb355d244c886e3335c549f8cc7bd7d02d4",
+    "moodle-course-settings-executor.js": "d4028ee5b8d3dc76d8789f05cdb1fd887adb1350506d018cb803b4c6de907fb4",
+    "moodle-enrolment-executor.js": "1456e9267dac2effc6e19d32667afab06cb6c47de10341c066c573176db12e7c",
+    "moodle-executor.js": "52a14722810356925c6ef495bf93c9f4da8fe7ce4955ed3ba6625b3ac9e680f1",
+    "moodle-forum-activity-summary-read.js": "dc2336fad5366af48ad2920e55d5747ea7401a6f1fd8aabc8bb25592f374610e",
+    "moodle-forum-post-executor.js": "89ccc185c4fd54a6fa0c2be025590ac2c6bc26109bc0525f122b8f67161c7fed",
+    "moodle-forum-read.js": "b92d7ecc6d50858a968a5201f24855bfca0718e3c5874d1b7f8e7c383af50098",
+    "moodle-glossary-wiki-executor.js": "0883d87a8577edc460c72f7beac4559381b74ea881dba506d966808bccd2d56c",
+    "moodle-grade-report-read.js": "8dc40b5f9cdb9f68bdc2594b39e92ceaac6b2d342cae777ab654d51065e4657e",
+    "moodle-gradebook-executor.js": "1c74338b5da5d24d8c2b21ae6d3776fbc127dafbc9be1c71b94f723c30f4cbf0",
+    "moodle-groups-executor.js": "28f809518dafc7653f325051cefa86effeead7340f1651ca0683ab4095b8b306",
+    "moodle-groups-read.js": "8b2ca32f2a9345df96ee82b6b0adac37574734fccd3e7ad5a9095d2958834aa9",
+    "moodle-h5p-executor.js": "0dc4a9343c34e871c86f07a9dacbb6117f9cca445ba40a1da68f5a2a50848e33",
+    "moodle-learner-submission-read.js": "335572b09d90b55c34d79ad332bc806149742d644022d736c6834ca3ad5c07b7",
+    "moodle-lesson-executor.js": "26b85c077c20eb910ca6df2921abcaa75ad5a41778bd2811c4a1ad68b42915f8",
+    "moodle-lesson-read.js": "d3429f976581d05b10dc1a80e36b20816d2257e131a8fb7da86e2caeb5b4b1bb",
+    "moodle-lti-executor.js": "4e2f016d4b4663606e6dca13f96edf4844bb6e5a4d2147d5d1d7aa9163300314",
+    "moodle-participants-read.js": "2fda54fbfa405d1c078a4caa0ceaf746996f9dc44c7c6d963c6a02c4d7e2818f",
+    "moodle-privacy.js": "0c49e98f007d9c23535cdc4801b0c1c2640787e6c700d1f8b1bd6bd2580efa2c",
+    "moodle-qbank-executor.js": "406b79764ba364ee279155c5b07fea9d374db70256b1dc07daf2fb3c4048bd38",
+    "moodle-qbank-question-executor.js": "31e6bfe071eb2352ba91160dba9fe826da5f4d53643dcf666f8724164ecfc4c9",
+    "moodle-question-impact-read.js": "fc4641f9a4da28ecfc59483abc071f833b09955563d27255d778f89cb87417ab",
+    "moodle-quiz-attempt-detail-read.js": "a109d35414d78c33aa1ebc43ceb186b9cac08af1e80eab83c2c31f5ffde51d38",
+    "moodle-quiz-attempt-summary-read.js": "2f41f08a52d1a27e1aacccaf28e959ddd686d5f5d6237ce6918a09066a73ca6b",
+    "moodle-quiz-structure-executor.js": "f0d1ec3d74a135b41690f6aaaed1fc76be96e750079d09e82526ed9799a4a8fd",
+    "moodle-reports-read.js": "083b795b993c3f2ceb5bb11e84081ad3a4194c1ae249fc35b1f6d91aeacfce24",
+    "moodle-restrictions-executor.js": "d9000ef442f5f4f0a9f139150ceccbed84e39966820bb2f7205be0bb82b15c03",
+    "moodle-scorm-executor.js": "69e5c0c9972ef6a40b428561fa557eb06ce73e766352e5df8711228845131652",
+    "moodle-scorm-report-read.js": "f550bd3e56716ebee9e0d1324d47295d66a6aa5a42dc2f3fa3af62470cc81ec9",
+    "moodle-section-executor.js": "41e3b94993d1c4786d0ca45a7dcc57f110bd1e9a2bbd1eeba6a61df927773c6c",
+    "moodle-site-inventory-read.js": "3852c0ebcd2fe62f69b3be3b22e1ee1708bb7b8e208105b70d70948de28785de",
+    "moodle-subsection-executor.js": "0bcd1b72fab1904e9603b82cb220c438f55cdf35560d59c929675e46ed45f7dc",
+    "moodle-workshop-executor.js": "7eab3a80247564234f124d4c694c28d020a36e66e007e5f30421a877ac384f14",
+    "service-worker.js": "e04cd0908237c7dc4419c402d24c10ede3db7aeca1ce5a544d5aa5d145830fa6"
+  },
+  "operations": {
+    "moodle.ajax.core_backup.async_progress.backup.read.v1": {
+      "file": "moodle-backup-executor.js",
+      "functionByteRange": [
+        1225,
+        69068
+      ],
+      "functionSha256": "a47a0b2230a5f0ee8f3c9a5d5c2cc9ffce77b80ac4a26a39d2b45a67e893a805",
+      "function": "executeMoodleBackupInPage",
+      "toolName": "moodle_get_backup_progress",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_backup.async_progress.restore.read.v1": {
+      "file": "moodle-backup-executor.js",
+      "functionByteRange": [
+        1225,
+        69068
+      ],
+      "functionSha256": "a47a0b2230a5f0ee8f3c9a5d5c2cc9ffce77b80ac4a26a39d2b45a67e893a805",
+      "function": "executeMoodleBackupInPage",
+      "toolName": "moodle_get_restore_progress",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_calendar.course_dates.read.v1": {
+      "file": "moodle-calendar-executor.js",
+      "functionByteRange": [
+        3608,
+        54261
+      ],
+      "functionSha256": "2f4cb4d9a47b3cc66d0e23a2daf52e00007243a6c4b1f100511b3e4ca1e1611c",
+      "function": "executeMoodleCalendarInPage",
+      "toolName": "moodle_get_course_dates",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_calendar.course_events.read.v1": {
+      "file": "moodle-calendar-executor.js",
+      "functionByteRange": [
+        3608,
+        54261
+      ],
+      "functionSha256": "2f4cb4d9a47b3cc66d0e23a2daf52e00007243a6c4b1f100511b3e4ca1e1611c",
+      "function": "executeMoodleCalendarInPage",
+      "toolName": "moodle_list_course_events",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_calendar.event.read.v1": {
+      "file": "moodle-calendar-executor.js",
+      "functionByteRange": [
+        3608,
+        54261
+      ],
+      "functionSha256": "2f4cb4d9a47b3cc66d0e23a2daf52e00007243a6c4b1f100511b3e4ca1e1611c",
+      "function": "executeMoodleCalendarInPage",
+      "toolName": "moodle_get_event",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_calendar.event_create.write.v1": {
+      "file": "moodle-calendar-executor.js",
+      "functionByteRange": [
+        3608,
+        54261
+      ],
+      "functionSha256": "2f4cb4d9a47b3cc66d0e23a2daf52e00007243a6c4b1f100511b3e4ca1e1611c",
+      "function": "executeMoodleCalendarInPage",
+      "toolName": "moodle_create_course_event",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_calendar.event_delete.write.v1": {
+      "file": "moodle-calendar-executor.js",
+      "functionByteRange": [
+        3608,
+        54261
+      ],
+      "functionSha256": "2f4cb4d9a47b3cc66d0e23a2daf52e00007243a6c4b1f100511b3e4ca1e1611c",
+      "function": "executeMoodleCalendarInPage",
+      "toolName": "moodle_delete_event",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_calendar.event_update.write.v1": {
+      "file": "moodle-calendar-executor.js",
+      "functionByteRange": [
+        3608,
+        54261
+      ],
+      "functionSha256": "2f4cb4d9a47b3cc66d0e23a2daf52e00007243a6c4b1f100511b3e4ca1e1611c",
+      "function": "executeMoodleCalendarInPage",
+      "toolName": "moodle_update_event",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_course_get_enrolled_courses_by_timeline_classification.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_list_my_courses",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_get_state.assignments.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_list_assignments",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_get_state.quizzes.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_list_quizzes",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_get_state.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_contents",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.cm_delete.v1": {
+      "file": "moodle-activity-lifecycle-executor.js",
+      "functionByteRange": [
+        3116,
+        36089
+      ],
+      "functionSha256": "9efc67b24bfd1630db66f118aad6b37f4c00ccc164d98faa3d04b8d73fd20306",
+      "function": "executeMoodleActivityLifecycleInPage",
+      "toolName": "moodle_delete_activity",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.cm_duplicate.v1": {
+      "file": "moodle-activity-lifecycle-executor.js",
+      "functionByteRange": [
+        3116,
+        36089
+      ],
+      "functionSha256": "9efc67b24bfd1630db66f118aad6b37f4c00ccc164d98faa3d04b8d73fd20306",
+      "function": "executeMoodleActivityLifecycleInPage",
+      "toolName": "moodle_duplicate_activity",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.cm_groupmode.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_set_activity_group_mode",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.cm_hide.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_hide_activity",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.cm_move.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_move_activity",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.cm_move_to_position.v1": {
+      "file": "moodle-activity-lifecycle-executor.js",
+      "functionByteRange": [
+        3116,
+        36089
+      ],
+      "functionSha256": "9efc67b24bfd1630db66f118aad6b37f4c00ccc164d98faa3d04b8d73fd20306",
+      "function": "executeMoodleActivityLifecycleInPage",
+      "toolName": "moodle_move_activity_to_position",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.cm_show.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_show_activity",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.section_add.v1": {
+      "file": "moodle-section-executor.js",
+      "functionByteRange": [
+        3646,
+        37736
+      ],
+      "functionSha256": "a05a599375bd9976ae2adb17d51aacab815db14e0599357cbfeca2d080511f83",
+      "function": "executeMoodleSectionInPage",
+      "toolName": "moodle_create_section",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.section_delete.v1": {
+      "file": "moodle-section-executor.js",
+      "functionByteRange": [
+        3646,
+        37736
+      ],
+      "functionSha256": "a05a599375bd9976ae2adb17d51aacab815db14e0599357cbfeca2d080511f83",
+      "function": "executeMoodleSectionInPage",
+      "toolName": "moodle_delete_section",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.section_hide.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_hide_section",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.section_move_after.v1": {
+      "file": "moodle-section-executor.js",
+      "functionByteRange": [
+        3646,
+        37736
+      ],
+      "functionSha256": "a05a599375bd9976ae2adb17d51aacab815db14e0599357cbfeca2d080511f83",
+      "function": "executeMoodleSectionInPage",
+      "toolName": "moodle_move_section",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_courseformat_update_course.section_show.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_show_section",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_update_inplace_editable.user_roles.assign.v1": {
+      "file": "moodle-enrolment-executor.js",
+      "functionByteRange": [
+        3623,
+        54028
+      ],
+      "functionSha256": "f65e3ad3a3c114d89f5e4502a5d01d0b1137fe1931e3cbf45ee745a7dbd4e950",
+      "function": "executeMoodleEnrolmentInPage",
+      "toolName": "moodle_assign_role",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.ajax.core_update_inplace_editable.user_roles.remove.v1": {
+      "file": "moodle-enrolment-executor.js",
+      "functionByteRange": [
+        3623,
+        54028
+      ],
+      "functionSha256": "f65e3ad3a3c114d89f5e4502a5d01d0b1137fe1931e3cbf45ee745a7dbd4e950",
+      "function": "executeMoodleEnrolmentInPage",
+      "toolName": "moodle_remove_role",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.admin.role_definitions.read.v1": {
+      "file": "moodle-site-inventory-read.js",
+      "functionByteRange": [
+        4952,
+        26415
+      ],
+      "functionSha256": "cdea2dcf099e3ec215e373bd5ada3fba89716fa7ab098e139a150d0df0439acb",
+      "function": "executeMoodleSiteInventoryReadInPage",
+      "toolName": "moodle_get_role_definitions",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.admin.site_inventory.read.v1": {
+      "file": "moodle-site-inventory-read.js",
+      "functionByteRange": [
+        4952,
+        26415
+      ],
+      "functionSha256": "cdea2dcf099e3ec215e373bd5ada3fba89716fa7ab098e139a150d0df0439acb",
+      "function": "executeMoodleSiteInventoryReadInPage",
+      "toolName": "moodle_get_site_inventory",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.assign.feedback.read.v1": {
+      "file": "moodle-assignment-submission-read.js",
+      "functionByteRange": [
+        18348,
+        35420
+      ],
+      "functionSha256": "03b90cedde1949f322a2d5e0454f3f8d2b734e3b6b2c510f8104ae5c307aeb39",
+      "function": "executeMoodleAssignmentFeedbackInPage",
+      "toolName": "moodle_get_assignment_feedback",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.assign.submission.read.v1": {
+      "file": "moodle-assignment-submission-read.js",
+      "functionByteRange": [
+        1024,
+        17892
+      ],
+      "functionSha256": "24ad3ea2a020d2bb1e5394920ef25ea0ee53a7769968aa80325be09222e4b297",
+      "function": "executeMoodleAssignmentSubmissionInPage",
+      "toolName": "moodle_get_assignment_submission",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.assign.submissions.read.v1": {
+      "file": "moodle-learner-submission-read.js",
+      "functionByteRange": [
+        299,
+        12069
+      ],
+      "functionSha256": "739e0bc521b875c7613036a231f5ab267f4b98178ee8a662e9a1c31eaac7a9f7",
+      "function": "executeMoodleAssignmentSubmissionSummaryInPage",
+      "toolName": "moodle_get_assignment_submission_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.backup.backup.course.write.v1": {
+      "file": "moodle-backup-executor.js",
+      "functionByteRange": [
+        1225,
+        69068
+      ],
+      "functionSha256": "a47a0b2230a5f0ee8f3c9a5d5c2cc9ffce77b80ac4a26a39d2b45a67e893a805",
+      "function": "executeMoodleBackupInPage",
+      "toolName": "moodle_start_course_backup",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.backup.copy.course.write.v1": {
+      "file": "moodle-backup-executor.js",
+      "functionByteRange": [
+        1225,
+        69068
+      ],
+      "functionSha256": "a47a0b2230a5f0ee8f3c9a5d5c2cc9ffce77b80ac4a26a39d2b45a67e893a805",
+      "function": "executeMoodleBackupInPage",
+      "toolName": "moodle_copy_course",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.backup.import.course.write.v1": {
+      "file": "moodle-backup-executor.js",
+      "functionByteRange": [
+        1225,
+        69068
+      ],
+      "functionSha256": "a47a0b2230a5f0ee8f3c9a5d5c2cc9ffce77b80ac4a26a39d2b45a67e893a805",
+      "function": "executeMoodleBackupInPage",
+      "toolName": "moodle_start_course_import",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.backup.restore.course.write.v1": {
+      "file": "moodle-backup-executor.js",
+      "functionByteRange": [
+        1225,
+        69068
+      ],
+      "functionSha256": "a47a0b2230a5f0ee8f3c9a5d5c2cc9ffce77b80ac4a26a39d2b45a67e893a805",
+      "function": "executeMoodleBackupInPage",
+      "toolName": "moodle_start_course_restore",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.backup.restorefile.index.read.v1": {
+      "file": "moodle-backup-executor.js",
+      "functionByteRange": [
+        1225,
+        69068
+      ],
+      "functionSha256": "a47a0b2230a5f0ee8f3c9a5d5c2cc9ffce77b80ac4a26a39d2b45a67e893a805",
+      "function": "executeMoodleBackupInPage",
+      "toolName": "moodle_list_backup_files",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.choice.option.write.v1": {
+      "file": "moodle-activity-content-executor.js",
+      "functionByteRange": [
+        3211,
+        70377
+      ],
+      "functionSha256": "2576f637904897f09b4ded406138426d92edc8e00707aca2c33fa18b9e3c2805",
+      "function": "executeMoodleActivityContentInPage",
+      "toolName": "moodle_update_choice_option",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.choice.options.read.v1": {
+      "file": "moodle-activity-content-read.js",
+      "functionByteRange": [
+        2373,
+        29641
+      ],
+      "functionSha256": "7bd226ac983edbe6003d3f4a0aa385b1fd9db022157648e3c6938858d315dd71",
+      "function": "executeMoodleActivityContentReadInPage",
+      "toolName": "moodle_get_choice_options",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.choice.response_summary.read.v1": {
+      "file": "moodle-activity-content-read.js",
+      "functionByteRange": [
+        2373,
+        29641
+      ],
+      "functionSha256": "7bd226ac983edbe6003d3f4a0aa385b1fd9db022157648e3c6938858d315dd71",
+      "function": "executeMoodleActivityContentReadInPage",
+      "toolName": "moodle_get_choice_response_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.completion.read.v1": {
+      "file": "moodle-completion-executor.js",
+      "functionByteRange": [
+        2680,
+        55921
+      ],
+      "functionSha256": "e588a06639633aa26d88570ed5629d0d3422abc901da890d9c34fe5326379271",
+      "function": "executeMoodleCompletionInPage",
+      "toolName": "moodle_get_course_completion",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.completion.write.v1": {
+      "file": "moodle-completion-executor.js",
+      "functionByteRange": [
+        2680,
+        55921
+      ],
+      "functionSha256": "e588a06639633aa26d88570ed5629d0d3422abc901da890d9c34fe5326379271",
+      "function": "executeMoodleCompletionInPage",
+      "toolName": "moodle_update_course_completion",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.edit.format.write.v1": {
+      "file": "moodle-course-settings-executor.js",
+      "functionByteRange": [
+        918,
+        51376
+      ],
+      "functionSha256": "8a79df9f179326de566e449b15497fa3e4f60fcb3b2538c15ad932a8a32d1239",
+      "function": "executeMoodleCourseSettingsInPage",
+      "toolName": "moodle_change_course_format",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.edit.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_course",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.edit.settings.read.v1": {
+      "file": "moodle-course-settings-executor.js",
+      "functionByteRange": [
+        918,
+        51376
+      ],
+      "functionSha256": "8a79df9f179326de566e449b15497fa3e4f60fcb3b2538c15ad932a8a32d1239",
+      "function": "executeMoodleCourseSettingsInPage",
+      "toolName": "moodle_get_course_settings",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.edit.settings.write.v1": {
+      "file": "moodle-course-settings-executor.js",
+      "functionByteRange": [
+        918,
+        51376
+      ],
+      "functionSha256": "8a79df9f179326de566e449b15497fa3e4f60fcb3b2538c15ad932a8a32d1239",
+      "function": "executeMoodleCourseSettingsInPage",
+      "toolName": "moodle_update_course_settings",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.edit.summary.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_course_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.edit.summary.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_course_summary",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.edit.visibility.hide.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_hide_course",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.edit.visibility.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_show_course",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.editsection.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_section",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.editsection.restrictions.read.v1": {
+      "file": "moodle-restrictions-executor.js",
+      "functionByteRange": [
+        2660,
+        53133
+      ],
+      "functionSha256": "e04256da8fc42af167c83924ebda8971d46ff03efc408bdc0e6cb606f8e185b2",
+      "function": "executeMoodleRestrictionsInPage",
+      "toolName": "moodle_get_section_restrictions",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.editsection.restrictions.write.v1": {
+      "file": "moodle-restrictions-executor.js",
+      "functionByteRange": [
+        2660,
+        53133
+      ],
+      "functionSha256": "e04256da8fc42af167c83924ebda8971d46ff03efc408bdc0e6cb606f8e185b2",
+      "function": "executeMoodleRestrictionsInPage",
+      "toolName": "moodle_update_section_restrictions",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.editsection.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_section",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.assign.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_assignment_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.assign.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_assignment",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.assign.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_assignment",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.assign.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_assignment",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.bigbluebuttonbn.create.read.v1": {
+      "file": "moodle-bbb-executor.js",
+      "functionByteRange": [
+        4135,
+        58709
+      ],
+      "functionSha256": "434d962785473fffff3e82c585425e52d2cce10450dd7046a374848bde741595",
+      "function": "executeMoodleBigBlueButtonInPage",
+      "toolName": "moodle_get_bigbluebuttonbn_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.bigbluebuttonbn.create.write.v1": {
+      "file": "moodle-bbb-executor.js",
+      "functionByteRange": [
+        4135,
+        58709
+      ],
+      "functionSha256": "434d962785473fffff3e82c585425e52d2cce10450dd7046a374848bde741595",
+      "function": "executeMoodleBigBlueButtonInPage",
+      "toolName": "moodle_create_bigbluebuttonbn",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.bigbluebuttonbn.read.v1": {
+      "file": "moodle-bbb-executor.js",
+      "functionByteRange": [
+        4135,
+        58709
+      ],
+      "functionSha256": "434d962785473fffff3e82c585425e52d2cce10450dd7046a374848bde741595",
+      "function": "executeMoodleBigBlueButtonInPage",
+      "toolName": "moodle_get_bigbluebuttonbn",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.bigbluebuttonbn.write.v1": {
+      "file": "moodle-bbb-executor.js",
+      "functionByteRange": [
+        4135,
+        58709
+      ],
+      "functionSha256": "434d962785473fffff3e82c585425e52d2cce10450dd7046a374848bde741595",
+      "function": "executeMoodleBigBlueButtonInPage",
+      "toolName": "moodle_update_bigbluebuttonbn",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.book.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_book_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.book.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_book",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.book.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_book",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.book.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_book",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.choice.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_choice_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.choice.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_choice",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.choice.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_choice",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.choice.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_choice",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.completion.read.v1": {
+      "file": "moodle-completion-executor.js",
+      "functionByteRange": [
+        2680,
+        55921
+      ],
+      "functionSha256": "e588a06639633aa26d88570ed5629d0d3422abc901da890d9c34fe5326379271",
+      "function": "executeMoodleCompletionInPage",
+      "toolName": "moodle_get_activity_completion",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.completion.write.v1": {
+      "file": "moodle-completion-executor.js",
+      "functionByteRange": [
+        2680,
+        55921
+      ],
+      "functionSha256": "e588a06639633aa26d88570ed5629d0d3422abc901da890d9c34fe5326379271",
+      "function": "executeMoodleCompletionInPage",
+      "toolName": "moodle_update_activity_completion",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.data.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_database_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.data.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_database",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.data.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_database",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.data.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_database",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.feedback.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_feedback_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.feedback.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_feedback",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.feedback.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_feedback",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.feedback.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_feedback",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.folder.file.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_folder_file_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.folder.file.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_folder_file",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "single"
+    },
+    "moodle.form.course.modedit.folder.files.add.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_add_folder_files",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "multiple"
+    },
+    "moodle.form.course.modedit.folder.files.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_folder_files",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.folder.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_folder",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.folder.subfolder.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_folder_subfolder",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.forum.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_forum_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.forum.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_forum",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.forum.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_forum",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.forum.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_forum",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.glossary.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_glossary_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.glossary.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_glossary",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.glossary.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_glossary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.glossary.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_glossary",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.h5pactivity.create.read.v1": {
+      "file": "moodle-h5p-executor.js",
+      "functionByteRange": [
+        2612,
+        70030
+      ],
+      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "function": "executeMoodleH5pInPage",
+      "toolName": "moodle_get_h5pactivity_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.h5pactivity.create.write.v1": {
+      "file": "moodle-h5p-executor.js",
+      "functionByteRange": [
+        2612,
+        70030
+      ],
+      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "function": "executeMoodleH5pInPage",
+      "toolName": "moodle_create_h5pactivity",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "single"
+    },
+    "moodle.form.course.modedit.h5pactivity.package.replace.write.v1": {
+      "file": "moodle-h5p-executor.js",
+      "functionByteRange": [
+        2612,
+        70030
+      ],
+      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "function": "executeMoodleH5pInPage",
+      "toolName": "moodle_replace_h5pactivity_package",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "single"
+    },
+    "moodle.form.course.modedit.h5pactivity.read.v1": {
+      "file": "moodle-h5p-executor.js",
+      "functionByteRange": [
+        2612,
+        70030
+      ],
+      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "function": "executeMoodleH5pInPage",
+      "toolName": "moodle_get_h5pactivity",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.h5pactivity.write.v1": {
+      "file": "moodle-h5p-executor.js",
+      "functionByteRange": [
+        2612,
+        70030
+      ],
+      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "function": "executeMoodleH5pInPage",
+      "toolName": "moodle_update_h5pactivity",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.imscp.package.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_imscp_package_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.imscp.package.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_imscp_package",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "single"
+    },
+    "moodle.form.course.modedit.imscp.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_imscp",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.label.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_label_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.label.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_label",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.label.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_label",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.label.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_label",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.lesson.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_lesson_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.lesson.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_lesson",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.lesson.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_lesson",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.lesson.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_lesson",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.lti.create.read.v1": {
+      "file": "moodle-lti-executor.js",
+      "functionByteRange": [
+        3438,
+        47843
+      ],
+      "functionSha256": "0d8875717a0a815a43049b2a9ce1da90d320415a884e8f640207a2450c4c666d",
+      "function": "executeMoodleLtiInPage",
+      "toolName": "moodle_get_lti_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.lti.create.write.v1": {
+      "file": "moodle-lti-executor.js",
+      "functionByteRange": [
+        3438,
+        47843
+      ],
+      "functionSha256": "0d8875717a0a815a43049b2a9ce1da90d320415a884e8f640207a2450c4c666d",
+      "function": "executeMoodleLtiInPage",
+      "toolName": "moodle_create_lti",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.lti.read.v1": {
+      "file": "moodle-lti-executor.js",
+      "functionByteRange": [
+        3438,
+        47843
+      ],
+      "functionSha256": "0d8875717a0a815a43049b2a9ce1da90d320415a884e8f640207a2450c4c666d",
+      "function": "executeMoodleLtiInPage",
+      "toolName": "moodle_get_lti",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.lti.write.v1": {
+      "file": "moodle-lti-executor.js",
+      "functionByteRange": [
+        3438,
+        47843
+      ],
+      "functionSha256": "0d8875717a0a815a43049b2a9ce1da90d320415a884e8f640207a2450c4c666d",
+      "function": "executeMoodleLtiInPage",
+      "toolName": "moodle_update_lti",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.page.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_page_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.page.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_page",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.page.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_page",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.page.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_page",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.qbank.create.read.v1": {
+      "file": "moodle-qbank-executor.js",
+      "functionByteRange": [
+        3144,
+        42467
+      ],
+      "functionSha256": "5a23376e5585af6e3dc0db712b14eae845d5e1741ab394cf48403ef1084864f9",
+      "function": "executeMoodleQbankInPage",
+      "toolName": "moodle_get_qbank_activity_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.qbank.create.write.v1": {
+      "file": "moodle-qbank-executor.js",
+      "functionByteRange": [
+        3144,
+        42467
+      ],
+      "functionSha256": "5a23376e5585af6e3dc0db712b14eae845d5e1741ab394cf48403ef1084864f9",
+      "function": "executeMoodleQbankInPage",
+      "toolName": "moodle_create_qbank_activity",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.qbank.read.v1": {
+      "file": "moodle-qbank-executor.js",
+      "functionByteRange": [
+        3144,
+        42467
+      ],
+      "functionSha256": "5a23376e5585af6e3dc0db712b14eae845d5e1741ab394cf48403ef1084864f9",
+      "function": "executeMoodleQbankInPage",
+      "toolName": "moodle_get_qbank_activity",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.quiz.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_quiz_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.quiz.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_quiz",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.quiz.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_quiz",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.quiz.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_quiz",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.resource.file.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_resource_file_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.resource.file.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_resource_file",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "single"
+    },
+    "moodle.form.course.modedit.resource.file.delete.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_delete_resource_file",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.resource.file.replace.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_replace_resource_file",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "single"
+    },
+    "moodle.form.course.modedit.resource.files.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_resource_files",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.restrictions.read.v1": {
+      "file": "moodle-restrictions-executor.js",
+      "functionByteRange": [
+        2660,
+        53133
+      ],
+      "functionSha256": "e04256da8fc42af167c83924ebda8971d46ff03efc408bdc0e6cb606f8e185b2",
+      "function": "executeMoodleRestrictionsInPage",
+      "toolName": "moodle_get_activity_restrictions",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.restrictions.write.v1": {
+      "file": "moodle-restrictions-executor.js",
+      "functionByteRange": [
+        2660,
+        53133
+      ],
+      "functionSha256": "e04256da8fc42af167c83924ebda8971d46ff03efc408bdc0e6cb606f8e185b2",
+      "function": "executeMoodleRestrictionsInPage",
+      "toolName": "moodle_update_activity_restrictions",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.scorm.package.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_scorm_package_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.scorm.package.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_scorm_package",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "single"
+    },
+    "moodle.form.course.modedit.scorm.package.replace.write.v1": {
+      "file": "moodle-scorm-executor.js",
+      "functionByteRange": [
+        846,
+        50329
+      ],
+      "functionSha256": "5ddfd2017337fcf61767b487e0a2f7140005eb64a8fc0689f422226187aef82c",
+      "function": "executeMoodleScormInPage",
+      "toolName": "moodle_replace_scorm_package",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "single"
+    },
+    "moodle.form.course.modedit.scorm.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_scorm",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.scorm.write.v1": {
+      "file": "moodle-scorm-executor.js",
+      "functionByteRange": [
+        846,
+        50329
+      ],
+      "functionSha256": "5ddfd2017337fcf61767b487e0a2f7140005eb64a8fc0689f422226187aef82c",
+      "function": "executeMoodleScormInPage",
+      "toolName": "moodle_update_scorm",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.subsection.create.write.v1": {
+      "file": "moodle-subsection-executor.js",
+      "functionByteRange": [
+        3525,
+        37972
+      ],
+      "functionSha256": "3a5df1370070459a353cd725e90d9176e4610a758c8ec41010214b6b78c35b88",
+      "function": "executeMoodleSubsectionInPage",
+      "toolName": "moodle_create_subsection",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.url.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_url_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.url.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_url",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.url.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_url",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.url.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_url",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.wiki.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_wiki_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.wiki.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_wiki",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.wiki.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_wiki",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.wiki.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_wiki",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.workshop.create.read.v1": {
+      "file": "moodle-workshop-executor.js",
+      "functionByteRange": [
+        4275,
+        55852
+      ],
+      "functionSha256": "fbf956c5a26c9838609a350611577b100efc009a925a757dd73a6641433341d8",
+      "function": "executeMoodleWorkshopInPage",
+      "toolName": "moodle_get_workshop_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.workshop.create.write.v1": {
+      "file": "moodle-workshop-executor.js",
+      "functionByteRange": [
+        4275,
+        55852
+      ],
+      "functionSha256": "fbf956c5a26c9838609a350611577b100efc009a925a757dd73a6641433341d8",
+      "function": "executeMoodleWorkshopInPage",
+      "toolName": "moodle_create_workshop",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.workshop.read.v1": {
+      "file": "moodle-workshop-executor.js",
+      "functionByteRange": [
+        4275,
+        55852
+      ],
+      "functionSha256": "fbf956c5a26c9838609a350611577b100efc009a925a757dd73a6641433341d8",
+      "function": "executeMoodleWorkshopInPage",
+      "toolName": "moodle_get_workshop",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.course.modedit.workshop.write.v1": {
+      "file": "moodle-workshop-executor.js",
+      "functionByteRange": [
+        4275,
+        55852
+      ],
+      "functionSha256": "fbf956c5a26c9838609a350611577b100efc009a925a757dd73a6641433341d8",
+      "function": "executeMoodleWorkshopInPage",
+      "toolName": "moodle_update_workshop",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.data.entry_summary.read.v1": {
+      "file": "moodle-activity-content-read.js",
+      "functionByteRange": [
+        2373,
+        29641
+      ],
+      "functionSha256": "7bd226ac983edbe6003d3f4a0aa385b1fd9db022157648e3c6938858d315dd71",
+      "function": "executeMoodleActivityContentReadInPage",
+      "toolName": "moodle_get_database_entry_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.data.field.create.write.v1": {
+      "file": "moodle-activity-content-executor.js",
+      "functionByteRange": [
+        3211,
+        70377
+      ],
+      "functionSha256": "2576f637904897f09b4ded406138426d92edc8e00707aca2c33fa18b9e3c2805",
+      "function": "executeMoodleActivityContentInPage",
+      "toolName": "moodle_create_database_field",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.data.field.write.v1": {
+      "file": "moodle-activity-content-executor.js",
+      "functionByteRange": [
+        3211,
+        70377
+      ],
+      "functionSha256": "2576f637904897f09b4ded406138426d92edc8e00707aca2c33fa18b9e3c2805",
+      "function": "executeMoodleActivityContentInPage",
+      "toolName": "moodle_update_database_field",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.data.fields.read.v1": {
+      "file": "moodle-activity-content-read.js",
+      "functionByteRange": [
+        2373,
+        29641
+      ],
+      "functionSha256": "7bd226ac983edbe6003d3f4a0aa385b1fd9db022157648e3c6938858d315dd71",
+      "function": "executeMoodleActivityContentReadInPage",
+      "toolName": "moodle_get_database_fields",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.enrol.methods.read.v1": {
+      "file": "moodle-participants-read.js",
+      "functionByteRange": [
+        14945,
+        25857
+      ],
+      "functionSha256": "f47d31fcd3417abdef212d89aace88b72d5b2942e26502474b1d9ff10709a4a3",
+      "function": "executeMoodleEnrolmentMethodsInPage",
+      "toolName": "moodle_get_enrolment_methods",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.enrol.participant.enrol.write.v1": {
+      "file": "moodle-enrolment-executor.js",
+      "functionByteRange": [
+        3623,
+        54028
+      ],
+      "functionSha256": "f65e3ad3a3c114d89f5e4502a5d01d0b1137fe1931e3cbf45ee745a7dbd4e950",
+      "function": "executeMoodleEnrolmentInPage",
+      "toolName": "moodle_enrol_participant",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.enrol.participant.read.v1": {
+      "file": "moodle-participants-read.js",
+      "functionByteRange": [
+        26189,
+        40286
+      ],
+      "functionSha256": "8826ce234be4b8d6d47f91ad8c2235ef5d9fefe8c2d56d3598c105ad097b4c5e",
+      "function": "executeMoodleParticipantEnrolmentInPage",
+      "toolName": "moodle_get_participant_enrolment",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.enrol.participant.suspend.write.v1": {
+      "file": "moodle-enrolment-executor.js",
+      "functionByteRange": [
+        3623,
+        54028
+      ],
+      "functionSha256": "f65e3ad3a3c114d89f5e4502a5d01d0b1137fe1931e3cbf45ee745a7dbd4e950",
+      "function": "executeMoodleEnrolmentInPage",
+      "toolName": "moodle_suspend_participant",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.enrol.participant.unenrol.write.v1": {
+      "file": "moodle-enrolment-executor.js",
+      "functionByteRange": [
+        3623,
+        54028
+      ],
+      "functionSha256": "f65e3ad3a3c114d89f5e4502a5d01d0b1137fe1931e3cbf45ee745a7dbd4e950",
+      "function": "executeMoodleEnrolmentInPage",
+      "toolName": "moodle_unenrol_participant",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.enrol.participants.read.v1": {
+      "file": "moodle-participants-read.js",
+      "functionByteRange": [
+        831,
+        14689
+      ],
+      "functionSha256": "e088842e49f6a0ca203265f35eeeb729f445f4d8f1fb28378c2657532dbea164",
+      "function": "executeMoodleCourseParticipantsInPage",
+      "toolName": "moodle_get_course_participants",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.feedback.item.create.write.v1": {
+      "file": "moodle-activity-content-executor.js",
+      "functionByteRange": [
+        3211,
+        70377
+      ],
+      "functionSha256": "2576f637904897f09b4ded406138426d92edc8e00707aca2c33fa18b9e3c2805",
+      "function": "executeMoodleActivityContentInPage",
+      "toolName": "moodle_create_feedback_item",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.feedback.item.write.v1": {
+      "file": "moodle-activity-content-executor.js",
+      "functionByteRange": [
+        3211,
+        70377
+      ],
+      "functionSha256": "2576f637904897f09b4ded406138426d92edc8e00707aca2c33fa18b9e3c2805",
+      "function": "executeMoodleActivityContentInPage",
+      "toolName": "moodle_update_feedback_item",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.feedback.items.read.v1": {
+      "file": "moodle-activity-content-read.js",
+      "functionByteRange": [
+        2373,
+        29641
+      ],
+      "functionSha256": "7bd226ac983edbe6003d3f4a0aa385b1fd9db022157648e3c6938858d315dd71",
+      "function": "executeMoodleActivityContentReadInPage",
+      "toolName": "moodle_get_feedback_items",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.feedback.response_summary.read.v1": {
+      "file": "moodle-activity-content-read.js",
+      "functionByteRange": [
+        2373,
+        29641
+      ],
+      "functionSha256": "7bd226ac983edbe6003d3f4a0aa385b1fd9db022157648e3c6938858d315dd71",
+      "function": "executeMoodleActivityContentReadInPage",
+      "toolName": "moodle_get_feedback_response_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.forum.activity_summary.read.v1": {
+      "file": "moodle-forum-activity-summary-read.js",
+      "functionByteRange": [
+        315,
+        13481
+      ],
+      "functionSha256": "4d66a59a5c564eb102aac7e78580bff503f1fabd3ebecb5fba4e7b2f427ac2fe",
+      "function": "executeMoodleForumActivitySummaryInPage",
+      "toolName": "moodle_get_forum_activity_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.forum.discussion.create.write.v1": {
+      "file": "moodle-forum-post-executor.js",
+      "functionByteRange": [
+        814,
+        46407
+      ],
+      "functionSha256": "45e391a7e1968c055d7453f17be56f098c45f1b3e54eb96a247fd323575dc995",
+      "function": "executeMoodleForumPostInPage",
+      "toolName": "moodle_create_forum_discussion",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.forum.discussion.lock.write.v1": {
+      "file": "moodle-forum-post-executor.js",
+      "functionByteRange": [
+        814,
+        46407
+      ],
+      "functionSha256": "45e391a7e1968c055d7453f17be56f098c45f1b3e54eb96a247fd323575dc995",
+      "function": "executeMoodleForumPostInPage",
+      "toolName": "moodle_lock_forum_discussion",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.forum.discussion.pin.write.v1": {
+      "file": "moodle-forum-post-executor.js",
+      "functionByteRange": [
+        814,
+        46407
+      ],
+      "functionSha256": "45e391a7e1968c055d7453f17be56f098c45f1b3e54eb96a247fd323575dc995",
+      "function": "executeMoodleForumPostInPage",
+      "toolName": "moodle_pin_forum_discussion",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.forum.discussion.subscription.write.v1": {
+      "file": "moodle-forum-post-executor.js",
+      "functionByteRange": [
+        814,
+        46407
+      ],
+      "functionSha256": "45e391a7e1968c055d7453f17be56f098c45f1b3e54eb96a247fd323575dc995",
+      "function": "executeMoodleForumPostInPage",
+      "toolName": "moodle_set_forum_subscription",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.forum.post.reply.write.v1": {
+      "file": "moodle-forum-post-executor.js",
+      "functionByteRange": [
+        814,
+        46407
+      ],
+      "functionSha256": "45e391a7e1968c055d7453f17be56f098c45f1b3e54eb96a247fd323575dc995",
+      "function": "executeMoodleForumPostInPage",
+      "toolName": "moodle_reply_to_forum_post",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.forum.post_target.read.v1": {
+      "file": "moodle-forum-post-executor.js",
+      "functionByteRange": [
+        814,
+        46407
+      ],
+      "functionSha256": "45e391a7e1968c055d7453f17be56f098c45f1b3e54eb96a247fd323575dc995",
+      "function": "executeMoodleForumPostInPage",
+      "toolName": "moodle_get_forum_post_target",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.glossary.entries.read.v1": {
+      "file": "moodle-glossary-wiki-executor.js",
+      "functionByteRange": [
+        3471,
+        54779
+      ],
+      "functionSha256": "7565aecf89351f858a48e032b110795b466cdacd2db6779b970ad45a2af932bf",
+      "function": "executeMoodleGlossaryWikiInPage",
+      "toolName": "moodle_list_glossary_entries",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.glossary.entry.create.write.v1": {
+      "file": "moodle-glossary-wiki-executor.js",
+      "functionByteRange": [
+        3471,
+        54779
+      ],
+      "functionSha256": "7565aecf89351f858a48e032b110795b466cdacd2db6779b970ad45a2af932bf",
+      "function": "executeMoodleGlossaryWikiInPage",
+      "toolName": "moodle_create_glossary_entry",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.glossary.entry.read.v1": {
+      "file": "moodle-glossary-wiki-executor.js",
+      "functionByteRange": [
+        3471,
+        54779
+      ],
+      "functionSha256": "7565aecf89351f858a48e032b110795b466cdacd2db6779b970ad45a2af932bf",
+      "function": "executeMoodleGlossaryWikiInPage",
+      "toolName": "moodle_get_glossary_entry",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.glossary.entry.update.write.v1": {
+      "file": "moodle-glossary-wiki-executor.js",
+      "functionByteRange": [
+        3471,
+        54779
+      ],
+      "functionSha256": "7565aecf89351f858a48e032b110795b466cdacd2db6779b970ad45a2af932bf",
+      "function": "executeMoodleGlossaryWikiInPage",
+      "toolName": "moodle_update_glossary_entry",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.outcome.index.read.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_get_grade_outcomes",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.report.learner.read.v1": {
+      "file": "moodle-grade-report-read.js",
+      "functionByteRange": [
+        18806,
+        32182
+      ],
+      "functionSha256": "c03f49ccae2e21b40707c57cb37060cad42b6848ef8327f3eaf686f7e0f228a1",
+      "function": "executeMoodleLearnerGradeReportInPage",
+      "toolName": "moodle_get_learner_grade_report",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.report.summary.read.v1": {
+      "file": "moodle-grade-report-read.js",
+      "functionByteRange": [
+        2829,
+        18347
+      ],
+      "functionSha256": "1afb9671ba19b63481342fdb1a3078f990f8c0ff6ff5540380bceb9e955980ad",
+      "function": "executeMoodleGradeReportSummaryInPage",
+      "toolName": "moodle_get_grade_report_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.scale.index.read.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_get_grade_scales",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.settings.index.read.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_get_gradebook_settings",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.tree.category.read.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_get_grade_category",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.tree.category.settings.write.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_update_grade_category_settings",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.tree.category.write.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_update_grade_category",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.tree.index.read.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_get_gradebook_setup",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.tree.item.read.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_get_grade_item",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.tree.item.settings.write.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_update_grade_item_settings",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grade.tree.item.write.v1": {
+      "file": "moodle-gradebook-executor.js",
+      "functionByteRange": [
+        659,
+        52256
+      ],
+      "functionSha256": "0b2b0bc8a19d74361a327f06485b7fe74a4ecc3f1b3128af4a5c7d75b7a935f7",
+      "function": "executeMoodleGradebookInPage",
+      "toolName": "moodle_update_grade_item",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.group.create.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_create_group",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.group.delete.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_delete_group",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.group.member.add.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_add_group_member",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.group.member.remove.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_remove_group_member",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.group.update.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_update_group",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grouping.create.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_create_grouping",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grouping.groups.set.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_set_grouping_groups",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.grouping.update.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_update_grouping",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.lesson.page.create.v1": {
+      "file": "moodle-lesson-executor.js",
+      "functionByteRange": [
+        4921,
+        59332
+      ],
+      "functionSha256": "5958d62579e258edf95b59a45165272768b79db1a08ae74213ecac7dab2e2a0b",
+      "function": "executeMoodleLessonPageWriteInPage",
+      "toolName": "moodle_create_lesson_page",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.lesson.page.delete.v1": {
+      "file": "moodle-lesson-executor.js",
+      "functionByteRange": [
+        4921,
+        59332
+      ],
+      "functionSha256": "5958d62579e258edf95b59a45165272768b79db1a08ae74213ecac7dab2e2a0b",
+      "function": "executeMoodleLessonPageWriteInPage",
+      "toolName": "moodle_delete_lesson_page",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.lesson.page.move.v1": {
+      "file": "moodle-lesson-executor.js",
+      "functionByteRange": [
+        4921,
+        59332
+      ],
+      "functionSha256": "5958d62579e258edf95b59a45165272768b79db1a08ae74213ecac7dab2e2a0b",
+      "function": "executeMoodleLessonPageWriteInPage",
+      "toolName": "moodle_move_lesson_page",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.lesson.page.read.v1": {
+      "file": "moodle-lesson-read.js",
+      "functionByteRange": [
+        20774,
+        39585
+      ],
+      "functionSha256": "205abb9d17f21e9a82e7ada2c68e82031e722ff34ea1070043fdb264f54effe0",
+      "function": "executeMoodleLessonPageInPage",
+      "toolName": "moodle_get_lesson_page",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.lesson.page.update.v1": {
+      "file": "moodle-lesson-executor.js",
+      "functionByteRange": [
+        4921,
+        59332
+      ],
+      "functionSha256": "5958d62579e258edf95b59a45165272768b79db1a08ae74213ecac7dab2e2a0b",
+      "function": "executeMoodleLessonPageWriteInPage",
+      "toolName": "moodle_update_lesson_page",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.lesson.pages.read.v1": {
+      "file": "moodle-lesson-read.js",
+      "functionByteRange": [
+        3174,
+        20551
+      ],
+      "functionSha256": "4c9873c877faa8f226f657eea60e58bdd9250423a29458547776f9075dd35016",
+      "function": "executeMoodleLessonPageListInPage",
+      "toolName": "moodle_list_lesson_pages",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.assign.override.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_assignment_override",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.assign.override.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_assignment_override",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.assign.overrides.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_assignment_overrides",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.book.chapter.create.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_book_chapter_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.book.chapter.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_book_chapter",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.book.chapter.delete.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_delete_book_chapter",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.book.chapter.hide.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_hide_book_chapter",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.book.chapter.move.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_move_book_chapter",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.book.chapter.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_book_chapter",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.book.chapter.show.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_show_book_chapter",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.book.chapter.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_book_chapter",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.book.chapters.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_list_book_chapters",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.forum.export.read.v1": {
+      "file": "moodle-forum-read.js",
+      "functionByteRange": [
+        166,
+        15240
+      ],
+      "functionSha256": "fae1eaad6bccf9606fa9bd03d35e69344bb7f6e9836d9e7560242f881bde110b",
+      "function": "executeMoodleForumReadInPage",
+      "toolName": "moodle_get_forum_posts",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.edit.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_list_quiz_questions",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.edit.slot.maxmark.write.v1": {
+      "file": "moodle-quiz-structure-executor.js",
+      "functionByteRange": [
+        3911,
+        34902
+      ],
+      "functionSha256": "da942a47b453b0a083281a422df96eea62e8cee9221eaca48742c7fec347db56",
+      "function": "executeMoodleQuizStructureInPage",
+      "toolName": "moodle_set_quiz_slot_mark",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.edit.slot.move.write.v1": {
+      "file": "moodle-quiz-structure-executor.js",
+      "functionByteRange": [
+        3911,
+        34902
+      ],
+      "functionSha256": "da942a47b453b0a083281a422df96eea62e8cee9221eaca48742c7fec347db56",
+      "function": "executeMoodleQuizStructureInPage",
+      "toolName": "moodle_reorder_quiz_slot",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.edit.slot.pagebreak.write.v1": {
+      "file": "moodle-quiz-structure-executor.js",
+      "functionByteRange": [
+        3911,
+        34902
+      ],
+      "functionSha256": "da942a47b453b0a083281a422df96eea62e8cee9221eaca48742c7fec347db56",
+      "function": "executeMoodleQuizStructureInPage",
+      "toolName": "moodle_set_quiz_page_break",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.edit.slot.remove.write.v1": {
+      "file": "moodle-quiz-structure-executor.js",
+      "functionByteRange": [
+        3911,
+        34902
+      ],
+      "functionSha256": "da942a47b453b0a083281a422df96eea62e8cee9221eaca48742c7fec347db56",
+      "function": "executeMoodleQuizStructureInPage",
+      "toolName": "moodle_remove_quiz_slot",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.edit.structure.read.v1": {
+      "file": "moodle-quiz-structure-executor.js",
+      "functionByteRange": [
+        3911,
+        34902
+      ],
+      "functionSha256": "da942a47b453b0a083281a422df96eea62e8cee9221eaca48742c7fec347db56",
+      "function": "executeMoodleQuizStructureInPage",
+      "toolName": "moodle_get_quiz_structure",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.override.create.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_create_quiz_override",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.override.write.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_update_quiz_override",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.overrides.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_quiz_overrides",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.qbank_question.add.read.v1": {
+      "file": "moodle-qbank-question-executor.js",
+      "functionByteRange": [
+        4402,
+        69893
+      ],
+      "functionSha256": "5a1a99769343a21acd70bab292a965ee474f471099dcdcefef18a40fcd313cc4",
+      "function": "executeMoodleQbankQuestionInPage",
+      "toolName": "moodle_get_qbank_quiz_slot_plan",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.mod.quiz.qbank_question.add.write.v1": {
+      "file": "moodle-qbank-question-executor.js",
+      "functionByteRange": [
+        4402,
+        69893
+      ],
+      "functionSha256": "5a1a99769343a21acd70bab292a965ee474f471099dcdcefef18a40fcd313cc4",
+      "function": "executeMoodleQbankQuestionInPage",
+      "toolName": "moodle_add_qbank_question_to_quiz",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.question.bank.default_category.realize.write.v1": {
+      "file": "moodle-qbank-executor.js",
+      "functionByteRange": [
+        3144,
+        42467
+      ],
+      "functionSha256": "5a23376e5585af6e3dc0db712b14eae845d5e1741ab394cf48403ef1084864f9",
+      "function": "executeMoodleQbankInPage",
+      "toolName": "moodle_realize_qbank_default_category",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.question.bank.editquestion.create.read.v1": {
+      "file": "moodle-qbank-question-executor.js",
+      "functionByteRange": [
+        4402,
+        69893
+      ],
+      "functionSha256": "5a1a99769343a21acd70bab292a965ee474f471099dcdcefef18a40fcd313cc4",
+      "function": "executeMoodleQbankQuestionInPage",
+      "toolName": "moodle_get_qbank_question_creation_form",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.question.bank.editquestion.create.write.v1": {
+      "file": "moodle-qbank-question-executor.js",
+      "functionByteRange": [
+        4402,
+        69893
+      ],
+      "functionSha256": "5a1a99769343a21acd70bab292a965ee474f471099dcdcefef18a40fcd313cc4",
+      "function": "executeMoodleQbankQuestionInPage",
+      "toolName": "moodle_create_qbank_question",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.question.bank.editquestion.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_quiz_question",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.question.bank.filter.inventory.read.v1": {
+      "file": "moodle-executor.js",
+      "functionByteRange": [
+        6,
+        414028
+      ],
+      "functionSha256": "baaa8ec9262f861bed3166b066b7aa71cdaea58bf64da42a554fb033b194080e",
+      "function": "executeMoodleInPage",
+      "toolName": "moodle_get_question_bank_filter_inventory",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.question.bank.impact_scope.read.v1": {
+      "file": "moodle-question-impact-read.js",
+      "functionByteRange": [
+        2621,
+        22975
+      ],
+      "functionSha256": "758fc0062435a49d8f629f15d5ab4d86609024b6e9b90254de7cef21d224a77a",
+      "function": "executeMoodleQuestionBankImpactScopeInPage",
+      "toolName": "moodle_get_question_bank_impact_scope",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.quiz.attempt_detail.read.v1": {
+      "file": "moodle-quiz-attempt-detail-read.js",
+      "functionByteRange": [
+        2577,
+        19539
+      ],
+      "functionSha256": "cac6057f368e525d904983caf0f41501b23a449ac7cd31ef45db2a0258903b20",
+      "function": "executeMoodleQuizAttemptInPage",
+      "toolName": "moodle_get_quiz_attempt",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.quiz.attempt_summary.read.v1": {
+      "file": "moodle-quiz-attempt-summary-read.js",
+      "functionByteRange": [
+        275,
+        14519
+      ],
+      "functionSha256": "f0e7a5a8f4f721ce2e23ed5c72c3ea17c379bbb7a09232cb2a3ad806e284faf1",
+      "function": "executeMoodleQuizAttemptSummaryInPage",
+      "toolName": "moodle_get_quiz_attempt_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.quiz.manual_grading_queue.read.v1": {
+      "file": "moodle-quiz-attempt-detail-read.js",
+      "functionByteRange": [
+        19848,
+        31386
+      ],
+      "functionSha256": "64d3bf59592f70597959b9586309e8fe7d65c9e8f95f85652c31d324b18df21a",
+      "function": "executeMoodleQuizManualGradingQueueInPage",
+      "toolName": "moodle_get_quiz_manual_grading_queue",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.quiz.regrade_report.read.v1": {
+      "file": "moodle-quiz-attempt-detail-read.js",
+      "functionByteRange": [
+        31805,
+        42490
+      ],
+      "functionSha256": "0461c14460b4baeec9057dcff197ad5d123babefc1d8be5a96ca4b2e67d75b0f",
+      "function": "executeMoodleQuizRegradeReportInPage",
+      "toolName": "moodle_get_quiz_regrade_report",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.report.activity.read.v1": {
+      "file": "moodle-reports-read.js",
+      "functionByteRange": [
+        4075,
+        34700
+      ],
+      "functionSha256": "bff05389386edc43ee868657f52cb8b7479d261ca7b545c2d37aa5c032acc740",
+      "function": "executeMoodleCourseReportReadInPage",
+      "toolName": "moodle_get_course_activity_report",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.report.completion.read.v1": {
+      "file": "moodle-reports-read.js",
+      "functionByteRange": [
+        4075,
+        34700
+      ],
+      "functionSha256": "bff05389386edc43ee868657f52cb8b7479d261ca7b545c2d37aa5c032acc740",
+      "function": "executeMoodleCourseReportReadInPage",
+      "toolName": "moodle_get_course_completion_report",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.report.dates.read.v1": {
+      "file": "moodle-reports-read.js",
+      "functionByteRange": [
+        4075,
+        34700
+      ],
+      "functionSha256": "bff05389386edc43ee868657f52cb8b7479d261ca7b545c2d37aa5c032acc740",
+      "function": "executeMoodleCourseReportReadInPage",
+      "toolName": "moodle_get_course_dates_report",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.report.log_summary.read.v1": {
+      "file": "moodle-reports-read.js",
+      "functionByteRange": [
+        4075,
+        34700
+      ],
+      "functionSha256": "bff05389386edc43ee868657f52cb8b7479d261ca7b545c2d37aa5c032acc740",
+      "function": "executeMoodleCourseReportReadInPage",
+      "toolName": "moodle_get_course_log_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.report.participation.read.v1": {
+      "file": "moodle-reports-read.js",
+      "functionByteRange": [
+        4075,
+        34700
+      ],
+      "functionSha256": "bff05389386edc43ee868657f52cb8b7479d261ca7b545c2d37aa5c032acc740",
+      "function": "executeMoodleCourseReportReadInPage",
+      "toolName": "moodle_get_course_participation_report",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.scorm.attempt_summary.read.v1": {
+      "file": "moodle-scorm-report-read.js",
+      "functionByteRange": [
+        1585,
+        20669
+      ],
+      "functionSha256": "1895a04df36b07d51848132a573059e5b65dd588593452951bf2ee2d73c3be92",
+      "function": "executeMoodleScormAttemptSummaryInPage",
+      "toolName": "moodle_get_scorm_attempt_summary",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.scorm.learner_report.read.v1": {
+      "file": "moodle-scorm-report-read.js",
+      "functionByteRange": [
+        21073,
+        36364
+      ],
+      "functionSha256": "426022bd17973c8017461f6721d53aac034c519f611bc404d93edc973641e515",
+      "function": "executeMoodleScormLearnerReportInPage",
+      "toolName": "moodle_get_scorm_learner_report",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.wiki.page.read.v1": {
+      "file": "moodle-glossary-wiki-executor.js",
+      "functionByteRange": [
+        3471,
+        54779
+      ],
+      "functionSha256": "7565aecf89351f858a48e032b110795b466cdacd2db6779b970ad45a2af932bf",
+      "function": "executeMoodleGlossaryWikiInPage",
+      "toolName": "moodle_get_wiki_page",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.wiki.page.update.write.v1": {
+      "file": "moodle-glossary-wiki-executor.js",
+      "functionByteRange": [
+        3471,
+        54779
+      ],
+      "functionSha256": "7565aecf89351f858a48e032b110795b466cdacd2db6779b970ad45a2af932bf",
+      "function": "executeMoodleGlossaryWikiInPage",
+      "toolName": "moodle_update_wiki_page",
+      "readOnly": false,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.wiki.pages.read.v1": {
+      "file": "moodle-glossary-wiki-executor.js",
+      "functionByteRange": [
+        3471,
+        54779
+      ],
+      "functionSha256": "7565aecf89351f858a48e032b110795b466cdacd2db6779b970ad45a2af932bf",
+      "function": "executeMoodleGlossaryWikiInPage",
+      "toolName": "moodle_list_wiki_pages",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.form.workshop.phase.read.v1": {
+      "file": "moodle-workshop-executor.js",
+      "functionByteRange": [
+        4275,
+        55852
+      ],
+      "functionSha256": "fbf956c5a26c9838609a350611577b100efc009a925a757dd73a6641433341d8",
+      "function": "executeMoodleWorkshopInPage",
+      "toolName": "moodle_get_workshop_phase",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.native.participants_table.privacy_roster.v1": {
+      "file": "moodle-privacy.js",
+      "functionByteRange": [
+        180,
+        23082
+      ],
+      "functionSha256": "03efcdbccae8b5506ba66d3df9991b12da2de038fd2777f21a02fcc5579421ea",
+      "function": "collectMoodleCourseParticipantRoster",
+      "toolName": "moodle_get_course_participant_roster",
+      "readOnly": true,
+      "inputKind": "roster",
+      "attachmentMode": "none"
+    },
+    "moodle.page.group.groupings.read.v1": {
+      "file": "moodle-groups-executor.js",
+      "functionByteRange": [
+        4290,
+        77719
+      ],
+      "functionSha256": "c2ce63002b491754ffa674585e4bcf7f99d1f3937eac1df98e6417a7d0e6bfd7",
+      "function": "executeMoodleGroupsLifecycleInPage",
+      "toolName": "moodle_get_course_groupings",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.page.group.membership_map.read.v1": {
+      "file": "moodle-groups-read.js",
+      "functionByteRange": [
+        179,
+        10850
+      ],
+      "functionSha256": "ff5544262f07cdf0fc5129852ccd1c03092fe329dbe84af6673b2c755f546ef2",
+      "function": "executeMoodleCourseGroupsInPage",
+      "toolName": "moodle_get_course_groups",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.state.subsection.contents.read.v1": {
+      "file": "moodle-subsection-executor.js",
+      "functionByteRange": [
+        3525,
+        37972
+      ],
+      "functionSha256": "3a5df1370070459a353cd725e90d9176e4610a758c8ec41010214b6b78c35b88",
+      "function": "executeMoodleSubsectionInPage",
+      "toolName": "moodle_list_subsection_contents",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    },
+    "moodle.state.subsection.read.v1": {
+      "file": "moodle-subsection-executor.js",
+      "functionByteRange": [
+        3525,
+        37972
+      ],
+      "functionSha256": "3a5df1370070459a353cd725e90d9176e4610a758c8ec41010214b6b78c35b88",
+      "function": "executeMoodleSubsectionInPage",
+      "toolName": "moodle_get_subsection",
+      "readOnly": true,
+      "inputKind": "operation",
+      "attachmentMode": "none"
+    }
+  }
+}

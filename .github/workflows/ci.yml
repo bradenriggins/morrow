@@ -42,6 +42,7 @@ jobs:
               - 'morrow-for-muse/**'
               - 'desktop/connector/extension/src/**'
               - 'desktop/connector/extension/generated/moodle-browser-catalog.json'
+              - 'desktop/artifacts/moodle-browser/moodle-browser-routes.json'
               - '.github/**'
               - '.gitattributes'
               - '.gitignore'

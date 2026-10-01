@@ -108,6 +108,8 @@ REPO_FILES = ("LICENSE",)
 MOODLE_ASSET_SOURCE = "desktop/connector/extension/src/moodle-*.js"
 MOODLE_CATALOG_SOURCE = "desktop/connector/extension/generated/moodle-browser-catalog.json"
 MOODLE_CORE_SOURCE = "desktop/connector/extension/src/moodle-executor.js"
+MOODLE_ROUTE_SOURCE = "desktop/artifacts/moodle-browser/moodle-browser-routes.json"
+MOODLE_WORKER_SOURCE = "desktop/connector/extension/src/service-worker.js"
 # pytest-only test modules: they rely on conftest.py to stay out of the
 # live home, so run from an installed tree they would write the
 # educator's live journal. Only the install suites, which isolate
@@ -176,7 +178,7 @@ def repo_files():
     """Map canonical tracked repository files to their package destinations."""
     adapters = _git_out("ls-files", "-z", "--", MOODLE_ASSET_SOURCE)
     paths = {raw.decode("utf-8") for raw in adapters.split(b"\0") if raw}
-    paths.update((MOODLE_CORE_SOURCE, MOODLE_CATALOG_SOURCE))
+    paths.update((MOODLE_CORE_SOURCE, MOODLE_CATALOG_SOURCE, MOODLE_ROUTE_SOURCE))
     mappings = [(rel, rel) for rel in REPO_FILES]
     mappings.extend((rel, "moodle/browser-assets/" + os.path.basename(rel))
                     for rel in sorted(paths))
@@ -193,7 +195,36 @@ def repo_files():
             raise SystemExit("CARVE FAIL: morrow-for-muse/%s would shadow "
                              "the repository's %s" % (destination, rel))
         out[destination] = src
+    validate_moodle_routes()
     return out
+
+
+def validate_moodle_routes():
+    """Refuse a route registry built from other adapter or worker bytes."""
+    try:
+        with open(os.path.join(REPO, MOODLE_ROUTE_SOURCE), encoding="utf-8") as fh:
+            routes = json.load(fh)
+        sources = routes["sources"]
+        if routes["schema"] != "morrow.moodle-browser-routes.v1" or not isinstance(sources, dict):
+            raise ValueError("invalid routes")
+    except (OSError, ValueError, KeyError, TypeError):
+        raise SystemExit("CARVE FAIL: invalid %s" % MOODLE_ROUTE_SOURCE)
+    required = {"service-worker.js": MOODLE_WORKER_SOURCE,
+                "moodle-browser-catalog.json": MOODLE_CATALOG_SOURCE}
+    for name, digest in sources.items():
+        rel = required.get(name)
+        if rel is None and re.fullmatch(r"moodle-[a-z0-9-]+\.js", name):
+            rel = "desktop/connector/extension/src/" + name
+        if rel is None or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise SystemExit("CARVE FAIL: invalid source in %s" % MOODLE_ROUTE_SOURCE)
+        src = os.path.join(REPO, rel)
+        tracked = subprocess.run(
+            ["git", "-C", REPO, "ls-files", "--error-unmatch", "--", rel],
+            capture_output=True).returncode == 0
+        if not tracked or not os.path.isfile(src) or os.path.islink(src) or sha256(src) != digest:
+            raise SystemExit("CARVE FAIL: %s no longer matches %s" % (rel, MOODLE_ROUTE_SOURCE))
+    if not all(name in sources for name in required):
+        raise SystemExit("CARVE FAIL: incomplete sources in %s" % MOODLE_ROUTE_SOURCE)
 
 
 def _git_out(*args, **kwargs):
@@ -216,14 +247,16 @@ def source_state(sources):
         raise SystemExit("CARVE FAIL: the repository has no commit to "
                          "carve from")
     scope = ["--", os.path.relpath(SRC, REPO), MOODLE_ASSET_SOURCE,
-             MOODLE_CATALOG_SOURCE] + list(REPO_FILES)
+             MOODLE_CATALOG_SOURCE, MOODLE_ROUTE_SOURCE,
+             MOODLE_WORKER_SOURCE] + list(REPO_FILES)
     changed = {path.decode("utf-8") for path in _git_out(
         "diff", "--name-only", "--no-renames", "-z", "HEAD",
         *scope).split(b"\0") if path}
     committed = {}
     tree_scope = ["--", os.path.relpath(SRC, REPO),
                   os.path.dirname(MOODLE_CORE_SOURCE),
-                  MOODLE_CATALOG_SOURCE] + list(REPO_FILES)
+                  MOODLE_CATALOG_SOURCE, MOODLE_ROUTE_SOURCE,
+                  MOODLE_WORKER_SOURCE] + list(REPO_FILES)
     for entry in _git_out("ls-tree", "-r", "-z", "HEAD",
                           *tree_scope).split(b"\0"):
         if entry:

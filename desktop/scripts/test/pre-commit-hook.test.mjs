@@ -201,7 +201,7 @@ test("a change to files only the repository gates read runs the gates only", (t)
 // commit ran the repository text gates. Every path below is swept against the steps ci.yml names.
 test("each change runs exactly the steps CI runs for it, derived from ci.yml", (t) => {
   const { work, commit } = repository(t);
-  const paths = ["desktop/file.txt", "morrow-for-muse/file.txt", ".github/workflows/ci.yml", "desktop/connector/extension/src/moodle-executor.js", "desktop/connector/extension/src/moodle-extra-executor.js", "desktop/connector/extension/generated/moodle-browser-catalog.json", ...Object.keys(ROOT_FILE_READERS)];
+  const paths = ["desktop/file.txt", "morrow-for-muse/file.txt", ".github/workflows/ci.yml", "desktop/connector/extension/src/moodle-executor.js", "desktop/connector/extension/src/moodle-extra-executor.js", "desktop/connector/extension/generated/moodle-browser-catalog.json", "desktop/artifacts/moodle-browser/moodle-browser-routes.json", ...Object.keys(ROOT_FILE_READERS)];
   const wrong = paths.flatMap((path) => {
     const result = commit(path);
     const expected = expectedCalls(path, work);
