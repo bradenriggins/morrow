@@ -202,6 +202,13 @@ class SafeRedirectSession(requests.Session if requests is not None else object):
         resolved = urlparse(urljoin(resp.url or prev_url, target))
         new_scheme = resolved.scheme
         prev_parts = urlparse(prev_url)
+        def origin_label(parts):
+            host = parts.hostname or "unknown"
+            if ":" in host:
+                host = "[" + host + "]"
+            port = ":%d" % parts.port if parts.port is not None else ""
+            return parts.scheme + "://" + host + port
+
         if (resolved.hostname or "").lower() != \
                 (prev_parts.hostname or "").lower() \
                 or resolved.port != prev_parts.port:
@@ -211,14 +218,15 @@ class SafeRedirectSession(requests.Session if requests is not None else object):
             raise MoodleLaneError(
                 "network",
                 "refused redirect off the Moodle host: %s -> %s (no "
-                "request was sent to the other host)" % (prev_url, target))
+                "request was sent to the other host)" %
+                (origin_label(prev_parts), origin_label(resolved)))
         if prev_scheme == "https" and new_scheme == "http":
             raise MoodleLaneError(
                 "network",
                 "refused https->http redirect downgrade: %s -> %s "
                 "(session credentials would cross plaintext; no "
                 "request was sent to the http target)"
-                % (prev_url, target))
+                % (origin_label(prev_parts), origin_label(resolved)))
         return target
 
 

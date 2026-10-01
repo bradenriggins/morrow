@@ -2,6 +2,8 @@
 
 ## 0.4.8 (2026-09-30)
 
+- Keep session keys, SSO codes, URL credentials, and fragments out of
+  refused Moodle redirect errors.
 - Refuse oversized Moodle AJAX reads and malformed response envelopes
   before they can become complete results or crash the caller.
 - Preserve continuation links with multiple relations, URI delimiters, or
