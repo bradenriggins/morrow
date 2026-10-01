@@ -88,6 +88,13 @@ The bootstrap/discovery layer couples to these deployment details:
   create, readback, undo, and absence. Its receipts stay in the source
   repository. Runtime journals are local to the configured journal
   directory and contain bounded receipts, not cookie or password values.
+- Write IDs also have atomic reservation files under the journal directory.
+  Each reservation is synced before dispatch. Lost responses and failed
+  readback retain it, so another session cannot resend the same write.
+  A classified sign-in response releases a reservation only because it
+  proves no write effect; verified sign-in and approval are still required.
+  Corrupt or unreadable existing journals refuse writes. These checks have
+  local regression coverage and do not supply the production handoff above.
 - The live write batteries live in
   `../proof-battery/evidence/moodle-wave2/` (`proof_run2.py`,
   `discover_wave2.py` and friends), not in this directory.
