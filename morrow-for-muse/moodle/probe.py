@@ -15,9 +15,9 @@ connector must answer at connect time (section 3.3):
     (tracksessionip, limitconcurrentlogins, custom cookie names are
     config-gated: recorded as UNOBSERVABLE, not wished away.)
 
-The probe is read-only by construction: GETs plus benign AJAX calls
-with nonsense IDs that can only produce "not found" errors, never
-writes. Output carries shapes, statuses, lengths, and IDs only.
+The probe uses only known read functions. An arbitrary ID cannot prove
+that a mutation is harmless. Write functions require the governed
+operation path and are never called by this probe.
 
 Usage:
   probe.py --base https://sandbox.moodledemo.net --username teacher --password <published demo password>
@@ -50,8 +50,7 @@ USER_AGENT = "morrow-moodle-prober/0.1 (read-only capability probe)"
 DEFAULT_TIMEOUT = 25
 
 # The lane's function set: (function, benign args, why the lane needs it).
-# Benign args are chosen to be executable but side-effect-free; a
-# "not found" provider error still proves the function is AJAX-exposed.
+# A "not found" response from a known read still proves AJAX exposure.
 FUNCTION_SET = [
     ("core_course_get_enrolled_courses_by_timeline_classification",
      {"classification": "all"}, "course discovery (read)"),
@@ -63,14 +62,8 @@ FUNCTION_SET = [
      "forum discovery (read)"),
     ("mod_forum_get_forum_discussions", {"forumid": 1},
      "discussion listing readback"),
-    ("mod_forum_add_discussion",
-     {"forumid": 999999999, "subject": "probe", "message": "probe"},
-     "discussion create (write; bogus forumid so the probe can only "
-     "fail, never write; form-path fallback expected on 5.2)"),
-    ("mod_forum_delete_discussion", {"discussionid": 999999999},
-     "discussion delete (negative control: absent from the 5.2 registry, "
-     "so the undo for a discussion create is the form-path delete)"),
 ]
+PROBE_READ_FUNCTIONS = frozenset(function for function, _, _ in FUNCTION_SET)
 
 VERSION_RE = re.compile(r"Moodle\s+(\d+\.\d+)")
 
@@ -87,6 +80,10 @@ def scrape_version(session: "requests.Session", base: str,
 def probe_function(sess: MoodleSession, methodname: str,
                    args: Dict[str, Any]) -> Dict[str, Any]:
     """Classify one function: ajax_exposed / not_exposed / other error."""
+    if methodname not in PROBE_READ_FUNCTIONS:
+        return {"function": methodname, "ajax": "unknown",
+                "signal": "requires-governed-operation",
+                "detail": "this capability requires a governed provider proof; no probe request was sent"}
     try:
         env = sess._ajax_call(methodname, args)
     except Exception as exc:  # MoodleLaneError or network

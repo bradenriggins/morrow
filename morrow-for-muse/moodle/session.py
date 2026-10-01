@@ -633,6 +633,18 @@ class MoodleSession:
         op_id = plan.get("op_id") or str(uuid.uuid4())
         tool = plan["tool"]
         args = plan.get("args", {})
+        verify_block = plan.get("verify")
+        if verify_block is not None:
+            match = verify_block.get("match") if isinstance(verify_block, dict) else None
+            if (not isinstance(verify_block, dict)
+                    or not isinstance(verify_block.get("method"), str)
+                    or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", verify_block["method"])
+                    or not isinstance(verify_block.get("args", {}), dict)
+                    or not isinstance(match, dict)
+                    or not isinstance(match.get("field"), str)
+                    or not match["field"] or len(match["field"]) > 128
+                    or "value" not in match or match["value"] is None):
+                raise MoodleLaneError("verification", "invalid frozen Moodle readback; no write was sent")
         # A halted session cannot claim an operation until verified
         # resume and fresh per-op approval.
         self._check_reauth_halt()
@@ -656,12 +668,15 @@ class MoodleSession:
             raise
 
         receipt = _receipt(data, plan.get("receipt_fields", ["id", "name"]))
-        verify_block = plan.get("verify")
         verify_result: Dict[str, Any] = {"status": "n/a"}
         if verify_block:
             verify_result = self._run_verify(verify_block)
 
         self.journal(tool, args, receipt, op_id=op_id, verify=verify_result)
+        if verify_result["status"] == "FAILED":
+            raise MoodleLaneError(
+                "verification", "Moodle write readback did not match; do not repeat the write",
+                {"op_id": op_id, "status": "FAILED", "write_dispatched": True})
         return {"op_id": op_id, "receipt": receipt, "verify": verify_result}
 
     def _run_verify(self, verify: Dict[str, Any]) -> Dict[str, Any]:

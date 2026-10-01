@@ -2,6 +2,13 @@
 
 ## 0.4.8 (2026-09-30)
 
+- Keep the read-only Moodle capability probe on known read functions.
+  Never test mutation support by assuming a large target ID cannot exist.
+- Report failed Moodle write readbacks as failures. Validate frozen matches
+  before dispatch and retain failed verification records and replay guards.
+- Add the Moodle browser identity and course-page transport. Keep session
+  material inside Chromium and refuse site or account changes. The governed
+  Moodle operation and setup integration remains a release gate.
 - Refuse unsafe Moodle form paths before sending the session key. Keep
   form query values out of receipts.
 - Store new Moodle journals and write reservations under `MORROW_HOME`.

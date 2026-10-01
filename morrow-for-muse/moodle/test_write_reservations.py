@@ -54,7 +54,8 @@ def test_ambiguous_write_stays_reserved_after_restart(tmp_path, failure):
 
 def test_failed_verification_cannot_replay_after_restart(tmp_path):
     provider = Provider()
-    plan = dict(PLAN, verify={"method": "synthetic_verify"})
+    plan = dict(PLAN, verify={"method": "synthetic_verify",
+                             "match": {"field": "id", "value": 1}})
     with pytest.raises(RuntimeError):
         session(tmp_path, provider).write(plan)
     with pytest.raises(MoodleLaneError, match="already used"):
