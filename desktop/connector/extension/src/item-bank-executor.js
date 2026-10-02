@@ -129,7 +129,10 @@ export async function executeItemBankInPage(input) {
     if (!apiHostPattern.test(apiHost) || !principalId || principalId !== input.principalId) return { matched: false };
     try { referrerUrl = new URL(document.referrer || ""); } catch { return { matched: false }; }
     if (referrerUrl.origin !== canvasUrl.origin) return { matched: false };
-    if (standardTenant && apiHost.split(".")[0] !== standardTenant) return { matched: false };
+    // A custom Canvas domain has no trustworthy tenant label, so it is refused
+    // instead of granting access to a guessed host, as the native path above
+    // and the permission-origins rule do.
+    if (!standardTenant || apiHost.split(".")[0] !== standardTenant) return { matched: false };
     const referrer = referrerUrl.pathname.match(/^\/courses\/([1-9][0-9]*)\/external_tools\/([1-9][0-9]*)\/?$/);
     const referrerCourse = referrer?.[1];
     externalToolId = id(referrer?.[2]);
@@ -380,9 +383,15 @@ export async function executeItemBankInPage(input) {
     if (String(formValues.entity_type) !== "course") return { matched: true, ok: false, sent: false, error: "item_bank_share_scope_unsupported" };
     if (formValues.permission !== undefined && String(formValues.permission) !== "read") return { matched: true, ok: false, sent: false, error: "item_bank_share_permission_unsupported" };
     // The bank service names a course by its Canvas uuid, so the numeric course id the person
-    // chose is resolved to that course's uuid by Canvas itself before anything is shared.
+    // chose is resolved to that course's uuid by Canvas itself before anything is shared. A raw
+    // numeric id names no course to the bank service, so sending one would share with nobody
+    // while the readback below still matched what was sent.
     let sharedEntity = String(formValues.entity_id);
-    if (native) {
+    if (sharedEntity === input.courseId) {
+      // The reviewed course's own uuid is already established: the native path
+      // read it from Canvas itself, and the LTI credential carries it.
+      sharedEntity = contextUuid;
+    } else {
       const target = await canvasCourse(canvasUrl.origin, sharedEntity);
       if (!target) {
         return { matched: true, ok: false, sent: false, error: "item_bank_share_course_unavailable" };
@@ -807,6 +816,17 @@ export async function executeItemBankInPage(input) {
   const verifyCourseAssociation = async () => {
     const requestedBank = id(input.arguments?.bank_id);
     if (!requestedBank) return { matched: true, ok: false, sent: false, error: "bank_id is required" };
+    // A copy or move reads its question from another bank: that bank must be
+    // one this course holds too, or the copy would carry another course's
+    // question into this one. A bank shared with this course lists here, so a
+    // shared source still passes.
+    const wanted = new Set([requestedBank]);
+    if (operation.nickname === "copy_entry" || operation.nickname === "move_entry") {
+      const sourceBank = id(formValues.source_bank_id);
+      if (!sourceBank) return { matched: true, ok: false, sent: false, error: "item_bank_source_entry_required" };
+      wanted.add(sourceBank);
+    }
+    const seen = new Set();
     let associated = false;
     let exhausted = false;
     for (let page = 1; page <= 25; page += 1) {
@@ -830,7 +850,8 @@ export async function executeItemBankInPage(input) {
       if (!Array.isArray(rows) || rows.some((row) => !row || typeof row !== "object" || Array.isArray(row) || !id(row.id))) {
         return { matched: true, ok: false, sent: false, status: response.status, outcomeUnknown: false, error: "item_bank_course_association_unreadable" };
       }
-      if (rows.some((row) => id(row.id) === requestedBank)) {
+      for (const row of rows) seen.add(id(row.id));
+      if ([...wanted].every((bank) => seen.has(bank))) {
         associated = true;
         break;
       }

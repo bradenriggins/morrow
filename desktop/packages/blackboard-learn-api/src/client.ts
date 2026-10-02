@@ -10,6 +10,8 @@ const DEFAULT_COLLECTION_LIMIT = 100;
 const MAX_DIAGNOSTIC_HEADERS = 8;
 const MAX_DIAGNOSTIC_HEADER_LENGTH = 200;
 const AUTHENTICATED_PRINCIPAL_PATH = "/learn/api/public/v1/users/me";
+/** The shared credential exchange answers every waiter, so it carries its own bound instead of a caller's signal. */
+const TOKEN_EXCHANGE_TIMEOUT_MS = 30_000;
 /** A record, a created record, or a change the tenant accepted without describing it. */
 const ACCEPTED_STATUS = new Set([200, 201, 204]);
 /** The documented asynchronous course-copy request answers 202 with a task Location. */
@@ -85,6 +87,9 @@ interface TokenRecord {
 function abortError(error: unknown): BlackboardApiError | undefined {
   if (error instanceof DOMException && error.name === "AbortError") {
     return new ApiError("blackboard_request_cancelled", "The Blackboard request was cancelled.");
+  }
+  if (error instanceof DOMException && error.name === "TimeoutError") {
+    return new ApiError("blackboard_request_cancelled", "The Blackboard request timed out.");
   }
   return undefined;
 }
@@ -245,6 +250,10 @@ export class BlackboardLearnClient {
       // own signal below.
       this.tokenRequest = (async () => {
         const url = new URL("/learn/api/public/v1/oauth2/token", this.tenant.baseUrl);
+        // Its own timeout instead of a caller's signal: a hung Learn must
+        // settle the shared promise for every waiter rather than wedge each
+        // later credential read behind an exchange that never answers.
+        const timeout = AbortSignal.timeout(TOKEN_EXCHANGE_TIMEOUT_MS);
         try {
           this.requests += 1;
           const response = await this.fetcher(url, {
@@ -256,9 +265,10 @@ export class BlackboardLearnClient {
               accept: "application/json",
             },
             body: "grant_type=client_credentials",
+            signal: timeout,
           });
           if (response.status !== 200) throw responseError(response, this.diagnosticHeaders);
-          const payload = await jsonResponse(response);
+          const payload = await jsonResponse(response, timeout);
           if (!payload || typeof payload.access_token !== "string" || !payload.access_token || typeof payload.expires_in !== "number" || !Number.isFinite(payload.expires_in) || payload.expires_in < 1) {
             throw new ApiError("blackboard_response_invalid", "Blackboard returned an invalid OAuth response.");
           }

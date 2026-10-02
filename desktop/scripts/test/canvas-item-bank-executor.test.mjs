@@ -259,6 +259,26 @@ function provider({ writeStatus = 0, sabotage = false, banks, items, entries, sh
   return { state, requests, fetch, dispatches: () => requests.filter((request) => request.method !== "GET").length };
 }
 
+// Canvas itself names each course's uuid for a share target: the bank service
+// shares under the uuid, never under the numeric id the reviewer chose.
+const TARGET_COURSE_UUID = "target-course-77-uuid";
+const COURSE_UUIDS = { 42: CONTEXT_UUID, 77: TARGET_COURSE_UUID };
+function sharingFetch(api) {
+  const canvasReads = [];
+  const fetch = async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.origin === "https://school.instructure.com") {
+      canvasReads.push(parsed.pathname);
+      const match = parsed.pathname.match(/^\/api\/v1\/courses\/([1-9][0-9]*)$/);
+      const uuid = match ? COURSE_UUIDS[match[1]] : undefined;
+      return new Response(JSON.stringify(uuid ? { id: Number(match[1]), uuid } : { error: "missing" }),
+        { status: uuid ? 200 : 404, headers: { "content-type": "application/json" } });
+    }
+    return api.fetch(url, options);
+  };
+  return { fetch, canvasReads };
+}
+
 /**
  * The observed-reach disclosure every existing-bank change carries. It is never
  * a complete claim, and the reviewer acknowledges the exact observed external
@@ -410,7 +430,7 @@ const WRITE_SHAPES = [
 async function runShape(shape, options = {}) {
   return await withPageContext(async () => {
     const api = provider(options);
-    globalThis.fetch = api.fetch;
+    globalThis.fetch = sharingFetch(api).fetch;
     const args = await shape.args(api.state);
     if (options.stale && shape.stale) shape.stale(api.state);
     else if (options.stale) api.state.banks[0] = { ...api.state.banks[0], title: "Renamed behind the reviewer" };
@@ -957,6 +977,99 @@ test("a bank the selected course does not hold is refused before any bank reques
   });
 });
 
+test("a copy or move whose source bank the selected course does not hold is refused", async () => {
+  // The question a copy or move takes must come from a bank this course
+  // holds: an unchecked source bank would carry another course's question
+  // into this one. A source the course holds passes, as the write round-trip
+  // above proves; a foreign one stops at the association check.
+  for (const nickname of ["copy_entry", "move_entry"]) {
+    await withPageContext(async () => {
+      const api = provider();
+      api.state.banks.push({ id: "90", title: "Foreign bank", language: "en" });
+      api.state.entries.set("403", { id: "403", bank_id: "90", entry_type: "Item", entry_id: "501" });
+      globalThis.fetch = api.fetch;
+      const result = await executeItemBankInPage(input(nickname, {
+        course_id: "42", bank_id: "91", source_bank_id: "90", source_bank_entry_id: "403",
+        expected_snapshot: {
+          bank_sha256: await digest(api.state.banks[0]),
+          entries_sha256: await digest([embeddedEntry(api.state, api.state.entries.get("401"))]),
+          source_entry_sha256: await digest(embeddedEntry(api.state, api.state.entries.get("403"))),
+        }, ...await observed(),
+      }));
+      assert.equal(result.error, "item_bank_course_association_unverified", nickname);
+      assert.equal(result.sent, false, nickname);
+      assert.equal(api.dispatches(), 0, nickname);
+      assert.deepEqual([...new Set(api.requests.map((request) => request.path))], ["/api/banks"], nickname);
+      assertPrivate(result, nickname);
+    });
+  }
+});
+
+test("a share names the target course by the uuid Canvas itself returns", async () => {
+  // The bank service names a course by its Canvas uuid: a raw numeric id
+  // would share with nobody while the readback still matched what was sent.
+  await withPageContext(async () => {
+    const api = provider();
+    const canvas = sharingFetch(api);
+    globalThis.fetch = canvas.fetch;
+    const result = await executeItemBankInPage(input("share_bank", {
+      course_id: "42", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read",
+      expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), shares_sha256: await digest([]) }, ...await observed(),
+    }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.verification.status, "verified");
+    assert.deepEqual(canvas.canvasReads, ["/api/v1/courses/77"]);
+    const posts = api.requests.filter((request) => request.method === "POST");
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].body.shared_bank.entity_id, TARGET_COURSE_UUID);
+    assertPrivate(result, "share_bank uuid");
+  });
+  // A target Canvas does not name stops the share before any bank request.
+  await withPageContext(async () => {
+    const api = provider();
+    globalThis.fetch = sharingFetch(api).fetch;
+    const result = await executeItemBankInPage(input("share_bank", {
+      course_id: "42", bank_id: "91", entity_type: "course", entity_id: "78", permission: "read",
+      expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), shares_sha256: await digest([]) }, ...await observed(),
+    }));
+    assert.equal(result.error, "item_bank_share_course_unavailable");
+    assert.equal(result.sent, false);
+    assert.equal(api.dispatches(), 0);
+    assertPrivate(result, "share_bank unknown target");
+  });
+  // The reviewed course shares with itself under its already established
+  // uuid, with no second Canvas read.
+  await withPageContext(async () => {
+    const api = provider();
+    const canvas = sharingFetch(api);
+    globalThis.fetch = canvas.fetch;
+    const result = await executeItemBankInPage(input("share_bank", {
+      course_id: "42", bank_id: "91", entity_type: "course", entity_id: "42", permission: "read",
+      expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), shares_sha256: await digest([]) }, ...await observed(),
+    }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(canvas.canvasReads, []);
+    const posts = api.requests.filter((request) => request.method === "POST");
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].body.shared_bank.entity_id, CONTEXT_UUID);
+    assertPrivate(result, "share_bank own course");
+  });
+});
+
+test("a custom Canvas domain is refused in the Item Banks frame without a tenant label", async () => {
+  // No trustworthy tenant label means no quiz-host check is possible, so the
+  // frame refuses instead of granting access to a guessed host.
+  await withPageContext(async () => {
+    let calls = 0; globalThis.fetch = async () => { calls += 1; return new Response("{}"); };
+    const request = input("list_banks", { course_id: "42" });
+    request.canvasOrigin = "https://canvas.school.edu";
+    const result = await executeItemBankInPage(request);
+    assert.equal(result.matched, false);
+    assert.equal(calls, 0);
+    assertPrivate(result, "custom domain");
+  }, { document: { referrer: "https://canvas.school.edu/courses/42/external_tools/54065" } });
+});
+
 test("share reads make one unpaged request and report pagination as unestablished", async () => {
   await withPageContext(async () => {
     const p = provider(); p.state.shares.push({ id: "1", entity_type: "course", entity_id: "course-context-77", permission: "read" });
@@ -1006,7 +1119,7 @@ test("a share row is read with either key casing, before the write and after it"
     await withPageContext(async () => {
       const api = provider({ shareCasing: casing });
       api.state.shares.push(row);
-      globalThis.fetch = api.fetch;
+      globalThis.fetch = sharingFetch(api).fetch;
       const result = await executeItemBankInPage(input("share_bank", {
         course_id: "42", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read",
         expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), shares_sha256: await digest(api.state.shares) },
@@ -1019,7 +1132,7 @@ test("a share row is read with either key casing, before the write and after it"
     });
     await withPageContext(async () => {
       const api = provider({ shareCasing: casing });
-      globalThis.fetch = api.fetch;
+      globalThis.fetch = sharingFetch(api).fetch;
       const result = await executeItemBankInPage(input("share_bank", {
         course_id: "42", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read",
         expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), shares_sha256: await digest(api.state.shares) },
@@ -1045,7 +1158,7 @@ test("a share a tenant applied but answered for in another casing is still refus
       api.state.shares.push(stored === "snake"
         ? { id: "1", bank_id: "91", entity_id: "77", entity_type: "course", permission: "read" }
         : { id: "1", bank_id: "91", entityId: "77", entityType: "course", permission: "read" });
-      globalThis.fetch = api.fetch;
+      globalThis.fetch = sharingFetch(api).fetch;
       const result = await executeItemBankInPage(input("share_bank", {
         course_id: "42", bank_id: "91", entity_type: "course", entity_id: "77", permission: "read",
         expected_snapshot: { bank_sha256: await digest(api.state.banks[0]), shares_sha256: await digest(api.state.shares) },
@@ -1065,7 +1178,7 @@ test("a duplicate effect is refused instead of sent a second time", async () => 
   ];
   for (const [nickname, argsFor, expected] of cases) {
     await withPageContext(async () => {
-      const api = provider(); globalThis.fetch = api.fetch;
+      const api = provider(); globalThis.fetch = sharingFetch(api).fetch;
       const result = await executeItemBankInPage(input(nickname, await argsFor(api)));
       assert.equal(result.error, expected, nickname);
       assert.equal(result.sent, false, nickname);
@@ -1246,8 +1359,9 @@ test("a deadline that passes after the snapshot reads leaves the write unsent", 
       const request = input(shape.nickname, args);
       request.expiresAt = Date.now() + 60_000;
       if (["create_item", "update_item"].includes(shape.nickname)) request.payloadContractSha256 = await digest(args.item);
+      const canvas = sharingFetch(api).fetch;
       globalThis.fetch = async (url, options = {}) => {
-        const response = await api.fetch(url, options);
+        const response = await canvas(url, options);
         if (api.requests.length >= readsBeforeWrite) request.expiresAt = Date.now() - 1;
         return response;
       };

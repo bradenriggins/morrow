@@ -487,7 +487,9 @@ test("a question is put into a bank only when the named quiz row holds that exac
     const method = options.method || "GET";
     if (parsed.pathname === "/api/banks/91/bank_entries" && method === "GET") {
       p.requests.push({ method, path: parsed.pathname });
-      return new Response(JSON.stringify(bankEntries), { status: 200, headers: { "content-type": "application/json" } });
+      const page = Number(parsed.searchParams.get("page") || "1");
+      const perPage = Number(parsed.searchParams.get("per_page") || "100");
+      return new Response(JSON.stringify(bankEntries.slice((page - 1) * perPage, page * perPage)), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (parsed.pathname === "/api/banks/91/bank_entries/move_from_quiz_entry" && method === "POST") {
       p.requests.push({ method, path: parsed.pathname, body: JSON.parse(options.body), query: parsed.search });
@@ -522,6 +524,57 @@ test("a question is put into a bank only when the named quiz row holds that exac
     // Sent once: a second request reads the bank, finds the question, and dispatches nothing.
     const again = await executeQuizBankDrawInPage(input("add_quiz_question_to_bank", await args({}), { verifiedBankSha256: bankSha256 }));
     assert.equal(again.ok, true);
+    assert.equal(again.sent, false);
+    assert.equal(again.verification.evidence, "question_already_in_this_bank");
+    assert.equal(p.requests.filter((request) => request.method === "POST").length, 1);
+  }, fetch);
+});
+
+// A bank past one page still guards its questions: the duplicate pre-check
+// and the readback after the move both read the bank to its end, so a
+// question past row 100 is found, not moved twice or reported missing.
+test("a question past the bank's first page is still found before and after the move", async () => {
+  const p = provider();
+  const bankEntries = [];
+  for (let row = 0; row < 100; row += 1) {
+    bankEntries.push({ id: String(800 + row), entry_type: "Item", entry: { id: String(900 + row) } });
+  }
+  const fetch = async (url, options = {}) => {
+    const parsed = new URL(url);
+    const method = options.method || "GET";
+    if (parsed.pathname === "/api/banks/91/bank_entries" && method === "GET") {
+      p.requests.push({ method, path: parsed.pathname });
+      const page = Number(parsed.searchParams.get("page") || "1");
+      const perPage = Number(parsed.searchParams.get("per_page") || "100");
+      return new Response(JSON.stringify(bankEntries.slice((page - 1) * perPage, page * perPage)), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (parsed.pathname === "/api/banks/91/bank_entries/move_from_quiz_entry" && method === "POST") {
+      p.requests.push({ method, path: parsed.pathname });
+      const sent = JSON.parse(options.body);
+      bankEntries.push({ id: "700", entry_type: sent.source_entry_type, entry: { id: sent.source_entry_id } });
+      return new Response(JSON.stringify(bankEntries[bankEntries.length - 1]), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return p.fetch(url, options);
+  };
+  await withBuilder(async () => {
+    const bankSha256 = "a".repeat(64);
+    const args = async (overrides) => ({
+      course_id: "42", assignment_id: "188", bank_id: "91", quiz_entry_id: "10", item_id: "501",
+      expected_snapshot: { bank_sha256: bankSha256, quiz_entries_sha256: await digest(p.entries) }, ...await observed(), ...overrides,
+    });
+    // The moved question lands on page 2 of a full bank, and the readback
+    // still proves it instead of reporting it missing.
+    const result = await executeQuizBankDrawInPage(input("add_quiz_question_to_bank", await args({}), { verifiedBankSha256: bankSha256 }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.sent, true);
+    assert.equal(result.verification.status, "verified");
+    assert.equal(result.verification.targetId, "501");
+    assert.equal(p.requests.filter((request) => request.method === "POST").length, 1);
+    const bankReads = p.requests.filter((request) => request.method === "GET" && request.path === "/api/banks/91/bank_entries");
+    assert.ok(bankReads.length >= 4, `expected paged pre-check and readback, saw ${bankReads.length} bank reads`);
+    // A second request finds the page-2 question in its pre-check and sends nothing.
+    const again = await executeQuizBankDrawInPage(input("add_quiz_question_to_bank", await args({}), { verifiedBankSha256: bankSha256 }));
+    assert.equal(again.ok, true, JSON.stringify(again));
     assert.equal(again.sent, false);
     assert.equal(again.verification.evidence, "question_already_in_this_bank");
     assert.equal(p.requests.filter((request) => request.method === "POST").length, 1);
