@@ -20,7 +20,7 @@
  * until it is reloaded; when the Bridge folder itself is out of date, the Morrow app shows its own
  * Morrow Bridge step.
  */
-export const VERSION_MISMATCH_RECOVERY = "Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.";
+export const VERSION_MISMATCH_RECOVERY = "Select Reload Morrow Bridge in the Morrow Bridge popup. If the versions still do not match, open the Morrow app and select Update Bridge.";
 
 const COPY = {
   course_access_account_required: {

@@ -19,6 +19,7 @@ import {
   runtimeNeedsReload,
   statusAnnouncement,
   statusValue,
+  versionDetail,
 } from "../../connector/extension/popup/popup-view.js";
 
 const anchor = (fields = {}) => ({ provider: "canvas", runtimeVerified: true, lastSeenAt: 1, ...fields });
@@ -82,6 +83,22 @@ test("a Morrow that refused this Bridge version asks for a Bridge reload, not a 
   assert.equal(controlState(status).primaryDisabled, false);
   assert.match(detailText(status), /versions do not match/i);
   assert.doesNotMatch(detailText(status), /Reconnect Morrow|approve the new connection/);
+});
+
+// A version mismatch names the two versions when the status already returned carries them, and
+// names only what it knows when one is absent: nothing is invented.
+test("a version mismatch names the versions the returned status carries, and invents none", () => {
+  const mismatch = { paired: true, pairing: false, connecting: false, connected: false, authenticationFailed: false, versionMismatch: true, runtimeHealthy: false, bindings: [binding()], siteAnchors: [anchor()], bindingCount: 1 };
+  assert.equal(versionDetail(mismatch), "");
+  assert.equal(versionDetail(null), "");
+  assert.equal(versionDetail({ ...mismatch, bridgeVersion: "1.0.134", expectedBridgeVersion: "1.0.135" }),
+    " This Morrow Bridge is version 1.0.134; Morrow expects version 1.0.135.");
+  assert.equal(versionDetail({ ...mismatch, bridgeVersion: "1.0.134" }),
+    " This Morrow Bridge is version 1.0.134, which Morrow does not expect.");
+  assert.equal(versionDetail({ ...mismatch, expectedBridgeVersion: "1.0.135" }),
+    " Morrow expects Morrow Bridge version 1.0.135.");
+  assert.match(detailText({ ...mismatch, bridgeVersion: "1.0.134", expectedBridgeVersion: "1.0.135" }),
+    /version 1\.0\.134; Morrow expects version 1\.0\.135\./);
 });
 
 test("a refused server identity offers re-pairing without discarding selected courses", () => {
@@ -335,10 +352,12 @@ test("the popup answers a failed first status read with a retry, then clears it 
     "#edit-access-banner-text": stubElement(),
     "#ask-first-all-courses": stubElement("Ask first in all courses"),
     "#reviews-waiting": stubElement("", true),
+    "#reviews-waiting-title": stubElement("Waiting for your review"),
     "#reviews-list": stubElement(),
     "#data-disclosure": stubElement(),
     "#privacy-link": stubElement("What Morrow Bridge can read", true),
     "#courses": stubElement("", true),
+    "#courses-title": stubElement("Your courses"),
     "#courses-list": stubElement(),
     "#all-courses": stubElement("All courses", true),
   };

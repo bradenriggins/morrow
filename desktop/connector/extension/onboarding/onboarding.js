@@ -20,6 +20,7 @@ const nextDetail = document.querySelector("#next-detail");
 const openSettings = document.querySelector("#open-settings");
 const reconnectMorrow = document.querySelector("#reconnect-morrow");
 const takeOverMorrow = document.querySelector("#take-over-morrow");
+const reloadBridge = document.querySelector("#reload-bridge");
 const quickOpenSettings = document.querySelector("#quick-open-settings");
 const error = document.querySelector("#error");
 
@@ -70,6 +71,7 @@ function render(status) {
   openSettings.hidden = !state.canOpenSettings;
   reconnectMorrow.hidden = !state.canReconnect;
   takeOverMorrow.hidden = !state.canTakeOver;
+  reloadBridge.hidden = !state.canReload;
 }
 
 // The cause reaches the page, not only the console: one code becomes what happened, why, and the
@@ -183,6 +185,12 @@ takeOverMorrow.addEventListener("click", async () => {
   } finally {
     takeOverMorrow.disabled = false;
   }
+});
+// Morrow expects a different Morrow Bridge build. One press reloads the extension with its
+// installed code, the same one-press recovery the popup offers; the saved connection reconnects
+// by itself after the reload.
+reloadBridge.addEventListener("click", () => {
+  chrome.runtime.reload();
 });
 quickOpenSettings.addEventListener("click", () => { void chrome.runtime.openOptionsPage(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleRefresh(); });
