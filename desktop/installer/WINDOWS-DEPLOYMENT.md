@@ -5,8 +5,8 @@ one-click, per-user installer. It does not offer a machine-wide mode, ask for
 elevation, or package the NSIS elevation helper.
 
 Build the x64 installer on Windows x64. Step 4 of the release procedure in
-[docs/versioning.md](../../docs/versioning.md) names the install and build
-commands to run first. Then, in `desktop/`, run one command:
+[docs/versioning.md](../../docs/versioning.md) dispatches `desktop-release.yml`
+against the exact commit to tag. Then, in `desktop/`, run one command:
 
 ```text
 node scripts/package-mcp-bundle.mjs --target win32-x64 --unsigned-release --output <new absolute folder>
