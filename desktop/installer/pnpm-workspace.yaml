@@ -13,3 +13,10 @@ overrides:
 allowBuilds:
   electron: true
   electron-winstaller: false
+# GHSA-86w9-cpqp-85rv (CVE-2026-85393): node-forge signature verification,
+# via @anthropic-ai/mcpb. No patched forge release exists and mcpb 2.1.2 is
+# latest. Morrow calls only mcpb packExtension; forge is reachable solely from
+# mcpb signMcpbFile, which Morrow never calls, and no signature is verified.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-86w9-cpqp-85rv
