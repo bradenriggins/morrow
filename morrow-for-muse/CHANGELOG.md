@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.10 (2026-10-02)
+
+Install `morrow-muse-connector-0.4.10.zip` from the `muse/v0.4.10`
+release and verify it with `SHA256SUMS` before unzipping, as described
+in `INSTALL.md`.
+
+### Adversarial audit fixes
+
+- Seal state-backup manifests with the approval tamper seal. A backup edited outside Morrow is refused at restore.
+- Serialize re-auth approvals on one ledger lock, so concurrent approvers cannot spend the same grant twice.
+- Keep Moodle journals private and passwords out of memory. Journals get strict file permissions, and login never retains the password.
+- Follow only same-origin redirects during session capture.
+- Harden install, scheduling, and transport gates, and prove write readback semantics with regression tests.
+
 ## 0.4.9 (2026-10-01)
 
 Install `morrow-muse-connector-0.4.9.zip` from the `muse/v0.4.9`
