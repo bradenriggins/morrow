@@ -122,6 +122,47 @@ def daemon_loop():
         time.sleep(max(1, min(60, wake - time.monotonic())))
 
 
+def _read_cmdline(pid):
+    """The process's command line, or None when it cannot be read."""
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as fh:
+            return fh.read().replace(b"\0", b" ").decode("utf-8", "replace")
+    except OSError:
+        pass
+    try:
+        out = subprocess.run(["ps", "-ww", "-o", "args=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def _pid_is_scheduler(pid):
+    """True when pid is alive and is this scheduler's daemon.
+
+    S4: the pid file alone is not identity. A recycled pid (or a stale
+    file after an unclean stop) used to make start refuse and stop
+    SIGTERM an unrelated process. The daemon is recognized by its
+    command line: it was started as `scheduler.py start` (the only
+    path that writes the pid file), so its cmdline names scheduler.py
+    with a `start` argument. An unreadable cmdline is not ours: stop
+    never signals an unverified pid.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except (OSError, ProcessLookupError):
+        return False
+    cmd = _read_cmdline(pid)
+    if not cmd or "scheduler.py" not in cmd:
+        return False
+    # "start" as an exact argv token (not a substring: a transient
+    # `scheduler.py status` or an editor with the file open is not
+    # the daemon).
+    return "start" in cmd.split()
+
+
 def is_running():
     if not os.path.exists(PID_FILE):
         return None
@@ -130,11 +171,9 @@ def is_running():
             pid = int(fh.read().strip())
     except (ValueError, OSError):
         return None
-    try:
-        os.kill(pid, 0)
+    if _pid_is_scheduler(pid):
         return pid
-    except (OSError, ProcessLookupError):
-        return None
+    return None
 
 
 def cmd_start():

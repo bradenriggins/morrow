@@ -211,8 +211,17 @@ def _is_our_loop(pid, tree):
     cmd = _cmdline(pid)
     if not cmd:
         return False
-    return ("supervisor.py" in cmd and " run " in cmd + " "
-            and os.path.realpath(tree) in cmd)
+    # S4: the tree must match as the exact --tree argument, not a
+    # substring. A substring match adopted prefix-path neighbors: the
+    # loop for <tree>2 contains realpath(<tree>) in its cmdline, so
+    # status/ensure/stop/uninstall for <tree> stole or killed <tree>2's
+    # loop. ensure() always passes `--tree <realpath>` as separate
+    # argv elements, so the path is space-delimited on both sides.
+    if "supervisor.py" not in cmd or " run " not in cmd + " ":
+        return False
+    probe = cmd + " "
+    arg = os.path.realpath(tree) + " "
+    return ("--tree " + arg in probe) or ("--tree=" + arg in probe)
 
 
 def status(tree):

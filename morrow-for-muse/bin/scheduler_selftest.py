@@ -95,6 +95,7 @@ def main():
     shutil.rmtree(WORK, ignore_errors=True)
 
     _t_wave6_cli_behavior()
+    _t_s4_pid_identity()
 
     print("pass: %d" % len(PASS))
     for name in PASS:
@@ -146,6 +147,80 @@ def _t_wave6_cli_behavior():
     check("w6p2e1: unknown command leaks no traceback frames",
           'File "' not in p.stderr and "line " not in p.stderr,
           p.stderr[:200])
+
+
+def _t_s4_pid_identity():
+    """S4: a pid file is not identity; only a live `scheduler.py
+    start` process counts as running.
+
+    A recycled pid (this selftest's own live pid, which is not the
+    daemon) must not make is_running() claim the scheduler runs, and
+    cmd_stop must not signal it. A dead pid must read as stopped.
+    """
+    import subprocess
+    work = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        ".selftest-work", "scheduler-pid")
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(work, exist_ok=True)
+    real_pid_file = sched.PID_FILE
+    sched.PID_FILE = os.path.join(work, "scheduler.pid")
+    try:
+        # 1. Our own live pid is not the daemon: the old kill(pid, 0)
+        # check claimed it was running.
+        with open(sched.PID_FILE, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+        check("s4: live foreign pid is not running",
+              sched.is_running() is None, repr(sched.is_running()))
+
+        # 2. A spawned sleep is not the daemon either.
+        proc = subprocess.Popen(["sleep", "30"])
+        try:
+            with open(sched.PID_FILE, "w", encoding="utf-8") as fh:
+                fh.write(str(proc.pid))
+            check("s4: spawned foreign pid is not running",
+                  sched.is_running() is None, repr(sched.is_running()))
+        finally:
+            proc.terminate()
+            proc.wait()
+
+        # 3. A dead pid reads as stopped.
+        with open(sched.PID_FILE, "w", encoding="utf-8") as fh:
+            fh.write("424242")
+        check("s4: dead pid is not running",
+              sched.is_running() is None, repr(sched.is_running()))
+
+        # 4. A live `scheduler.py start` cmdline IS the daemon (the
+        # cmdline reader is stubbed; liveness is this real process).
+        real_reader = sched._read_cmdline
+        sched._read_cmdline = lambda pid: "%s /x/scheduler.py start" \
+            % sys.executable
+        try:
+            with open(sched.PID_FILE, "w", encoding="utf-8") as fh:
+                fh.write(str(os.getpid()))
+            check("s4: live scheduler cmdline is running",
+                  sched.is_running() == os.getpid(),
+                  repr(sched.is_running()))
+            # ... but a transient `scheduler.py status` is not.
+            sched._read_cmdline = lambda pid: "%s /x/scheduler.py status" \
+                % sys.executable
+            check("s4: transient scheduler.py status is not running",
+                  sched.is_running() is None, repr(sched.is_running()))
+        finally:
+            sched._read_cmdline = real_reader
+
+        # 5. cmd_stop refuses to signal a foreign pid.
+        with open(sched.PID_FILE, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            sched.cmd_stop()
+        check("s4: stop on a foreign pid signals nothing",
+              "not running" in buf.getvalue(), buf.getvalue()[:120])
+    finally:
+        sched.PID_FILE = real_pid_file
+        shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":
