@@ -481,7 +481,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
         : "";
       return {
         summary: "Morrow Bridge is connected",
-        title: `Continue in ${target}.`,
+        title: "Continue in your assistant.",
         copy: `Your Blackboard courses are ready in ${target}. No browser pairing is needed for them.`,
         body: `<div class="info-box"><strong>Blackboard courses are ready</strong><p>Open ${escapeHtml(target)}, start a new chat, and ask about your Blackboard courses. If ${escapeHtml(target)} cannot see them, return here and select Check Bridge.</p></div><div class="inline-actions">${open}<button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button></div>`,
       };

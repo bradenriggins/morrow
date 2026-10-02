@@ -314,6 +314,11 @@ function renderUpdates(current) {
     renderUpdateActions('<button class="primary-button" type="button" data-action="repair">Repair Morrow</button>');
     return;
   }
+  if (updates.reason === "update_runtime_unverified") {
+    updatesCopy.textContent = "Morrow updated but could not verify its course tools. Repair Morrow, then check again.";
+    renderUpdateActions('<button class="primary-button" type="button" data-action="repair">Repair Morrow</button>');
+    return;
+  }
   if (updates.reason === "update_verification_failed") {
     updatesCopy.textContent = "Morrow could not verify the update. Get a fresh copy from meetmorrow.app/download.";
     renderUpdateActions('<button class="secondary-button" type="button" data-action="open-download-page">Open download page</button>');

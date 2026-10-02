@@ -532,4 +532,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-This checkout contains Morrow Desktop 1.0.10 with Morrow Bridge 1.0.134. Published downloads are Mac 1.0.10 and Windows 1.0.10. The exact files passed native platform smoke before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+This checkout contains Morrow Desktop 1.0.10 with Morrow Bridge 1.0.135. Published downloads are Mac 1.0.10 and Windows 1.0.10. The exact files passed native platform smoke before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
