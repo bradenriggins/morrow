@@ -301,7 +301,12 @@ async function authorizeActiveCanvasTab() {
     await cancelCourseConnection(intent.id);
     throw new Error("course_permission_denied");
   }
-  return await message("morrow_connect_course_complete", { intentId: intent.id });
+  const completed = await message("morrow_connect_course_complete", { intentId: intent.id });
+  // The worker answers ok with completed:false when the prepared connection is gone: pairing
+  // started again, Morrow disconnected, or the tab changed before the claim. That is a failure
+  // with its own code, never a success with the notice cleared.
+  if (completed?.completed === false) throw new Error("course_connection_superseded");
+  return completed;
 }
 
 async function runAction(action, onSuccess = () => {}) {

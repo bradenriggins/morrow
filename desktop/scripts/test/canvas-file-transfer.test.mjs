@@ -528,3 +528,62 @@ test("stops an undeclared oversized download while it is streaming", async () =>
   assert.equal(result.error, "canvas_file_download_too_large");
   assert.equal(requests.length, 10);
 });
+
+function resolveResponses(ownerPath, owner) {
+  return [
+    response({ url: CANVAS + "/api/v1/users/self/profile", json: { id: "7" } }),
+    response({ url: CANVAS + "/api/v1/courses/42", json: { id: "42" } }),
+    typeof owner === "number"
+      ? response({ url: CANVAS + ownerPath, json: {}, status: owner })
+      : response({ url: CANVAS + ownerPath, json: owner }),
+  ];
+}
+
+function resolveInput(uploadPath) {
+  return input({ mode: "resolve", target: { kind: "file", uploadPath } });
+}
+
+test("resolve proves a folder, group, or section belongs to the bound course before anything is sent", async () => {
+  const proven = [
+    ["/api/v1/folders/81/files", "/api/v1/folders/81", { id: "81", context_type: "Course", context_id: "42" }],
+    ["/api/v1/folders/81/files", "/api/v1/folders/81", { id: 81, context_type: "Course", context_id: 42 }],
+    ["/api/v1/groups/9/files", "/api/v1/groups/9", { id: "9", context_type: "Course", course_id: "42" }],
+    ["/api/v1/sections/5/assignments/1/submissions/7/files", "/api/v1/sections/5", { id: "5", course_id: "42" }],
+    ["/api/v1/courses/42/files", null, null],
+  ];
+  for (const [uploadPath, ownerPath, owner] of proven) {
+    const responses = ownerPath
+      ? resolveResponses(ownerPath, owner)
+      : [
+          response({ url: CANVAS + "/api/v1/users/self/profile", json: { id: "7" } }),
+          response({ url: CANVAS + "/api/v1/courses/42", json: { id: "42" } }),
+        ];
+    const { result, requests } = await run(resolveInput(uploadPath), responses);
+    assert.equal(result.ok, true, uploadPath);
+    assert.equal(result.sent, false, uploadPath);
+    assert.equal(result.data.upload_path, uploadPath, uploadPath);
+    assert.equal(requests.some((entry) => (entry.options.method || "GET") !== "GET"), false, uploadPath);
+  }
+});
+
+test("resolve refuses a target owned by another course, another scope, or no one", async () => {
+  const refused = [
+    ["/api/v1/folders/86/files", "/api/v1/folders/86", { id: "86", context_type: "Course", context_id: "43" }],
+    ["/api/v1/folders/86/files", "/api/v1/folders/86", { id: "86", context_type: "Account", context_id: "5" }],
+    ["/api/v1/folders/86/files", "/api/v1/folders/86", { id: "999", context_type: "Course", context_id: "42" }],
+    ["/api/v1/groups/10/files", "/api/v1/groups/10", { id: "10", context_type: "Course", course_id: "43" }],
+    ["/api/v1/groups/10/files", "/api/v1/groups/10", { id: "10", context_type: "User", course_id: "7" }],
+    ["/api/v1/sections/6/assignments/1/submissions/7/files", "/api/v1/sections/6", { id: "6", course_id: "43" }],
+  ];
+  for (const [uploadPath, ownerPath, owner] of refused) {
+    const { result, requests } = await run(resolveInput(uploadPath), resolveResponses(ownerPath, owner));
+    assert.equal(result.ok, false, uploadPath);
+    assert.equal(result.sent, false, uploadPath);
+    assert.equal(result.outcomeUnknown, false, uploadPath);
+    assert.equal(result.error, "canvas_file_upload_target_invalid", uploadPath);
+    assert.equal(requests.some((entry) => (entry.options.method || "GET") !== "GET"), false, uploadPath);
+  }
+  const missing = await run(resolveInput("/api/v1/folders/86/files"), resolveResponses("/api/v1/folders/86", 404));
+  assert.equal(missing.result.ok, false);
+  assert.equal(missing.result.sent, false);
+});

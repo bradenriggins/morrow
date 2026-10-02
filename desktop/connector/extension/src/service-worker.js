@@ -2543,7 +2543,10 @@ function bridgeUiState(command) {
  * an open popup to read it.
  */
 async function applyBridgeUiState(uiState) {
+  // The runtime sends the current key each time, so an absent key forgets the stored one: a
+  // prior review's key is never left signing-capable once the runtime stops vouching for it.
   if (uiState.presence) await storeReviewApprovalPresence(uiState.presence).catch(() => undefined);
+  else await clearReviewApprovalPresence().catch(() => undefined);
   // The runtime sends every review's names each time, so an absent list forgets them all.
   await storeReviewLearnerNames(uiState.learnerNames || []).catch(() => undefined);
   state.reviews = uiState.reviews;
@@ -4884,8 +4887,10 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
 
 /**
  * The one Canvas upload this reviewed transfer sends, resolved from the catalog's own upload route
- * and the ids that name its target. A course upload must name the selected course; an upload to a
- * folder, group, section, or person is a site request Canvas decides with the person's own roles.
+ * and the ids that name its target. A course upload must name the selected course. A folder,
+ * group, or section upload is proved against the selected course in the page immediately before
+ * anything is sent. A person's files and an account rubric import are site requests, never course
+ * requests: only the signed-in person's own files are reachable, and both need Account access.
  */
 function canvasReviewedUploadTarget(binding, args) {
   const operation = state.operations.get(String(args?.upload_tool || ""));
@@ -4894,12 +4899,22 @@ function canvasReviewedUploadTarget(binding, args) {
   if (!path || decimalId(args?.course_id) !== binding.courseId) return null;
   const namedCourse = args.upload_arguments?.course_id;
   if (namedCourse !== undefined && decimalId(namedCourse) !== binding.courseId) return null;
-  return { kind, uploadPath: `/api${path}` };
+  if (path.startsWith("/v1/users/")) {
+    const namedUser = args.upload_arguments?.user_id;
+    if (namedUser !== "self" && decimalId(namedUser) !== binding.principalId) return null;
+  }
+  const siteTarget = path.startsWith("/v1/users/") || path.startsWith("/v1/accounts/");
+  return { kind, uploadPath: `/api${path}`, ...(siteTarget ? { siteTarget: true } : {}) };
 }
 
 async function executeCanvasCourseFileTransfer(binding, args, expiresAt, privateAttachment) {
   const target = canvasReviewedUploadTarget(binding, args);
   if (!target) return { ok: false, sent: false, error: "canvas_file_upload_target_invalid" };
+  // A person's files and an account rubric import apply beyond the selected course, so they need
+  // the same Account access a site operation needs. Nothing has been sent when this refuses.
+  if (target.siteTarget && (await storage()).courseAccessMode !== "account") {
+    return { ok: false, sent: false, error: "course_access_account_required" };
+  }
   const deadline = boundedCommandDeadline(expiresAt, target.kind === "rubric_csv" ? COURSE_FILE_READ_TIMEOUT_MS * 4 : COURSE_FILE_READ_TIMEOUT_MS);
   if (!deadline) return { ok: false, sent: false, error: "canvas_file_transfer_timeout" };
   if (!await courseFileStorageAccessEnabled()) return { ok: false, sent: false, error: "canvas_file_storage_access_required" };
@@ -4924,6 +4939,15 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       attachment: privateAttachment,
       expiresAt: deadline,
     };
+    // A folder, group, or section names no course, so the page reads the object and proves the
+    // bound course owns it before anything is sent. A course upload already proved its course
+    // above, and a site upload already cleared the Account access gate.
+    if (target.kind === "file" && /^\/api\/v1\/(?:folders|groups|sections)\//.test(target.uploadPath)) {
+      const resolved = await execute({ ...transferInput, mode: "resolve" });
+      if (!resolved?.ok || resolved?.sent !== false || resolved?.data?.upload_path !== target.uploadPath) {
+        return { ok: false, sent: false, error: resolved?.error || "canvas_file_upload_target_invalid" };
+      }
+    }
     const folderId = canvasUploadFolderId(target.uploadPath);
     if (target.kind === "rubric_csv") {
       // The import goes to Canvas itself with the signed-in session, so the page sends it and waits
@@ -5385,6 +5409,27 @@ function withoutSignedLinkFields(value) {
 function withoutCanvasSignedLinks(result, provider) {
   return provider === "canvas" && result?.data !== undefined
     ? { ...result, data: withoutSignedLinkFields(result.data) }
+    : result;
+}
+
+/**
+ * A sign-in token, a session, or a one-time action answers with the credential itself. Morrow
+ * keeps that credential out of every result it hands back, the way it keeps signed file links
+ * out: the result carries the record and never the bearer secret.
+ */
+function withoutTokenSecretFields(value) {
+  if (Array.isArray(value)) return value.map((entry) => withoutTokenSecretFields(entry));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== "token")
+    .map(([key, entry]) => [key, withoutTokenSecretFields(entry)]));
+}
+
+function withoutSessionCredentialSecrets(result, operation) {
+  if (operation?.provider !== "canvas" || result?.data === undefined) return result;
+  const admission = canvasOperationAdmission(operation);
+  return admission?.authority === "site" && admission?.siteClass === "session_credential"
+    ? { ...result, data: withoutTokenSecretFields(result.data) }
     : result;
 }
 
@@ -5992,7 +6037,11 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
     const namedPlan = namedCanvasReadback
       ? planCanvasOperationReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data)
       : null;
-    const plan = guardedCanvasContent || guardedPage || guardedNewQuizSettings || guardedNewQuizLifecycle || guardedNewQuizItemLifecycle || guardedNewQuizItemPosition || newQuizResponseBound || guardedItemBank || privateConversation || privateCanvasCourseFileOperation(operation) || privateHotSpot || operation.provider !== "canvas" || namedCanvasReadback || semanticReadback ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
+    // A sign-in token, a session, or a one-time action keeps no field afterwards that names what
+    // changed, so no readback plan is built for one even when a route shape resembles a readable
+    // one: the write is reported unconfirmed rather than checked against a meaningless read.
+    const sessionCredentialWrite = operation.provider === "canvas" && canvasOperationAdmission(operation)?.siteClass === "session_credential";
+    const plan = guardedCanvasContent || guardedPage || guardedNewQuizSettings || guardedNewQuizLifecycle || guardedNewQuizItemLifecycle || guardedNewQuizItemPosition || newQuizResponseBound || guardedItemBank || privateConversation || privateCanvasCourseFileOperation(operation) || privateHotSpot || operation.provider !== "canvas" || namedCanvasReadback || semanticReadback || sessionCredentialWrite ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
     readDescriptor = genericCanvasWriteReadback(command, operation, privateConversation)
       ? await canvasRecoveryDescriptor(operation, command.arguments || {}, result.data, result)
       : null;
@@ -6053,10 +6102,10 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       verification = { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "no_safe_readback_route" };
     }
   }
-  const publicResult = withoutCanvasSignedLinks(
+  const publicResult = withoutSessionCredentialSecrets(withoutCanvasSignedLinks(
     privateAttachment || privateAttachments || privateConversation ? withoutPrivateAttachment(result) : result,
     operation.provider,
-  );
+  ), operation);
   const renderCheck = await savedHtmlRenderCheck(command, operation, publicResult);
   sendResult(command, true, { schema: "morrow.canvas-browser-result.v1", ...publicResult, provider: operation.provider, ...(verification ? { verification } : {}), ...(readDescriptor ? { readDescriptor } : {}), ...(semanticResolution ? { semanticResolution } : {}), ...(renderCheck ? { renderCheck } : {}) }, null);
   // The answer is already sent. A storage failure here loses one setup-guide line, never a result.

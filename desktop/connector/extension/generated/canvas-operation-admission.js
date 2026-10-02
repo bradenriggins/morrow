@@ -117,6 +117,9 @@ const NO_READABLE_PROVIDER_EFFECT_ROUTE = Object.freeze([
     "/v1/users/reset_password",
     "/v1/users/self/pandata_events_token",
     "/v1/users/{user_id}/observer_pairing_codes",
+    // Minting an access token answers with the bearer credential itself, shown once and never
+    // readable back: without this entry the create reads as an exactly-checked standing grant.
+    "/v1/users/{user_id}/tokens",
 ]);
 /**
  * The first step of a Canvas file upload. This request creates no file: Canvas answers with an
@@ -357,6 +360,10 @@ export function canvasReadbackAssessment(operations, operation, admission = canv
         return { state: "not_applicable", reason: "read_only" };
     if (admission.write.state !== "admitted")
         return { state: "not_applicable", reason: "write_held" };
+    // A sign-in token, a session, or a one-time action keeps no field afterwards that names what
+    // changed, so there is no readback even when a route shape resembles one.
+    if (NO_READABLE_PROVIDER_EFFECT_ROUTE.includes(operation.path))
+        return { state: "unavailable", reason: "no_safe_readback_route" };
     if (canvasExecutorOwnedReadback(operation))
         return { state: "structurally_exact" };
     const blocker = canvasReadbackBlocker(operation);
