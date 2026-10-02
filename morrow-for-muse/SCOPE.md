@@ -111,13 +111,6 @@ HTTPS receipts do not prove the browser path.
   educator asks and even with a signed approval.
 - The Canvas Login Helper (`helper/`): educator self-sign-in,
   SSO/MFA-capable, with keepalive.
-- Moodle browser operations (`bin/morrow moodle`): one-time account pairing,
-  paged course discovery without a course-count limit, pinned adapters,
-  current source review, Plan/Edit admission, encrypted learner privacy,
-  immutable learner approvals, durable claims, and verified-only writes.
-  Native first-use, private attachments, and broader live provider proof
-  remain required. Follow `moodle/SKILL.md`; source-only HTTPS auth modules
-  are excluded from the package.
 
 ### In scope but pending live proof (not shipped v1 claims)
 
@@ -140,6 +133,15 @@ live battery marks them live-proven in
   delete.
 - Item Bank item read and delete (IB-11/IB-19): implemented in the SDK
   lane, not proven (see Item Banks above).
+- Moodle browser operations (`bin/morrow moodle`): a development
+  candidate, not a shipped v1 claim. The package includes one-time
+  account pairing, paged course discovery without a course-count
+  limit, pinned adapters, current source review, Plan/Edit admission,
+  encrypted learner privacy, immutable learner approvals, durable
+  claims, and verified-only writes, but native first-use, production
+  admission, and live provider proof remain required, and there is no
+  production session handoff. Follow `moodle/SKILL.md`; source-only
+  HTTPS auth modules are excluded from the package.
 
 ## Out for v1
 
