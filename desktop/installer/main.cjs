@@ -24,7 +24,8 @@ const { canonicalDirectory, exists, isComplete, mkdirPrivate, payloadLayout, win
  */
 const EXTERNAL_ADDRESSES = Object.freeze({
   storeListing: null,
-  support: "https://meetmorrow.app/support"
+  support: "https://meetmorrow.app/support",
+  download: "https://meetmorrow.app/download"
 });
 
 const PRODUCT_VERSION = app.getVersion();
@@ -970,8 +971,7 @@ async function startMorrow(lifecycle) {
     }
   });
   // Opens the support page in the person's default browser. The address
-  // comes only from the fixed allow list above, never from the renderer, and
-  // this is the one entry of it Morrow can open today (D5).
+  // comes only from the fixed allow list above, never from the renderer (D5).
   ipcMain.handle("installer:open-support", async (event, ...input) => {
     trusted(event);
     try {
@@ -981,6 +981,22 @@ async function startMorrow(lifecycle) {
     }
     try {
       await shell.openExternal(EXTERNAL_ADDRESSES.support);
+      return respond();
+    } catch {
+      return failed(errorDetails("external_open_failed"));
+    }
+  });
+  // Opens the download page in the person's default browser. The address
+  // comes only from the fixed allow list above, never from the renderer (D5).
+  ipcMain.handle("installer:open-download-page", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+    } catch (error) {
+      return failed(error);
+    }
+    try {
+      await shell.openExternal(EXTERNAL_ADDRESSES.download);
       return respond();
     } catch {
       return failed(errorDetails("external_open_failed"));
