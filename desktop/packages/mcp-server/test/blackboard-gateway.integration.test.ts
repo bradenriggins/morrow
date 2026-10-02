@@ -13,6 +13,7 @@ import { parseGatewayConfig } from "../src/config.js";
 import { createFullMorrowServer } from "../src/full-server.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { BLACKBOARD_ACTIONS } from "../src/blackboard-actions.js";
+import { generateLoopbackTls } from "./fixtures/loopback-tls.js";
 
 const COURSE_ID = "_22_1";
 const CONTENT_ID = "_33_1";
@@ -20,8 +21,6 @@ const PRINCIPAL_ID = "_11_1";
 const COPY_DESTINATION_ID = "BIO-101-COPY";
 const COPIED_COURSE_ID = "_23_1";
 const CREDENTIAL_REVISION = "8c751fc3-ecf9-4558-b86b-d97a34e93295";
-const TEST_CERTIFICATE = fileURLToPath(new URL("./fixtures/blackboard-test-cert.pem", import.meta.url));
-const TEST_KEY = fileURLToPath(new URL("./fixtures/blackboard-test-key.pem", import.meta.url));
 
 function json(response: ServerResponse, value: unknown, status = 200): void {
   response.writeHead(status, { "content-type": "application/json" });
@@ -84,8 +83,7 @@ async function createFixture(options: {
   // process's config-privacy check walks every real ancestor to filesystem
   // root, which fails under Linux's world-writable /tmp.
   const directory = await mkdtemp(join(homedir(), ".morrow-blackboard-gateway-test-"));
-  const certificate = await readFile(TEST_CERTIFICATE);
-  const key = await readFile(TEST_KEY);
+  const { key, cert: certificate } = await generateLoopbackTls(directory);
   const requests: string[] = [];
   let patch = 0;
   const announcements = new Map<string, JsonObject>(options.preexistingMatchingAnnouncement ? [["_90_1", {

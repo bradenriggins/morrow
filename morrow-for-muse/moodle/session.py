@@ -278,8 +278,15 @@ class MoodleSession:
         self._legacy_journal_dir = None if journal_dir else os.path.abspath(
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "journal", "moodle"))
         self.journal_dir = journal_dir or os.path.join(morrow_home(), "journal", "moodle")
+        # The journal carries principal names and receipts: dir 0700,
+        # file 0600, per codebase discipline (dispatch/executor
+        # ensure_journal_dir). makedirs(mode=) only applies at
+        # creation, so pre-existing loose paths are tightened.
         os.makedirs(self.journal_dir, exist_ok=True)
+        os.chmod(self.journal_dir, 0o700)
         self.journal_path = os.path.join(self.journal_dir, "moodle.jsonl")
+        if os.path.exists(self.journal_path):
+            os.chmod(self.journal_path, 0o600)
         # The journal is the durable record; rehydrate the used-op-id
         # set from it so a process restart cannot replay an op id that
         # was already journaled as dispatched (the in-memory set alone
@@ -512,8 +519,17 @@ class MoodleSession:
             "session": {"sesskey_len": len(self.sesskey),
                         "principal": self.principal},
         }
-        with open(self.journal_path, "a", encoding="utf-8") as fh:
+        # 0600 at open, never open-then-chmod (executor W6-P2-2): the
+        # explicit mode leaves no window where the journal is
+        # group/other-readable. A pre-existing loose file is tightened.
+        fd = os.open(self.journal_path,
+                     os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(line, default=str) + "\n")
+        try:
+            os.chmod(self.journal_path, 0o600)
+        except OSError:
+            pass
         return op_id
 
     def _reserve(self, op_id: str) -> None:

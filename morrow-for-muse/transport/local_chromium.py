@@ -679,6 +679,50 @@ def _origin_of(url):
     return (scheme, host, port)
 
 
+def normalize_canvas_base(raw):
+    """Validate a Canvas lane base URL at construction time.
+
+    The Canvas lane drives the educator's authenticated browser tab at
+    this base, so a plaintext base would carry the session onto the
+    wire unencrypted, and userinfo would smuggle credentials into a
+    navigation target. An http:// base is refused loudly unless the
+    educator explicitly sets CANVAS_BASE_ALLOW_HTTP=1 (the same
+    documented local-dev override config.tree_config honors; test
+    fixtures and LAN-only deployments only). Call this BEFORE any
+    browser is touched, so a bad base fails fast here instead of late
+    at CDP navigate, misreported as session death.
+
+    Returns the base without a trailing slash. Raises ValueError with
+    a plain reason.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        raise ValueError("Canvas base URL is empty")
+    if any(ord(char) < 32 for char in raw):
+        raise ValueError("Canvas base URL must not contain control characters")
+    parsed = urllib.parse.urlparse(raw)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid Canvas base URL port") from exc
+    if (parsed.username is not None or parsed.password is not None
+            or "?" in raw or "#" in raw or "\\" in raw
+            or parsed.params):
+        raise ValueError("Canvas base URL must contain only an https origin")
+    if parsed.scheme == "http" and os.environ.get(
+            "CANVAS_BASE_ALLOW_HTTP") != "1":
+        raise ValueError(
+            "refusing plaintext http:// Canvas base: the authenticated "
+            "browser session would cross the network unencrypted. Use "
+            "https://, or set CANVAS_BASE_ALLOW_HTTP=1 to acknowledge "
+            "the risk (test fixtures and LAN-only deployments only).")
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError("could not parse Canvas base URL")
+    if not parsed.hostname or (port is not None and port == 0):
+        raise ValueError("Canvas base URL must contain only an https origin")
+    return raw.rstrip("/")
+
+
 def is_tenant_url(url, base_url):
     """True when url is on the exact origin of base_url.
 
@@ -931,10 +975,16 @@ class CDP:
             except Exception:
                 pass
 
-    def capture_network_response(self, tab, url, url_fragment, timeout=120):
+    def capture_network_response(self, tab, url, url_fragment, timeout=120,
+                                 expected_origin=None):
         """Enable Network on the tab's session, navigate to `url`, and
         return (response_url, body_text) for the first response whose URL
         contains `url_fragment`. Raises TimeoutError when nothing matches.
+
+        expected_origin pins the match to one origin (scheme://host[:port],
+        e.g. the tenant base): a response whose URL contains the fragment
+        but comes from any other origin (an ad, an IdP, an attacker page
+        racing the navigation) is skipped, never returned.
         """
         session = self.tab_session(tab)
         self.call(tab, "Network.enable", {}, timeout=30)
@@ -960,7 +1010,9 @@ class CDP:
                     if method == "Network.responseReceived":
                         response = params.get("response") or {}
                         rurl = str(response.get("url") or "")
-                        if url_fragment in rurl:
+                        if url_fragment in rurl and (
+                                expected_origin is None
+                                or is_tenant_url(rurl, expected_origin)):
                             pending[params.get("requestId")] = rurl
                     elif method == "Network.loadingFinished":
                         rid = params.get("requestId")
@@ -2406,7 +2458,7 @@ class LocalChromiumTransport:
     """
 
     def __init__(self, base_url, launcher):
-        self.base = base_url.rstrip("/")
+        self.base = normalize_canvas_base(base_url)
         self.launcher = launcher
         self.cdp = launcher.cdp
         # W2-P2-9: guards the tenant-tab find-or-create so two threads

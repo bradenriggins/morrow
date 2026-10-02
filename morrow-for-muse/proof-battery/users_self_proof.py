@@ -59,7 +59,8 @@ def main():
     try:
         url = "%s/api/v1/users/self" % CANVAS_BASE.rstrip("/")
         resp_url, body = cdp.capture_network_response(
-            tab, url, "/api/v1/users/self", timeout=60)
+            tab, url, "/api/v1/users/self", timeout=60,
+            expected_origin=CANVAS_BASE)
         try:
             payload = json.loads(body) if body else {}
         except ValueError:
