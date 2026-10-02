@@ -80,7 +80,7 @@ The child is an implementation detail of the Morrow MCP installation. Users do n
 
 ### Chrome extension
 
-The Manifest V3 extension, Morrow Bridge, initiates the loopback connection. It has no side panel and no chat interface.
+The Manifest V3 extension, Morrow Bridge, initiates the loopback connection. It has no side panel, and its only chat interface is the Private Chat drawer in its settings page.
 
 The extension owns:
 
@@ -215,7 +215,7 @@ Batch state is durable in SQLite. Arguments and manifests use authenticated encr
 
 ## Trust boundaries
 
-- **AI client:** may choose and call tools. MCP exposes no approval tool. A separate local page records approval only with Morrow Bridge's signature over the form, which the Bridge adds for a trusted click in the review tab. Local HTTP requests cannot approve, and they cannot pair a Bridge: Morrow pairs only a Bridge that proves it holds the secret in the Bridge folder Morrow set up, in the Connect Morrow step the person selects. It does not prove human presence against browser automation that drives Chrome input, and it does not stop a program that runs as the educator and reads Morrow's files.
+- **AI client:** may choose and call tools. MCP exposes no approval tool. A separate local page records approval only with Morrow Bridge's signature over the form, which the Bridge adds for a trusted click in the review tab. Local HTTP requests cannot approve, and they cannot pair a Bridge: Morrow pairs only a Bridge that proves it holds the secret in the Bridge folder Morrow set up, in the Pair Morrow step the person selects. It does not prove human presence against browser automation that drives Chrome input, and it does not stop a program that runs as the educator and reads Morrow's files.
 - **Morrow MCP:** may plan and reserve effects; has no platform credential.
 - **Approval page:** may approve only one exact, unexpired durable plan on loopback.
 - **Extension:** may use only paired commands, admitted operations, current bindings, and unused receipts.

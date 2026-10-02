@@ -10,7 +10,7 @@ Morrow Desktop, the app for Mac and Windows, connects the AI assistant you alrea
 
 Morrow helps instructors, instructional designers, and course reviewers turn lesson and quiz requests into reviewed changes and checked results. Ask an assistant set up with Morrow for a change, review the exact change in Morrow, and see what the course platform saved. You keep the teaching decisions.
 
-Morrow Desktop runs on your computer and connects to an assistant through MCP. The app sets up ChatGPT, Claude Desktop, Claude Code, or Gemini CLI, and the source route sets up the same four. A selected Codex update has passed a live test-course check; each other assistant still needs its own complete live checks. See the [test record](docs/implementation/BT2-LIVE-PROOF.md).
+Morrow Desktop runs on your computer and connects to an assistant through MCP. The app sets up ChatGPT, Claude Desktop, Claude Code, or Gemini CLI, and the source route sets up those four plus Cursor and VS Code, which the app does not set up. A selected Codex update has passed a live test-course check; each other assistant still needs its own complete live checks. See the [test record](docs/implementation/BT2-LIVE-PROOF.md).
 
 ## What a user installs
 
@@ -33,7 +33,7 @@ The extension shows two separate states: whether Morrow is connected to your ass
 last checked. A saved connection is not a promise that you are still signed in.
 Morrow checks the platform again before each request.
 
-You continue working in your assistant. Morrow does not add another chat interface.
+You continue working in your assistant. Morrow adds no chat interface of its own except the Private Chat drawer in Morrow Bridge's settings page.
 For example, ask it to list the modules in a connected course or show which
 assignments have no due date. Be specific about the course and what you want
 to change.
@@ -355,10 +355,10 @@ On a Mac, Morrow first asks you to move it to Applications when it runs from the
 The app presents three stages and shows one next action at a time:
 
 1. **Choose your assistant.** Morrow lists the assistants it found on this computer and configures only the one you select. Claude Desktop receives a generated local extension and asks you to approve it in Claude Desktop. Each of the other three receives one Morrow entry in its own settings file. Morrow keeps a copy of a settings file before it changes it, named after the file and the time, in the **Assistant settings backups** folder.
-2. **Set up Morrow Bridge.** Select **Show Bridge folder**. Morrow opens the folder Chrome must load and shows its full path with a **Copy path** button. In Chrome, open the three-dot menu, select **Extensions**, then **Manage Extensions**, turn on **Developer mode**, select **Load unpacked**, and select that folder. The folder is hidden by default: on a Mac, press Command+Shift+G in Chrome's folder picker and paste the path; on Windows, paste the path into the picker's address bar. Open Morrow Bridge and select **Pair Morrow**. Morrow connects only the Morrow Bridge that Chrome loaded from the folder Morrow shows. This temporary Chrome step stands until Morrow Bridge has a Chrome Web Store listing. A managed Chrome profile can block it, and Morrow does not work around that restriction.
+2. **Set up Morrow Bridge.** Select **Show Bridge folder**. Morrow opens the folder Chrome must load and shows its full path with a **Copy path** button. In Chrome, open the three-dot menu, select **Extensions**, then **Manage Extensions**, turn on **Developer mode**, select **Load unpacked**, and select that folder. The folder is hidden by default: on a Mac, press Command+Shift+G in Chrome's folder picker and paste the path; on Windows, paste the path into the picker's address bar. Open Morrow Bridge, review and accept the course data disclosure (**Agree and continue**), and select **Pair Morrow**. Morrow connects only the Morrow Bridge that Chrome loaded from the folder Morrow shows. This temporary Chrome step stands until Morrow Bridge has a Chrome Web Store listing. A managed Chrome profile can block it, and Morrow does not work around that restriction.
 3. **Pair your learning account once.** Sign in to Canvas or Moodle in Chrome and open any course to identify your account. Select **Pair Canvas account** or **Pair Moodle account** in Morrow Bridge and allow the exact site Chrome shows. Choose **Selected courses** to limit access to courses you allow in **Plan and Edit settings**. Choose **Account access** to use the account's available courses without selecting each one in Bridge. You can switch modes without pairing again. Give your assistant course names, course IDs, or course links. New courses start in Plan. Edit permission stays separate.
 
-When the course is connected, Morrow asks you to quit and reopen the assistant you chose, because an assistant reads its settings only when it starts. Open it again, start a new chat, then select **Check** in Morrow. Claude Code and Gemini CLI read Morrow's entry only in the project folder you chose at setup, so Morrow names that folder: start the assistant there, and approve the morrow server when Claude Code asks. Morrow shows the final "Continue in your assistant" step only after that assistant's own Morrow session has connected once.
+When the course is connected, Morrow asks you to quit and reopen the assistant you chose, because an assistant reads its settings only when it starts. Open it again, start a new chat, then select **Check** in Morrow. Claude Code and Gemini CLI read Morrow's entry only in the project folder you chose at setup, so Morrow names that folder: start the assistant there, and approve the morrow server when Claude Code asks. Morrow shows the final "Morrow is ready" panel only after that assistant's own Morrow session has connected once.
 
 Morrow creates a default materials folder. Choosing another folder is optional, and you can change it after setup.
 
