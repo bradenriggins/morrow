@@ -42,6 +42,7 @@ async function start(bindings: readonly BridgeBinding[] = [{
     token,
     port: 0,
     runtimeRevision,
+    extensionVersion: null,
     allowedExtensionIds: [extensionId],
     approveExtensionId: async () => undefined,
   };
@@ -1078,6 +1079,47 @@ describe("CanvasConnectorRuntime", () => {
         canvas_content_guard: guard,
       },
     })).toMatchObject({ ok: false });
+    expect(calls).toBe(1);
+  });
+
+  it("admits a guarded repair through the configured revision, not a hardcoded one", async () => {
+    const runtime = await start();
+    expect(runtime.expectedRuntimeRevision).toBe("1.0.0-rc.0");
+    const socket = sockets.at(-1)!;
+    const guard = {
+      kind: "assignment_image_alt",
+      course_id: "42",
+      assignment_id: "9",
+      body_sha256: "a".repeat(64),
+      protected_state_sha256: "b".repeat(64),
+      image_index: 1,
+      image_start: 3,
+      image_end: 21,
+      image_tag_sha256: "c".repeat(64),
+      image_src_sha256: "d".repeat(64),
+      alt_text: "Cell membrane diagram",
+      decorative: false,
+    };
+    let calls = 0;
+    respond(socket, (command) => {
+      calls += 1;
+      expect(command.toolName).toBe("canvas_edit_assignment");
+    });
+    expect(await runtime.call("canvas_edit_assignment", {
+      course_id: "42",
+      id: "9",
+      _morrow: {
+        source_binding_id: "canvas:test-account",
+        canvas_content_guard: guard,
+        outer_grant: {
+          plan_digest: "a".repeat(64),
+          approval_grant_digest: "b".repeat(64),
+          effect_receipt_id: "effect:assignment-image-alt-configured",
+          dispatch_attempt: 1,
+          gateway_process_id: "gateway:connector-test",
+        },
+      },
+    })).toMatchObject({ ok: true });
     expect(calls).toBe(1);
   });
 

@@ -305,6 +305,19 @@ function safeResultArtifactFailure(error: unknown): CallToolResult {
   };
 }
 
+/**
+ * Update guidance for a gateway that is not ready because Morrow Bridge refused the build it
+ * saw. Returns null when the health carries no structured mismatch, in which case the caller
+ * falls back to the runtime's own reason or the generic not-ready text.
+ */
+export function bridgeMismatchGuidance(health: JsonObject): string | null {
+  const components = isJsonObject(health.components) ? health.components : null;
+  const bridge = components && isJsonObject(components.extensionBridge) ? components.extensionBridge : null;
+  if (!bridge || !isJsonObject(bridge.lastMismatch)) return null;
+  return "Morrow Bridge reported a different build than this Morrow expects. "
+    + "Update Morrow Bridge and reload the extension, then try again.";
+}
+
 export function createMorrowServer(
   runtime: GatewayRuntime,
   healthProvider: () => JsonObject | Promise<JsonObject> = () => runtime.health() as unknown as JsonObject,
@@ -360,14 +373,16 @@ export function createMorrowServer(
       const health = await healthProvider() as unknown as ReturnType<GatewayRuntime["health"]>;
       // A runtime that is not ready for a named reason states that reason here,
       // because this line is what the person reads first.
-      const detail = (health as unknown as JsonObject).readyDetail;
+      const healthJson = health as unknown as JsonObject;
+      const detail = healthJson.readyDetail;
+      const mismatch = bridgeMismatchGuidance(healthJson);
       return textAndStructured(
         health.ready
           ? `Morrow is ready with ${health.publicToolCount} public tools.`
           : typeof detail === "string" && detail.trim().length > 0
             ? detail
-            : "Morrow is not ready. Review the source status.",
-        health as unknown as JsonObject,
+            : mismatch ?? "Morrow is not ready. Review the source status.",
+        healthJson,
       );
     },
   );

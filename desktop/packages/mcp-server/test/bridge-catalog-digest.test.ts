@@ -164,6 +164,7 @@ describe("bridge catalog digest fixture", () => {
       token: "bridge-catalog-digest-token-".repeat(3),
       port: 0,
       runtimeRevision: "1.0.0-rc.2",
+      extensionVersion: null,
       allowedExtensionIds: ["a".repeat(32)],
       approveExtensionId: async () => undefined,
     });

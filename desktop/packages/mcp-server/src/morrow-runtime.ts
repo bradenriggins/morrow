@@ -55,6 +55,39 @@ const TERMINAL_BATCH_AUTHORITY_STATES = new Set<BatchState>([
   "completed", "partial", "failed", "cancelled", "inspection_required",
 ]);
 
+/**
+ * Names the stale Bridge build behind a disconnected bridge, so health says which side to
+ * update instead of only reporting ready:false. Returns null when the bridge reports no
+ * version refusal.
+ */
+export function bridgeMismatchDetail(bridge: JsonObject | null): string | null {
+  const mismatch = bridge && isJsonObject(bridge.lastMismatch) ? bridge.lastMismatch : null;
+  if (!mismatch) return null;
+  const text = (value: unknown): string | null => typeof value === "string" && value.length > 0 ? value : null;
+  const shortDigest = (value: unknown): string | null => {
+    const digest = text(value);
+    return digest && /^[0-9a-f]{64}$/.test(digest) ? digest.slice(0, 12) : digest;
+  };
+  if (mismatch.reason === "bridge_protocol_mismatch") {
+    const received = typeof mismatch.receivedProtocolVersion === "number" ? String(mismatch.receivedProtocolVersion) : "unknown";
+    const expected = typeof mismatch.expectedProtocolVersion === "number" ? String(mismatch.expectedProtocolVersion) : "unknown";
+    return `Morrow Bridge speaks Bridge protocol ${received} but this Morrow expects protocol ${expected}. `
+      + "Update Morrow and Morrow Bridge to the same release, then reload the extension and try again.";
+  }
+  const receivedRevision = text(mismatch.receivedRuntimeRevision) ?? "unknown";
+  const expectedRevision = text(mismatch.expectedRuntimeRevision) ?? "unknown";
+  const receivedDigest = shortDigest(mismatch.receivedCatalogDigest) ?? "unknown";
+  const expectedDigest = shortDigest(mismatch.expectedCatalogDigest) ?? "unknown";
+  const receivedExtension = text(mismatch.receivedExtensionVersion);
+  const expectedExtension = text(mismatch.expectedExtensionVersion);
+  const extensionClause = receivedExtension || expectedExtension
+    ? ` (Bridge build ${receivedExtension ?? "unknown"}, expected ${expectedExtension ?? "unknown"})`
+    : "";
+  return `Morrow Bridge reported runtime revision ${receivedRevision} (expected ${expectedRevision}) `
+    + `and catalog digest ${receivedDigest} (expected ${expectedDigest})${extensionClause}. `
+    + "Update Morrow Bridge and reload the extension, then try again.";
+}
+
 function exactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return isJsonObject(value)
     && Object.keys(value).length === keys.length
@@ -1126,12 +1159,17 @@ export class MorrowRuntime {
       : null;
     const batchLedger = this.batchHealth();
     const effectBroker = this.gateway.effectHealth();
+    // A mismatch record only explains a bridge that is still disconnected. Once the extension
+    // connects, the stale record must not override the live state.
+    const mismatchDetail = !extensionConnected ? bridgeMismatchDetail(bridge) : null;
     return {
       ...gateway,
       ready: gateway.ready && (!connector || extensionConnected),
       ...(bridgeProblem
         ? { readyDetail: `${bridgeProblem.message} This Morrow started without its Canvas and Moodle browser tools.` }
-        : {}),
+        : mismatchDetail
+          ? { readyDetail: mismatchDetail }
+          : {}),
       components: {
         gateway: { ready: gateway.ready, version: gateway.version },
         morrowKernel: { ready: gateway.ready, effectBroker, batchLedger },

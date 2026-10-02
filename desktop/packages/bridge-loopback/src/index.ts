@@ -104,6 +104,13 @@ export interface LoopbackBridgeOptions {
   readonly token: string;
   readonly expectedRuntimeRevision: string;
   readonly expectedCatalogDigest: string;
+  /**
+   * The Chrome Web Store version of the Morrow Bridge build this server accepts, such as
+   * "1.0.134". The extension reports its own manifest version in its handshake, and the server
+   * refuses a build that reports another version or none. Leave unset only when the caller has
+   * no expected Bridge build to enforce, in which case the handshake reports are ignored.
+   */
+  readonly expectedExtensionVersion?: string;
   readonly allowedExtensionIds?: readonly string[];
   readonly port?: number;
   readonly authTimeoutMs?: number;
@@ -171,6 +178,25 @@ export interface LoopbackBridgeProblem {
   readonly message: string;
 }
 
+/**
+ * The most recent handshake or pairing the server refused for a version reason. A refused peer
+ * leaves no connection behind, so without this record health would show only a disconnected
+ * bridge and never say that a stale build caused it.
+ */
+export interface LoopbackBridgeVersionMismatch {
+  readonly schema: "morrow.bridge.version-mismatch.v1";
+  readonly reason: "bridge_version_mismatch" | "bridge_protocol_mismatch" | "bridge_bindings_digest_mismatch" | "version_mismatch";
+  readonly receivedRuntimeRevision: string | null;
+  readonly receivedCatalogDigest: string | null;
+  readonly receivedExtensionVersion: string | null;
+  readonly receivedProtocolVersion: number | null;
+  readonly expectedRuntimeRevision: string;
+  readonly expectedCatalogDigest: string;
+  readonly expectedExtensionVersion: string | null;
+  readonly expectedProtocolVersion: typeof BRIDGE_PROTOCOL_VERSION;
+  readonly at: number;
+}
+
 export interface LoopbackBridgeHealth {
   readonly schema: "morrow.bridge.health.v1";
   readonly listening: boolean;
@@ -183,6 +209,9 @@ export interface LoopbackBridgeHealth {
   readonly extensionId: string | null;
   readonly runtimeRevision: string | null;
   readonly catalogDigest: string;
+  readonly expectedRuntimeRevision: string;
+  readonly expectedExtensionVersion: string | null;
+  readonly lastMismatch?: LoopbackBridgeVersionMismatch;
   readonly bindingCount: number;
   readonly pendingCount: number;
   readonly connectedAt: number | null;
@@ -359,6 +388,54 @@ function originExtensionId(origin: string | undefined): string | null {
   return EXTENSION_ORIGIN.exec(origin.trim())?.[1] || null;
 }
 
+/** Chrome extension versions: one to four dot-separated integers, such as "1.0.134". */
+const CHROME_EXTENSION_VERSION = /^\d{1,5}(\.\d{1,5}){0,3}$/;
+
+/** Close code for a handshake that speaks another Bridge protocol version. 4400, 4401, 4403, and 4409 are taken. */
+const BRIDGE_PROTOCOL_MISMATCH_CLOSE_CODE = 4406;
+const BRIDGE_PROTOCOL_MISMATCH_REASON = "bridge_protocol_mismatch";
+const BRIDGE_BINDINGS_DIGEST_MISMATCH_REASON = "bridge_bindings_digest_mismatch";
+
+function exactExtensionVersion(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  const normalized = String(value).trim();
+  if (!CHROME_EXTENSION_VERSION.test(normalized)) {
+    throw new TypeError("expectedExtensionVersion must use Chrome's dotted version format");
+  }
+  return normalized;
+}
+
+/**
+ * Reads the extension's reported manifest version from a raw handshake value before the strict
+ * protocol parser sees it. The parser rejects unknown keys, so the caller strips the report and
+ * parses the remainder. A missing or malformed report reads as undefined: old builds report
+ * nothing, and a build that cannot spell its own version proves nothing either way.
+ */
+function readHandshakeExtensionVersion(value: unknown): { readonly version: string | undefined; readonly stripped: unknown } {
+  if (!isJsonObject(value) || !Object.hasOwn(value, "extensionVersion")) return { version: undefined, stripped: value };
+  const { extensionVersion, ...stripped } = value as Record<string, unknown>;
+  if (typeof extensionVersion !== "string") return { version: undefined, stripped };
+  const normalized = extensionVersion.trim();
+  return { version: CHROME_EXTENSION_VERSION.test(normalized) ? normalized : undefined, stripped };
+}
+
+/**
+ * Names a skewed protocol version on a raw handshake value. Returns null when the value carries
+ * no protocol version claim, which is malformed rather than skewed.
+ */
+function handshakeProtocolSkew(value: unknown, schema: string): { readonly received: string } | null {
+  if (!isJsonObject(value) || value.schema !== schema || !Object.hasOwn(value, "protocolVersion")) return null;
+  if (value.protocolVersion === BRIDGE_PROTOCOL_VERSION) return null;
+  const received = typeof value.protocolVersion === "number"
+    ? String(value.protocolVersion)
+    : String(JSON.stringify(value.protocolVersion) ?? "unknown").slice(0, 24);
+  return { received };
+}
+
+function bindingCatalogSkewed(binding: { readonly catalogDigest?: string }, expectedDigest: string): boolean {
+  return binding.catalogDigest !== undefined && binding.catalogDigest !== expectedDigest;
+}
+
 function strictUtf8(data: Uint8Array): string {
   return new TextDecoder("utf-8", { fatal: true }).decode(data);
 }
@@ -395,6 +472,8 @@ export class LoopbackBridgeServer {
   private readonly expectedToken: Buffer;
   private readonly expectedRuntimeRevision: string;
   private readonly expectedCatalogDigest: string;
+  private readonly expectedExtensionVersion: string | null;
+  private lastMismatch: LoopbackBridgeVersionMismatch | null = null;
   private readonly allowedExtensionIds: Set<string>;
   private readonly requestedPort: number;
   private readonly authTimeoutMs: number;
@@ -440,6 +519,7 @@ export class LoopbackBridgeServer {
     if (!/^[0-9a-f]{64}$/.test(this.expectedCatalogDigest)) {
       throw new TypeError("expectedCatalogDigest must be a SHA-256 digest");
     }
+    this.expectedExtensionVersion = exactExtensionVersion(options.expectedExtensionVersion);
     const ids = (options.allowedExtensionIds || []).map((value) => String(value).trim());
     if (ids.some((value) => !/^[a-p]{32}$/.test(value))) {
       throw new TypeError("allowed extension ids must use Chrome's 32-character id format");
@@ -516,6 +596,44 @@ export class LoopbackBridgeServer {
     if (!timer) return;
     clearTimeout(timer);
     this.authenticationTimers.delete(socket);
+  }
+
+  /**
+   * Remembers the most recent version refusal so health can say that a stale build, not a dead
+   * bridge, is why nothing is connected. Unknown reports stay null rather than guessing.
+   */
+  private recordVersionMismatch(
+    reason: LoopbackBridgeVersionMismatch["reason"],
+    received: {
+      readonly runtimeRevision?: unknown;
+      readonly catalogDigest?: unknown;
+      readonly extensionVersion?: unknown;
+      readonly protocolVersion?: unknown;
+    },
+  ): void {
+    const text = (value: unknown): string | null => typeof value === "string" ? value : null;
+    this.lastMismatch = {
+      schema: "morrow.bridge.version-mismatch.v1",
+      reason,
+      receivedRuntimeRevision: text(received.runtimeRevision),
+      receivedCatalogDigest: text(received.catalogDigest),
+      receivedExtensionVersion: text(received.extensionVersion),
+      receivedProtocolVersion: typeof received.protocolVersion === "number" ? received.protocolVersion : null,
+      expectedRuntimeRevision: this.expectedRuntimeRevision,
+      expectedCatalogDigest: this.expectedCatalogDigest,
+      expectedExtensionVersion: this.expectedExtensionVersion,
+      expectedProtocolVersion: BRIDGE_PROTOCOL_VERSION,
+      at: Date.now(),
+    };
+  }
+
+  /**
+   * Whether the peer's reported manifest version is skewed against this server's expected Bridge
+   * build. With no expected build configured there is nothing to be skewed against, so any
+   * report, including none, is accepted.
+   */
+  private extensionVersionSkewed(reported: string | undefined): boolean {
+    return this.expectedExtensionVersion !== null && reported !== this.expectedExtensionVersion;
   }
 
   private responseHeaders(contentType: string, origin?: string): Record<string, string> {
@@ -602,10 +720,30 @@ export class LoopbackBridgeServer {
       } catch {
         return this.json(response, 400, { error: "invalid_request" }, identity.origin);
       }
-      if (!isJsonObject(body) || body.extensionId !== identity.extensionId
-        || body.catalogDigest !== this.expectedCatalogDigest
-        || body.runtimeRevision !== this.expectedRuntimeRevision) {
+      if (!isJsonObject(body) || body.extensionId !== identity.extensionId) {
         return this.json(response, 403, { error: "connector_identity_refused" }, identity.origin);
+      }
+      // A stale Bridge build is refused as a version mismatch, not as a refused identity: pairing
+      // again cannot fix it, updating and reloading can.
+      const pairingExtensionVersion = readHandshakeExtensionVersion(body).version;
+      if (body.catalogDigest !== this.expectedCatalogDigest
+        || body.runtimeRevision !== this.expectedRuntimeRevision
+        || this.extensionVersionSkewed(pairingExtensionVersion)) {
+        this.recordVersionMismatch("version_mismatch", {
+          runtimeRevision: body.runtimeRevision,
+          catalogDigest: body.catalogDigest,
+          extensionVersion: pairingExtensionVersion,
+          protocolVersion: body.protocolVersion,
+        });
+        return this.json(response, 409, {
+          error: "version_mismatch",
+          expectedRuntimeRevision: this.expectedRuntimeRevision,
+          receivedRuntimeRevision: typeof body.runtimeRevision === "string" ? body.runtimeRevision : null,
+          expectedCatalogDigest: this.expectedCatalogDigest,
+          receivedCatalogDigest: typeof body.catalogDigest === "string" ? body.catalogDigest : null,
+          expectedExtensionVersion: this.expectedExtensionVersion,
+          receivedExtensionVersion: pairingExtensionVersion ?? null,
+        }, identity.origin);
       }
       const secret = await this.currentPairingSecret();
       if (!secret) return this.json(response, 409, { error: "pairing_folder_unconfirmed" }, identity.origin);
@@ -709,7 +847,7 @@ export class LoopbackBridgeServer {
 
   private acceptUnauthenticated(socket: WebSocket, originId: string | null): void {
     let authenticated = false;
-    let authentication: { request: BridgeAuthenticate; serverNonce: string } | null = null;
+    let authentication: { request: BridgeAuthenticate; serverNonce: string; extensionVersion: string | undefined } | null = null;
     const authTimer = setTimeout(() => {
       this.authenticationTimers.delete(socket);
       if (!authenticated) socket.close(4401, "authentication_required");
@@ -731,10 +869,23 @@ export class LoopbackBridgeServer {
       }
       if (!authenticated) {
         if (!authentication) {
+          const reported = readHandshakeExtensionVersion(value);
           let request: BridgeAuthenticate;
           try {
-            request = parseBridgeAuthenticate(value);
+            request = parseBridgeAuthenticate(reported.stripped);
           } catch {
+            const skew = handshakeProtocolSkew(value, BRIDGE_SCHEMAS.authenticate);
+            if (skew) {
+              this.recordVersionMismatch("bridge_protocol_mismatch", {
+                runtimeRevision: isJsonObject(value) ? value.runtimeRevision : undefined,
+                catalogDigest: isJsonObject(value) ? value.catalogDigest : undefined,
+                extensionVersion: reported.version,
+                protocolVersion: isJsonObject(value) ? value.protocolVersion : undefined,
+              });
+              socket.close(BRIDGE_PROTOCOL_MISMATCH_CLOSE_CODE,
+                `${BRIDGE_PROTOCOL_MISMATCH_REASON}:expected=${BRIDGE_PROTOCOL_VERSION},received=${skew.received}`);
+              return;
+            }
             socket.close(4401, "authentication_request_required");
             return;
           }
@@ -747,12 +898,20 @@ export class LoopbackBridgeServer {
           }
           // A different build is fixed by an update and a reload, not by pairing again, so the
           // Bridge is told which one it is. POST /pair already refuses the same mismatch.
-          if (request.runtimeRevision !== this.expectedRuntimeRevision || request.catalogDigest !== this.expectedCatalogDigest) {
+          if (request.runtimeRevision !== this.expectedRuntimeRevision
+            || request.catalogDigest !== this.expectedCatalogDigest
+            || this.extensionVersionSkewed(reported.version)) {
+            this.recordVersionMismatch("bridge_version_mismatch", {
+              runtimeRevision: request.runtimeRevision,
+              catalogDigest: request.catalogDigest,
+              extensionVersion: reported.version,
+              protocolVersion: request.protocolVersion,
+            });
             socket.close(4403, "bridge_version_mismatch");
             return;
           }
           const serverNonce = randomBytes(32).toString("hex");
-          authentication = { request, serverNonce };
+          authentication = { request, serverNonce, extensionVersion: reported.version };
           send(socket, {
             schema: BRIDGE_SCHEMAS.challenge,
             protocolVersion: BRIDGE_PROTOCOL_VERSION,
@@ -763,10 +922,23 @@ export class LoopbackBridgeServer {
           });
           return;
         }
+        const helloReported = readHandshakeExtensionVersion(value);
         let hello: BridgeHello;
         try {
-          hello = parseBridgeHello(value);
+          hello = parseBridgeHello(helloReported.stripped);
         } catch {
+          const skew = handshakeProtocolSkew(value, BRIDGE_SCHEMAS.hello);
+          if (skew) {
+            this.recordVersionMismatch("bridge_protocol_mismatch", {
+              runtimeRevision: authentication.request.runtimeRevision,
+              catalogDigest: authentication.request.catalogDigest,
+              extensionVersion: helloReported.version,
+              protocolVersion: isJsonObject(value) ? value.protocolVersion : undefined,
+            });
+            socket.close(BRIDGE_PROTOCOL_MISMATCH_CLOSE_CODE,
+              `${BRIDGE_PROTOCOL_MISMATCH_REASON}:expected=${BRIDGE_PROTOCOL_VERSION},received=${skew.received}`);
+            return;
+          }
           socket.close(4401, "invalid_hello");
           return;
         }
@@ -776,6 +948,7 @@ export class LoopbackBridgeServer {
           || hello.extensionId !== authentication.request.extensionId
           || hello.runtimeRevision !== authentication.request.runtimeRevision
           || hello.catalogDigest !== authentication.request.catalogDigest
+          || helloReported.version !== authentication.extensionVersion
           || !constantTimeHexEquals(
             authenticationProof(this.expectedToken, "client", authentication.request, authentication.serverNonce),
             hello.clientProof,
@@ -854,6 +1027,16 @@ export class LoopbackBridgeServer {
       if (message.generation !== active.generation) return;
       active.lastSeenAt = Date.now();
       if (message.syncId === undefined) {
+        const skewed = message.bindings.find((binding) => bindingCatalogSkewed(binding, active.catalogDigest));
+        if (skewed) {
+          this.recordVersionMismatch("bridge_bindings_digest_mismatch", {
+            runtimeRevision: active.runtimeRevision,
+            catalogDigest: skewed.catalogDigest,
+            protocolVersion: message.protocolVersion,
+          });
+          socket.close(4403, BRIDGE_BINDINGS_DIGEST_MISMATCH_REASON);
+          return;
+        }
         active.bindingSync = undefined;
         active.bindings = message.bindings;
         return;
@@ -874,7 +1057,20 @@ export class LoopbackBridgeServer {
       transfer.nextPart += 1;
       transfer.lastSeenAt = Date.now();
       if (message.complete === true) {
-        active.bindings = [...transfer.bindings.values()].sort((left, right) => left.sourceBindingId < right.sourceBindingId ? -1 : left.sourceBindingId > right.sourceBindingId ? 1 : 0);
+        const synced = [...transfer.bindings.values()].sort((left, right) => left.sourceBindingId < right.sourceBindingId ? -1 : left.sourceBindingId > right.sourceBindingId ? 1 : 0);
+        // A sync that drifts to another catalog mid-session is a skewed extension, not a new
+        // course list: accepting it would let later commands execute against the wrong catalog.
+        const skewed = synced.find((binding) => bindingCatalogSkewed(binding, active.catalogDigest));
+        if (skewed) {
+          this.recordVersionMismatch("bridge_bindings_digest_mismatch", {
+            runtimeRevision: active.runtimeRevision,
+            catalogDigest: skewed.catalogDigest,
+            protocolVersion: message.protocolVersion,
+          });
+          socket.close(4403, BRIDGE_BINDINGS_DIGEST_MISMATCH_REASON);
+          return;
+        }
+        active.bindings = synced;
         active.bindingSync = undefined;
       }
       return;
@@ -1010,6 +1206,9 @@ export class LoopbackBridgeServer {
         if (!binding || (editPolicySet.mode === "edit" && binding.runtimeVerified !== true)) {
           throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh request from current bindings.");
         }
+        if (bindingCatalogSkewed(binding, active.catalogDigest)) {
+          throw new BridgeUnavailableError("Morrow Bridge republished this course connection under a different catalog. Reload Morrow Bridge and create a fresh request from current bindings.");
+        }
       }
     }
     const expectedProvider = providerForToolName(invocation.toolName);
@@ -1122,10 +1321,18 @@ export class LoopbackBridgeServer {
     if (invocation.kind === "invoke_write" && !invocation.outerGrant) {
       throw new TypeError("invoke_write requires a gateway outer grant");
     }
+    // A binding stamped with another catalog is skewed, not unverified: proving the course again
+    // cannot fix it, so it is refused before any recovery is attempted.
+    if (requiresCurrentBinding && selectedBinding && bindingCatalogSkewed(selectedBinding, active.catalogDigest)) {
+      throw new BridgeUnavailableError("Morrow Bridge republished this course connection under a different catalog. Reload Morrow Bridge and create a fresh plan from a current binding.");
+    }
     if (requiresCurrentBinding && selectedBinding?.runtimeVerified !== true) {
       await this.recoverBinding(selectedBinding!.sourceBindingId, invocation.signal ? { signal: invocation.signal } : {});
       if (this.active !== active) throw this.unavailable();
       selectedBinding = active.bindings.find((binding) => binding.sourceBindingId === selectedBinding!.sourceBindingId);
+      if (selectedBinding && bindingCatalogSkewed(selectedBinding, active.catalogDigest)) {
+        throw new BridgeUnavailableError("Morrow Bridge republished this course connection under a different catalog. Reload Morrow Bridge and create a fresh plan from a current binding.");
+      }
       if (selectedBinding?.runtimeVerified !== true) {
         throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh plan from a current binding.");
       }
@@ -1341,6 +1548,9 @@ export class LoopbackBridgeServer {
       extensionId: active?.extensionId || null,
       runtimeRevision: active?.runtimeRevision || null,
       catalogDigest: this.expectedCatalogDigest,
+      expectedRuntimeRevision: this.expectedRuntimeRevision,
+      expectedExtensionVersion: this.expectedExtensionVersion,
+      ...(this.lastMismatch ? { lastMismatch: this.lastMismatch } : {}),
       bindingCount: active?.bindings.length || 0,
       pendingCount: this.pending.size,
       connectedAt: active?.connectedAt || null,

@@ -49,6 +49,7 @@ async function connect(
     runtimeVerified: true,
   }],
   helloExtras: { readonly instanceId?: string; readonly takeover?: true } = {},
+  versionExtras: { readonly extensionVersion?: string } = {},
 ): Promise<WebSocket> {
   const address = await server.start();
   const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
@@ -63,6 +64,7 @@ async function connect(
     extensionId,
     runtimeRevision: revision,
     catalogDigest: digest,
+    ...versionExtras,
     sentAt: Date.now(),
   } as const;
   socket.send(serializeBridgeMessage(authentication));
@@ -84,6 +86,7 @@ async function connect(
     extensionId,
     runtimeRevision: revision,
     catalogDigest: digest,
+    ...versionExtras,
     bindings,
     ...helloExtras,
     sentAt: Date.now(),
@@ -1833,5 +1836,311 @@ describe("a request for a closed course proves the course again before admission
     servers.push(server);
     await connect(server, [unverifiedCourse], { instanceId: "profile-owner-0001" });
     await expect(server.recoverBinding("canvas-course-99")).resolves.toBe(false);
+  });
+});
+
+describe("bridge version enforcement", () => {
+  const skewedDigest = "b".repeat(64);
+  const expectedVersion = "9.9.9";
+
+  function versionedServer(options: Partial<ConstructorParameters<typeof LoopbackBridgeServer>[0]> = {}) {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+      ...options,
+    });
+    servers.push(server);
+    return server;
+  }
+
+  async function handshakeClose(
+    server: LoopbackBridgeServer,
+    authenticate: Record<string, unknown>,
+    hello: Record<string, unknown> | null = null,
+  ): Promise<string> {
+    const address = await server.start();
+    const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+      origin: `chrome-extension://${extensionId}`,
+    });
+    sockets.push(socket);
+    await once(socket, "open");
+    const closed = once(socket, "close");
+    socket.send(JSON.stringify({
+      schema: BRIDGE_SCHEMAS.authenticate,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      clientNonce: randomBytes(32).toString("hex"),
+      extensionId,
+      runtimeRevision: revision,
+      catalogDigest: digest,
+      sentAt: Date.now(),
+      ...authenticate,
+    }));
+    if (hello) {
+      const [challengeRaw] = await once(socket, "message") as [Buffer];
+      const challenge = parseBridgeJson(challengeRaw.toString()) as { serverNonce: string };
+      const request = {
+        clientNonce: (authenticate.clientNonce ?? "") as string,
+        extensionId,
+        runtimeRevision: revision,
+        catalogDigest: digest,
+      };
+      const clientProof = createHmac("sha256", token)
+        .update(bridgeAuthenticationProofPayload("client", request, challenge.serverNonce), "utf8")
+        .digest("hex");
+      socket.send(JSON.stringify({
+        schema: BRIDGE_SCHEMAS.hello,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        clientNonce: request.clientNonce,
+        serverNonce: challenge.serverNonce,
+        clientProof,
+        extensionId,
+        runtimeRevision: revision,
+        catalogDigest: digest,
+        bindings: [],
+        sentAt: Date.now(),
+        ...hello,
+      }));
+    }
+    const [code, reason] = await closed as [number, Buffer];
+    return `${code} ${reason.toString()}`;
+  }
+
+  it("refuses a handshake that reports a skewed Bridge build", async () => {
+    const server = versionedServer({ expectedExtensionVersion: expectedVersion });
+    await expect(handshakeClose(server, { extensionVersion: "9.9.8" })).resolves.toBe("4403 bridge_version_mismatch");
+    await expect(handshakeClose(server, {})).resolves.toBe("4403 bridge_version_mismatch");
+    const socket = await connect(server, undefined, {}, { extensionVersion: expectedVersion });
+    expect(server.health()).toMatchObject({ connected: true, runtimeRevision: revision });
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it("refuses a hello that reports another build than its own authenticate", async () => {
+    const server = versionedServer({ expectedExtensionVersion: expectedVersion });
+    const clientNonce = randomBytes(32).toString("hex");
+    await expect(handshakeClose(
+      server,
+      { clientNonce, extensionVersion: expectedVersion },
+      { extensionVersion: "9.9.8" },
+    )).resolves.toBe("4403 bridge_identity_refused");
+  });
+
+  it("ignores version reports when no Bridge build is configured", async () => {
+    const server = versionedServer();
+    const socket = await connect(server, undefined, {}, { extensionVersion: "1.2.3" });
+    expect(server.health()).toMatchObject({ connected: true, expectedExtensionVersion: null });
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it("closes a skewed protocol version apart from authentication, naming the supported version", async () => {
+    const server = versionedServer();
+    await expect(handshakeClose(server, { protocolVersion: 2 }))
+      .resolves.toBe("4406 bridge_protocol_mismatch:expected=1,received=2");
+    const clientNonce = randomBytes(32).toString("hex");
+    await expect(handshakeClose(server, { clientNonce }, { protocolVersion: 2 }))
+      .resolves.toBe("4406 bridge_protocol_mismatch:expected=1,received=2");
+    await expect(handshakeClose(server, { protocolVersion: undefined }))
+      .resolves.toBe("4401 authentication_request_required");
+    expect(server.health().lastMismatch).toMatchObject({
+      schema: "morrow.bridge.version-mismatch.v1",
+      reason: "bridge_protocol_mismatch",
+      receivedProtocolVersion: 2,
+      expectedProtocolVersion: 1,
+    });
+  });
+
+  it("records refused handshakes in health with expected and received versions", async () => {
+    const server = versionedServer({ expectedExtensionVersion: expectedVersion });
+    expect(server.health().lastMismatch).toBeUndefined();
+    await expect(handshakeClose(server, { runtimeRevision: "8".repeat(40), extensionVersion: "9.9.8" }))
+      .resolves.toBe("4403 bridge_version_mismatch");
+    expect(server.health()).toMatchObject({
+      connected: false,
+      expectedRuntimeRevision: revision,
+      expectedExtensionVersion: expectedVersion,
+      lastMismatch: {
+        schema: "morrow.bridge.version-mismatch.v1",
+        reason: "bridge_version_mismatch",
+        receivedRuntimeRevision: "8".repeat(40),
+        receivedCatalogDigest: digest,
+        receivedExtensionVersion: "9.9.8",
+        expectedRuntimeRevision: revision,
+        expectedCatalogDigest: digest,
+        expectedExtensionVersion: expectedVersion,
+        expectedProtocolVersion: 1,
+      },
+    });
+    expect(server.health().lastMismatch).toHaveProperty("at", expect.any(Number));
+  });
+
+  it("rejects invoke on a binding stamped with another catalog, and sends nothing", async () => {
+    const server = versionedServer();
+    const socket = await connect(server, [
+      {
+        sourceBindingId: "canvas-course-42",
+        provider: "canvas",
+        courseId: "42",
+        catalogDigest: digest,
+        runtimeVerified: true,
+      },
+      {
+        sourceBindingId: "canvas-course-77",
+        provider: "canvas",
+        courseId: "77",
+        catalogDigest: skewedDigest,
+        runtimeVerified: true,
+      },
+    ]);
+    let calls = 0;
+    commandHandler(socket, () => {
+      calls += 1;
+      return { pages: [] };
+    });
+    const read = (sourceBindingId: string) => server.invoke({
+      kind: "invoke_read",
+      toolName: "list_pages",
+      operationKey: "GET /v1/courses/{course_id}/pages#list_pages",
+      arguments: { course_id: "42" },
+      sourceBindingId,
+    });
+    await expect(read("canvas-course-77")).rejects.toThrow(BridgeUnavailableError);
+    await expect(read("canvas-course-77")).rejects.toThrow("under a different catalog");
+    await expect(read("canvas-course-42")).resolves.toMatchObject({ ok: true });
+    expect(calls).toBe(1);
+  });
+
+  it("closes a binding sync that drifts to another catalog mid-session", async () => {
+    const server = versionedServer();
+    const socket = await connect(server, [{
+      sourceBindingId: "canvas-course-42",
+      provider: "canvas",
+      courseId: "42",
+      catalogDigest: digest,
+      runtimeVerified: true,
+    }]);
+    const generation = server.health().generation;
+    const closed = once(socket, "close");
+    socket.send(JSON.stringify({
+      schema: BRIDGE_SCHEMAS.bindings,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      generation,
+      bindings: [{
+        sourceBindingId: "canvas-course-42",
+        provider: "canvas",
+        courseId: "42",
+        catalogDigest: skewedDigest,
+        runtimeVerified: true,
+      }],
+      sentAt: Date.now(),
+    }));
+    const [code, reason] = await closed as [number, Buffer];
+    expect(code).toBe(4403);
+    expect(reason.toString()).toBe("bridge_bindings_digest_mismatch");
+    expect(server.health().lastMismatch).toMatchObject({
+      reason: "bridge_bindings_digest_mismatch",
+      receivedCatalogDigest: skewedDigest,
+      expectedCatalogDigest: digest,
+    });
+  });
+
+  it("closes a chunked binding sync that drifts to another catalog on completion", async () => {
+    const server = versionedServer();
+    const socket = await connect(server, [{
+      sourceBindingId: "canvas-course-42",
+      provider: "canvas",
+      courseId: "42",
+      catalogDigest: digest,
+      runtimeVerified: true,
+    }]);
+    const generation = server.health().generation;
+    const closed = once(socket, "close");
+    socket.send(JSON.stringify({
+      schema: BRIDGE_SCHEMAS.bindings,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      generation,
+      bindings: [{
+        sourceBindingId: "canvas-course-42",
+        provider: "canvas",
+        courseId: "42",
+        catalogDigest: skewedDigest,
+        runtimeVerified: true,
+      }],
+      syncId: "drifted-inventory-01",
+      part: 0,
+      complete: true,
+      sentAt: Date.now(),
+    }));
+    const [code, reason] = await closed as [number, Buffer];
+    expect(code).toBe(4403);
+    expect(reason.toString()).toBe("bridge_bindings_digest_mismatch");
+  });
+
+  it("accepts a binding sync stamped with the connection catalog", async () => {
+    const server = versionedServer();
+    const socket = await connect(server, [{
+      sourceBindingId: "canvas-course-42",
+      provider: "canvas",
+      courseId: "42",
+      catalogDigest: digest,
+      runtimeVerified: true,
+    }]);
+    const generation = server.health().generation;
+    socket.send(JSON.stringify({
+      schema: BRIDGE_SCHEMAS.bindings,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      generation,
+      bindings: [{
+        sourceBindingId: "canvas-course-42",
+        provider: "canvas",
+        courseId: "42",
+        catalogDigest: digest,
+        runtimeVerified: true,
+      }],
+      sentAt: Date.now(),
+    }));
+    await vi.waitFor(() => expect(server.health().lastSeenAt).not.toBeNull());
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    expect(server.health().lastMismatch).toBeUndefined();
+  });
+
+  it("refuses pairing with a skewed build as version_mismatch, apart from identity", async () => {
+    const folderSecret = {
+      challengeId: "morrow-0123456789abcdef0123456789abcdef",
+      nonce: randomBytes(32).toString("base64url"),
+      extensionId,
+    };
+    const server = versionedServer({ expectedExtensionVersion: expectedVersion, pairingEnabled: true, pairingSecret: () => folderSecret });
+    const address = await server.start();
+    const base = `http://${address.host}:${address.port}${address.path}`;
+    const pair = (body: unknown, id = extensionId) => fetch(`${base}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: `chrome-extension://${id}` },
+      body: JSON.stringify(body),
+    });
+    const skewed = await pair({ extensionId, catalogDigest: digest, runtimeRevision: "8".repeat(40), extensionVersion: "9.9.8" });
+    expect(skewed.status).toBe(409);
+    expect(await skewed.json()).toEqual({
+      error: "version_mismatch",
+      expectedRuntimeRevision: revision,
+      receivedRuntimeRevision: "8".repeat(40),
+      expectedCatalogDigest: digest,
+      receivedCatalogDigest: digest,
+      expectedExtensionVersion: expectedVersion,
+      receivedExtensionVersion: "9.9.8",
+    });
+    const skewedDigestPair = await pair({ extensionId, catalogDigest: skewedDigest, runtimeRevision: revision, extensionVersion: expectedVersion });
+    expect(skewedDigestPair.status).toBe(409);
+    expect(await skewedDigestPair.json()).toMatchObject({ error: "version_mismatch" });
+    const unreported = await pair({ extensionId, catalogDigest: digest, runtimeRevision: revision });
+    expect(unreported.status).toBe(409);
+    expect(await unreported.json()).toMatchObject({ error: "version_mismatch", receivedExtensionVersion: null });
+    const wrongIdentity = await pair({ extensionId: "b".repeat(32), catalogDigest: digest, runtimeRevision: revision });
+    expect(wrongIdentity.status).toBe(403);
+    expect(await wrongIdentity.json()).toEqual({ error: "connector_identity_refused" });
+    const approved = await pair({ extensionId, catalogDigest: digest, runtimeRevision: revision, extensionVersion: expectedVersion });
+    expect(approved.status).toBe(201);
+    expect(server.health().lastMismatch).toMatchObject({ reason: "version_mismatch" });
   });
 });

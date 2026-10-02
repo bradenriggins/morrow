@@ -22,6 +22,11 @@ export interface CanvasConnectorConfig {
   readonly token: string;
   readonly port: number;
   readonly runtimeRevision: string;
+  /**
+   * The Chrome Web Store version of the Morrow Bridge build the connector accepts, or null when
+   * no expected build is configured and handshake version reports are ignored.
+   */
+  readonly extensionVersion: string | null;
   readonly allowedExtensionIds: readonly string[];
   readonly approveExtensionId: (extensionId: string) => Promise<void>;
   /**
@@ -266,6 +271,23 @@ function exactIds(value: unknown): readonly string[] {
   return [...new Set(value)].sort();
 }
 
+function exactRuntimeRevision(value: unknown): string {
+  const revision = String(value ?? "").trim();
+  if (revision.length < 1 || revision.length > 160 || /[\s\x00-\x1f\x7f]/.test(revision)) {
+    throw new TypeError("MORROW_CANVAS_CONNECTOR_REVISION is invalid");
+  }
+  return revision;
+}
+
+function exactExtensionVersion(value: unknown): string | null {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const version = String(value).trim();
+  if (!/^\d{1,5}(\.\d{1,5}){0,3}$/.test(version)) {
+    throw new TypeError("MORROW_CANVAS_CONNECTOR_EXTENSION_VERSION is invalid");
+  }
+  return version;
+}
+
 function parseState(value: unknown): ConnectorState {
   if (!isJsonObject(value) || value.schema !== "morrow.canvas-connector.state.v1") {
     throw new TypeError("connector state is invalid");
@@ -368,7 +390,8 @@ export async function loadCanvasConnectorConfig(
     catalogPath,
     token,
     port: exactPort(environment.MORROW_CANVAS_CONNECTOR_PORT || state.port),
-    runtimeRevision: String(environment.MORROW_CANVAS_CONNECTOR_REVISION || "1.0.0-rc.2").trim(),
+    runtimeRevision: exactRuntimeRevision(environment.MORROW_CANVAS_CONNECTOR_REVISION || "1.0.0-rc.2"),
+    extensionVersion: exactExtensionVersion(environment.MORROW_CANVAS_CONNECTOR_EXTENSION_VERSION),
     allowedExtensionIds,
     pairingSecret: async () => await readPairingSecret(join(dirname(statePath), BRIDGE_FOLDER_RECORD)),
     approveExtensionId: async (extensionId: string) => {

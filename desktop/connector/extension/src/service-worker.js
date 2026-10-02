@@ -72,6 +72,71 @@ const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
 const PROTOCOL_VERSION = 1;
 const RUNTIME_REVISION = "1.0.0-rc.2";
+const CHROME_EXTENSION_VERSION = /^\d{1,5}(\.\d{1,5}){0,3}$/;
+// Session key owned by review-approval.js: a stored presence means a review approval page flow
+// is active. Read here so a Store update never reloads through it; the module owns the writes.
+const REVIEW_APPROVAL_PRESENCE_SESSION_KEY = "morrowReviewApprovalPresence";
+
+/**
+ * Validates a Chrome extension version, such as "1.0.134". Returns the normalized version, or
+ * null when the value is missing or malformed. Exported for tests.
+ */
+export function parseExtensionVersion(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return CHROME_EXTENSION_VERSION.test(normalized) ? normalized : null;
+}
+
+/**
+ * This Bridge's own manifest version, the per-release build identity the handshake proves.
+ * Returns null when the manifest is unreadable, in which case the handshake carries no
+ * version report and a Morrow that enforces one refuses the connection.
+ */
+export function extensionVersion() {
+  try {
+    return parseExtensionVersion(chrome?.runtime?.getManifest?.()?.version);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The version identity this Bridge sends in its handshake and pairing requests. Exported
+ * for tests.
+ */
+export function bridgeHandshakeVersions() {
+  const reported = extensionVersion();
+  return reported
+    ? { runtimeRevision: RUNTIME_REVISION, extensionVersion: reported }
+    : { runtimeRevision: RUNTIME_REVISION };
+}
+
+/**
+ * Whether a closed Bridge connection means a stale build, which a reload fixes, rather than
+ * an authentication or ownership problem. Exported for tests.
+ */
+export function isBridgeVersionMismatchClose(code, reason) {
+  if (code === 4403 && (reason === "bridge_version_mismatch" || reason === "bridge_bindings_digest_mismatch")) return true;
+  return code === 4406 && typeof reason === "string"
+    && (reason === "bridge_protocol_mismatch" || reason.startsWith("bridge_protocol_mismatch:"));
+}
+
+/**
+ * Whether the extension's own operation state proves a Store update reload is safe: no pending
+ * review, no approval page flow, no in-flight Bridge command (which covers a browser POST),
+ * no queued write, no pending private answer, and no handshake in flight. Every input must
+ * prove the idle case exactly; anything unknown or busy blocks the reload. Exported for tests.
+ */
+export function updateReloadQuiescent(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  return snapshot.reviewsWaiting === 0
+    && snapshot.reviewCount === 0
+    && snapshot.inFlightCommands === 0
+    && snapshot.queuedWrites === 0
+    && snapshot.privateChatPending === false
+    && snapshot.approvalPresence === false
+    && snapshot.handshakeInFlight === false;
+}
 const ITEM_BANK_CREDENTIAL_WAIT_MS = 45_000;
 const DISCOVERY_PAGE_LIMIT = 100;
 const USED_EFFECT_RECEIPT_LIMIT = 2_000;
@@ -549,7 +614,7 @@ const CANVAS_CONTENT_GUARD_OPERATIONS = Object.freeze([
   Object.freeze({ kind: "new_quiz_answer_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
   Object.freeze({ kind: "new_quiz_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
 ]);
-const state = { socket: null, generation: 0, courseDataAuthorityGeneration: 0, accepted: null, authenticationProblem: null, versionMismatch: false, ownership: null, takeoverRequested: false, catalog: null, operations: new Map(), handshakeDeadline: null, reconnectTimer: null, reconnectAttempt: 0, writeQueues: new Map(), storageQueue: Promise.resolve(), pairingFetchControllers: new Set(), bridgeCommands: new Map(), privateChat: null, privateChatClosed: null, reviewsWaiting: 0, reviews: [] };
+const state = { socket: null, generation: 0, courseDataAuthorityGeneration: 0, accepted: null, authenticationProblem: null, versionMismatch: false, ownership: null, takeoverRequested: false, updatePending: false, catalog: null, operations: new Map(), handshakeDeadline: null, reconnectTimer: null, reconnectAttempt: 0, writeQueues: new Map(), storageQueue: Promise.resolve(), pairingFetchControllers: new Set(), bridgeCommands: new Map(), privateChat: null, privateChatClosed: null, reviewsWaiting: 0, reviews: [] };
 const canvasUploadObservers = new Map();
 // siteAnchorId -> the last course-site match, or the probe that is finding one now.
 const anchorVerifications = new Map();
@@ -1113,8 +1178,14 @@ async function bridgePairingProof(offer) {
 
 // Morrow names why it would not pair. A folder that is not the one Morrow set up, or a Bridge
 // folder Morrow cannot confirm, needs the Bridge loaded again from Morrow's folder.
-function pairingRefusal(response, body) {
-  const error = hasExactKeys(body, ["error"]) ? body.error : null;
+export function pairingRefusal(response, body) {
+  const error = hasExactKeys(body, ["error"])
+    ? body.error
+    // The version_mismatch refusal carries expected/received details beside the error name.
+    : body && typeof body === "object" && !Array.isArray(body) && body.error === "version_mismatch"
+      ? "version_mismatch"
+      : null;
+  if (response.status === 409 && error === "version_mismatch") return "bridge_version_mismatch";
   if (response.status === 403 && error === "connector_identity_refused") return "bridge_version_mismatch";
   if ((response.status === 409 && error === "pairing_folder_unconfirmed")
     || (response.status === 403 && (error === "extension_identity_refused" || error === "pairing_proof_refused"))) {
@@ -2553,6 +2624,7 @@ async function applyBridgeUiState(uiState) {
   state.reviewsWaiting = uiState.reviews.length;
   await refreshBadge();
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+  void maybeReloadForDeferredUpdate();
   return { schema: "morrow.bridge.ui-state.v1", accepted: uiState.reviews.length };
 }
 
@@ -2565,6 +2637,7 @@ function clearBridgeReviews() {
   state.reviews = [];
   state.reviewsWaiting = 0;
   void refreshBadge().catch(() => undefined);
+  void maybeReloadForDeferredUpdate();
 }
 
 async function editPolicyOptions(sourceBindingId, authorityGeneration = state.courseDataAuthorityGeneration) {
@@ -3037,6 +3110,55 @@ function retireBridgeSocket(socket, { closeCode = null, reason = "", reconnect =
   return true;
 }
 
+/**
+ * Whether a review approval page flow is active. Returns null when session storage is
+ * unreadable, which blocks an update reload exactly like an active flow does: quiescence
+ * must be proven, never assumed.
+ */
+async function bridgeApprovalPresence() {
+  try {
+    const stored = await chrome.storage.session.get(REVIEW_APPROVAL_PRESENCE_SESSION_KEY);
+    try {
+      return parseReviewApprovalPresence(stored?.[REVIEW_APPROVAL_PRESENCE_SESSION_KEY]) !== null;
+    } catch {
+      return false;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Answers a Chrome Web Store update: reloads now only when this extension's own operation
+ * state proves it is safe, per UPDATES.md. Otherwise the update waits: Chrome installs it
+ * when the extension is idle, and each completion point below retries the reload sooner.
+ */
+async function handleStoreUpdateAvailable() {
+  const presence = await bridgeApprovalPresence();
+  const quiescent = updateReloadQuiescent({
+    reviewsWaiting: Number.isSafeInteger(state.reviewsWaiting) ? state.reviewsWaiting : 1,
+    reviewCount: state.reviews.length,
+    inFlightCommands: state.bridgeCommands.size,
+    queuedWrites: state.writeQueues.size,
+    privateChatPending: state.privateChat?.pending != null,
+    approvalPresence: presence !== false,
+    handshakeInFlight: state.socket !== null && state.generation === 0,
+  });
+  if (!quiescent) {
+    state.updatePending = true;
+    void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+    return;
+  }
+  state.updatePending = false;
+  chrome.runtime.reload();
+}
+
+/** Retries a deferred Store update reload from an operation completion point. */
+async function maybeReloadForDeferredUpdate() {
+  if (state.updatePending !== true) return;
+  await handleStoreUpdateAvailable().catch(() => undefined);
+}
+
 function startBridgeHandshakeDeadline(socket) {
   clearBridgeHandshakeDeadline();
   const timer = setTimeout(() => {
@@ -3081,7 +3203,7 @@ async function connectBridge() {
     protocolVersion: PROTOCOL_VERSION,
     clientNonce: bridgeNonce(),
     extensionId: chrome.runtime.id,
-    runtimeRevision: RUNTIME_REVISION,
+    ...bridgeHandshakeVersions(),
     catalogDigest: api.catalogDigest,
     sentAt: Date.now(),
   };
@@ -3151,6 +3273,7 @@ async function connectBridge() {
           clientProof,
           extensionId: authentication.extensionId,
           runtimeRevision: authentication.runtimeRevision,
+          ...(authentication.extensionVersion ? { extensionVersion: authentication.extensionVersion } : {}),
           catalogDigest: authentication.catalogDigest,
           bindings,
           instanceId,
@@ -3204,7 +3327,7 @@ async function connectBridge() {
     if (state.socket !== socket) return;
     // Morrow expects a different Morrow Bridge build. An update and a reload fix that, not
     // connecting again, so it is not an authentication problem. The reconnect alarm tries again.
-    if (event.code === 4403 && event.reason === "bridge_version_mismatch") {
+    if (isBridgeVersionMismatchClose(event.code, event.reason)) {
       state.versionMismatch = true;
       state.authenticationProblem = null;
       retireBridgeSocket(socket, { reconnect: false });
@@ -6366,6 +6489,7 @@ async function handleBridgeMessage(message, owner) {
       else await handleCommand(message);
     } finally {
       if (state.bridgeCommands.get(requestId) === active) state.bridgeCommands.delete(requestId);
+      void maybeReloadForDeferredUpdate();
     }
   }
 }
@@ -6394,7 +6518,7 @@ async function requestPairing() {
     const requested = await fetchPairing(httpUrl("/pair"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ extensionId: chrome.runtime.id, catalogDigest: api.catalogDigest, runtimeRevision: RUNTIME_REVISION }),
+      body: JSON.stringify({ extensionId: chrome.runtime.id, catalogDigest: api.catalogDigest, ...bridgeHandshakeVersions() }),
     }, answer);
     if (!requested.response.ok) throw new Error(pairingRefusal(requested.response, requested.body));
     const offer = pairingOffer(requested.body);
@@ -6687,6 +6811,8 @@ async function status() {
     connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
     authenticationFailed: Boolean(state.authenticationProblem),
     versionMismatch: !connected && state.versionMismatch === true,
+    extensionVersion: extensionVersion(),
+    updatePending: state.updatePending === true,
     connected,
     otherProfileOwnsConnection: !connected && state.ownership === "other_profile",
     runtimeHealthy: runtimeHealthy(connected),
@@ -7009,4 +7135,5 @@ chrome.runtime.onInstalled.addListener((details) => {
   void connectBridge();
   if (shouldOpenSetupOnInstall(details)) void openSetupGuide().catch(() => {});
 });
+chrome.runtime.onUpdateAvailable?.addListener(() => { void handleStoreUpdateAvailable().catch(() => undefined); });
 void connectBridge();
