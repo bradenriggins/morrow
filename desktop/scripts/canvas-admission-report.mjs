@@ -121,7 +121,12 @@ function buildCanvasAdmissionReport(catalog, contract) {
     if (assessment.state !== "structurally_exact") withoutExactReadback.push(operation.toolName);
     if (hasNamedCanvasReadback(operation)) namedReadbacks.push(operation.toolName);
     const executorOwned = canvasExecutorOwnedReadback(operation);
-    const plan = executorOwned ? null : planBrowserReadback(operations, operation, structuralArguments(operation), STRUCTURAL_RESPONSE);
+    // A write the assessment calls unavailable consults no plan: a sign-in token, a session, or a
+    // one-time action keeps no field afterwards that names what changed, even when a route shape
+    // resembles a readable one.
+    const plan = executorOwned || assessment.state === "unavailable"
+      ? null
+      : planBrowserReadback(operations, operation, structuralArguments(operation), STRUCTURAL_RESPONSE);
     const tier = readbackRouteTier(executorOwned, operation, plan, hasDeclaredCanvasReadback(operation));
     increment(routeTiers, tier);
     if (tier === "mismatched") mismatchedPlans.push(operation.toolName);

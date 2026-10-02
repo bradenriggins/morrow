@@ -172,17 +172,17 @@ const itemBankDestructive = (operation) => String(operation?.toolName || "").sta
   && destructiveOperation(operation);
 // Every Canvas DELETE route removes what it names (destructiveOperation), so every admitted
 // DELETE is approved change by change - except the listed personal preference changes, which
-// touch only the educator's own bookmarks, planner, favorites, stream, subscriptions, read
-// state, and AI chats, and are instantly re-doable. The exemption list fails closed: a DELETE
+// touch only the educator's own bookmarks, planner, favorites, stream, subscriptions, and read
+// state, and are instantly re-doable. The exemption list fails closed: a DELETE
 // that is not listed here is review-only, so a new route can never silently become a standing
-// grant the way an enumerated review-only list would allow.
+// grant the way an enumerated review-only list would allow. A course AI experience and an AI
+// conversation are not listed here: the experience is course content and a conversation can hold
+// a learner's session, so neither is the educator's own instantly re-doable preference.
 const CANVAS_DELETE_REVIEW_REASON = "Deleting this removes it and what it holds, and Morrow cannot undo it. Morrow prepares each deletion on its own, with the exact item, so you approve them one at a time.";
 const CANVAS_DELETE_STANDING_GRANT_TOOLS = new Set([
   "canvas_delete_bookmark",
   "canvas_delete_planner_note",
   "canvas_delete_planner_override",
-  "canvas_delete_ai_conversation",
-  "canvas_delete_ai_experience",
   "canvas_clear_course_nicknames",
   "canvas_remove_course_nickname",
   "canvas_reset_course_favorites",
@@ -693,6 +693,19 @@ function operationVerification(operation, canvasReads, rule) {
   return assessment.state === "structurally_exact" ? CHECKED : null;
 }
 
+// A Canvas write that is always approved change by change, even when bound, admitted, and
+// exactly readable back: the New Quiz delete that takes every item in it with it, an Item Bank
+// destructive change, and every DELETE outside the personal-preference exemption set. Catalog
+// actions and curated bundles share this one gate, so a future bundle naming one can never
+// silently become a standing grant.
+function canvasReviewOnlyWrite(operation) {
+  if (NEW_QUIZ_DELETE_TOOL === operation?.toolName) return NEW_QUIZ_DELETE_REVIEW_REASON;
+  if (itemBankDestructive(operation)) return ITEM_BANK_DESTRUCTIVE_REASON;
+  if (String(operation?.method || "").toUpperCase() === "DELETE"
+    && !CANVAS_DELETE_STANDING_GRANT_TOOLS.has(operation?.toolName || "")) return CANVAS_DELETE_REVIEW_REASON;
+  return null;
+}
+
 function operationAvailability(operation, canvasReads) {
   const provider = operationProvider(operation);
   if (!provider || operation?.readOnly !== false) return { availability: "review", reviewReason: "This catalog entry is not a course Edit action." };
@@ -703,12 +716,8 @@ function operationAvailability(operation, canvasReads) {
     if (canvasReadbackAssessment(canvasReads, operation, admission).state !== "structurally_exact") {
       return { availability: "review", reviewReason: CANVAS_UNCHECKED_REVIEW_REASON };
     }
-    if (NEW_QUIZ_DELETE_TOOL === operation.toolName) return { availability: "review", reviewReason: NEW_QUIZ_DELETE_REVIEW_REASON };
-    if (itemBankDestructive(operation)) return { availability: "review", reviewReason: ITEM_BANK_DESTRUCTIVE_REASON };
-    if (String(operation.method || "").toUpperCase() === "DELETE"
-      && !CANVAS_DELETE_STANDING_GRANT_TOOLS.has(operation.toolName || "")) {
-      return { availability: "review", reviewReason: CANVAS_DELETE_REVIEW_REASON };
-    }
+    const reviewOnly = canvasReviewOnlyWrite(operation);
+    if (reviewOnly) return { availability: "review", reviewReason: reviewOnly };
     return { availability: "edit" };
   }
   if (MOODLE_ACTIVITY_DELETE_TOOLS.has(operation.toolName || "")) {
@@ -917,7 +926,7 @@ function operationSpec(operation, canvasReads) {
 // A curated repair can name the reads it needs as well as the write it sends. When the connected
 // catalog is missing one of them the repair cannot run, so it is published for review instead of
 // being offered and then refused at the moment a person tries to save it.
-function curatedAvailability(spec, operations, canvasReads) {
+export function curatedAvailability(spec, operations, canvasReads) {
   const present = (toolName) => (Array.isArray(operations) ? operations : []).some((entry) => entry?.toolName === toolName);
   if (!(spec.requiresOperations || []).every(present)) return { availability: "review", reviewReason: CURATED_ROUTE_MISSING_REASON };
   if (spec.provider !== "canvas") return { availability: "edit" };
@@ -925,6 +934,10 @@ function curatedAvailability(spec, operations, canvasReads) {
     const operation = ruleOperation(operations, rule);
     if (!operation || typeof operation.path !== "string" || operation.readOnly !== false) return false;
     const admission = canvasOperationAdmission(operation);
+    // A curated bundle is a standing grant, so the review-only gates apply here exactly as they
+    // do to catalog actions: a future bundle naming a DELETE, the New Quiz delete, or an Item
+    // Bank destructive change is not offered for Edit.
+    if (canvasReviewOnlyWrite(operation)) return false;
     return canvasAdmissionIsBound(admission)
       && admission.write.state === "admitted"
       && operationVerification(operation, canvasReads, rule)?.verification === "checked";

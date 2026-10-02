@@ -240,7 +240,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       && (kind === "file" ? /\/files$/.test(target.uploadPath) : /\/rubrics\/upload$/.test(target.uploadPath))
       ? target.uploadPath : "";
     if (!plainObject(input) || !plainObject(input.binding) || !uploadPath
-      || !(kind === "file" ? ["direct", "initialize", "complete"] : ["rubric"]).includes(transferMode)) throw new Error("canvas_file_binding_invalid");
+      || !(kind === "file" ? ["direct", "initialize", "complete", "resolve"] : ["rubric"]).includes(transferMode)) throw new Error("canvas_file_binding_invalid");
     const courseId = decimalId(input.binding.courseId);
     const principalId = decimalId(input.binding.principalId);
     const folderId = /^\/api\/v1\/folders\/([1-9][0-9]*)\/files$/.exec(uploadPath)?.[1] || "";
@@ -356,7 +356,33 @@ export async function executeCanvasCourseFileTransferInPage(input) {
 
     const targetFields = { course_id: courseId, upload_path: uploadPath, ...(folderId ? { folder_id: folderId } : {}) };
     await currentBinding();
-    if (transferMode !== "complete" && folderId) await filenameAvailable();
+    if (transferMode === "resolve") {
+      // A folder, group, or section upload names its target without its course. Canvas keeps the
+      // owner on the object itself, so the target is read here and the upload goes ahead only
+      // for the bound course: folder and file objects name their course owner, a group names its
+      // course, and a section names its course. Anything else is refused before any upload
+      // begins, so a target in another course can never be reached through this binding.
+      const groupId = /^\/api\/v1\/groups\/([1-9][0-9]*)\/files$/.exec(uploadPath)?.[1] || "";
+      const sectionId = /^\/api\/v1\/sections\/([1-9][0-9]*)\//.exec(uploadPath)?.[1] || "";
+      if (folderId) {
+        const read = (await canvasJson("/api/v1/folders/" + encodeURIComponent(folderId), canvasOrigin)).value;
+        if (!plainObject(read) || decimalId(read.id) !== folderId || read.context_type !== "Course" || String(read.context_id) !== courseId) {
+          throw new Error("canvas_file_upload_target_invalid");
+        }
+      } else if (groupId) {
+        const read = (await canvasJson("/api/v1/groups/" + encodeURIComponent(groupId), canvasOrigin)).value;
+        if (!plainObject(read) || decimalId(read.id) !== groupId || read.context_type !== "Course" || String(read.course_id) !== courseId) {
+          throw new Error("canvas_file_upload_target_invalid");
+        }
+      } else if (sectionId) {
+        const read = (await canvasJson("/api/v1/sections/" + encodeURIComponent(sectionId), canvasOrigin)).value;
+        if (!plainObject(read) || decimalId(read.id) !== sectionId || String(read.course_id) !== courseId) {
+          throw new Error("canvas_file_upload_target_invalid");
+        }
+      }
+      return result({ ok: true, sent: false, outcomeUnknown: false, data: { ...targetFields } });
+    }
+    if (transferMode !== "complete" && transferMode !== "resolve" && folderId) await filenameAvailable();
     if (transferMode === "initialize") {
       const started = await beginUpload();
       return {

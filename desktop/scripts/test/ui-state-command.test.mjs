@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInThisContext } from "node:vm";
-import { parseReviewLearnerNames } from "../../connector/extension/src/review-approval.js";
+import { parseReviewApprovalPresence, parseReviewLearnerNames } from "../../connector/extension/src/review-approval.js";
 
 /**
  * WI-2.4d: the Bridge side of `ui_state` (D1b). The runtime pushes the list of reviews waiting
@@ -43,8 +43,9 @@ const HANDLE_UI_STATE_SOURCE = sliceIncluding("async function handleUiState(comm
  * stubbed. Nothing here reaches a real socket, a real tab or the real refreshBadge.
  */
 function harness({ generation = 1, cancelled = false } = {}) {
-  const calls = { sendResult: [], refreshBadge: 0, bridgeCommandCancelled: 0, runtimeMessages: [], storedLearnerNames: [] };
+  const calls = { sendResult: [], refreshBadge: 0, bridgeCommandCancelled: 0, runtimeMessages: [], storedLearnerNames: [], storedPresence: undefined, clearedPresence: 0 };
   globalThis.__morrowParseReviewLearnerNames = parseReviewLearnerNames;
+  globalThis.__morrowParseReviewApprovalPresence = parseReviewApprovalPresence;
   const script = [
     "globalThis.__morrowUiStateHarness = (() => {",
     `const calls = ${JSON.stringify(calls)};`,
@@ -55,7 +56,10 @@ function harness({ generation = 1, cancelled = false } = {}) {
     "function sendResult(command, ok, result, failure) { calls.sendResult.push({ ok, result, failure }); }",
     "const chrome = { runtime: { sendMessage: async (message) => { calls.runtimeMessages.push(message); } } };",
     "const parseReviewLearnerNames = globalThis.__morrowParseReviewLearnerNames;",
+    "const parseReviewApprovalPresence = globalThis.__morrowParseReviewApprovalPresence;",
     "async function storeReviewLearnerNames(entries) { calls.storedLearnerNames.push(entries); }",
+    "async function storeReviewApprovalPresence(presence) { calls.storedPresence = presence; }",
+    "async function clearReviewApprovalPresence() { calls.clearedPresence += 1; }",
     PROTOCOL_VERSION_SOURCE,
     PROBLEM_SOURCE,
     UI_STATE_VALIDATOR_SOURCE,
@@ -73,6 +77,7 @@ function harness({ generation = 1, cancelled = false } = {}) {
   const value = globalThis.__morrowUiStateHarness;
   delete globalThis.__morrowUiStateHarness;
   delete globalThis.__morrowParseReviewLearnerNames;
+  delete globalThis.__morrowParseReviewApprovalPresence;
   return value;
 }
 
@@ -208,4 +213,14 @@ test("a cancelled command applies nothing and sends no result", async () => {
   assert.equal(h.calls.bridgeCommandCancelled, 1);
   assert.equal(h.calls.refreshBadge, 0);
   assert.equal(h.calls.sendResult.length, 0);
+});
+
+test("a push with the approval key stores it; a push without it forgets the stored key", async () => {
+  const h = harness({ generation: 1 });
+  const presence = { origin: "http://127.0.0.1:44300", key: "x".repeat(43) };
+  await h.handleUiState(command({ uiState: { reviews: [REVIEW], presence } }));
+  assert.deepEqual(h.calls.storedPresence, presence);
+  assert.equal(h.calls.clearedPresence, 0);
+  await h.handleUiState(command({ uiState: { reviews: [REVIEW] } }));
+  assert.equal(h.calls.clearedPresence, 1, "an omitted key must not stay signing-capable");
 });

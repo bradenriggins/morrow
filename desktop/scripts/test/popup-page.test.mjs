@@ -383,6 +383,21 @@ test("Pair Canvas account asks Chrome for that one address, then opens course se
   assert.deepEqual(page.messages("morrow_course_selection_save"), [], "site authorization does not choose a course");
 });
 
+test("a completion the worker reports as incomplete is named, never celebrated as success", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true }),
+    tabs: [{ id: 12, url: `${COURSE_ORIGIN}/courses/1` }],
+    handlers: {
+      morrow_connect_course_prepare: () => ({ id: "intent-1", origins: [`${COURSE_ORIGIN}/*`] }),
+      morrow_connect_course_complete: () => ({ completed: false }),
+    },
+  });
+  await page.click("#primary");
+  assert.deepEqual(page.messages("morrow_connect_course_complete"), [{ type: "morrow_connect_course_complete", intentId: "intent-1" }]);
+  assert.equal(page.text("#error"), problemText("course_connection_superseded"));
+  assert.equal(page.optionsPageOpens, 0);
+});
+
 test("one account connection presents thirty selected courses as one shared session", async () => {
   const courses = Array.from({ length: 30 }, (_, i) => binding({ sourceBindingId: `canvas:course-${i + 1}`, courseName: `Course ${i + 1}` }));
   const page = await openPopup({ status: () => connection({ paired: true, connected: true, courseAccessMode: "account", bindings: courses, bindingCount: 30, siteAnchors: [anchor()] }) });
