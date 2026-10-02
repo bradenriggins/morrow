@@ -321,10 +321,9 @@ async function sweepStaleTemporaryFiles(stateDirectory, file) {
 }
 
 function lockSleep(milliseconds) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
-    if (timer && typeof timer.unref === "function") timer.unref();
-  });
+  // The sleep holds the event loop on purpose: a waiter parked here can be the only pending
+  // work, and an unref'd timer would let the process exit instead of retrying the lock.
+  return new Promise((resolve) => { setTimeout(resolve, milliseconds); });
 }
 
 async function acquireStoreLock(lockPath) {
@@ -682,7 +681,6 @@ function createUpdateController({
     const timer = typeof timers.setTimeout === "function"
       ? timers.setTimeout(() => boundary.interrupt(timeoutError, true), timeoutMs)
       : globalThis.setTimeout(() => boundary.interrupt(timeoutError, true), timeoutMs);
-    if (timer && typeof timer.unref === "function") timer.unref();
     boundary.promise = Promise.race([Promise.resolve().then(run), interruption])
       .finally(() => {
         settled = true;
@@ -718,7 +716,6 @@ function createUpdateController({
       timer = typeof timers.setTimeout === "function"
         ? timers.setTimeout(fire, timeoutMs)
         : globalThis.setTimeout(fire, timeoutMs);
-      if (timer && typeof timer.unref === "function") timer.unref();
     });
     return Promise.race([work, expiry]).finally(clearTimer);
   }
