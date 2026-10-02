@@ -201,6 +201,140 @@ describe("recoverBatchState", () => {
     }
   });
 
+  it("keeps the outer effect binding when it recovers a staged task", async () => {
+    const fixture = await workspace("recover-binding");
+    try {
+      const sourceOperationId = "operation:recover-binding-0001";
+      const outerOperationId = "op:recover-binding-outer-0001";
+      const store = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
+      const created = createWriteBatch(store, sourceOperationId);
+      store.bindGatewayOperation(created.batch.batchId, "course:9", outerOperationId, "approved");
+      store.beginRun(created.batch.batchId, catalogDigest);
+      expect(store.claimPending(created.batch.batchId, 1)).toHaveLength(1);
+
+      const journal = new GatewayOperationJournal({ path: fixture.path });
+      const prepared = prepareGatewayOperation(journal, sourceOperationId);
+      journal.markDispatched(prepared.operationId);
+      journal.recordResponse(prepared.operationId, {
+        upstreamResultDigest: sha256Text("staged-response"),
+        normalizedResultDigest: sha256Text("normalized-staged-response"),
+        sourceResultState: "awaiting_confirmation",
+        sourceTaskId: "task:recover-binding",
+      });
+      journal.close();
+      store.close();
+
+      const recoveredStore = recoverRunningChild(fixture.path, fixture.key);
+      recoveredStore.close();
+      const recovered = recoverBatchState({
+        path: fixture.path,
+        batchId: created.batch.batchId,
+        mode: "apply_safe",
+      });
+      expect(recovered.children[0]).toMatchObject({
+        action: "source_task_recovered",
+        applied: true,
+        gatewayOperationId: outerOperationId,
+        gatewayOperationState: "approved",
+      });
+
+      const finalStore = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
+      expect(finalStore.get(created.batch.batchId).children[0]).toMatchObject({
+        state: "succeeded",
+        gatewayOperationId: outerOperationId,
+        gatewayOperationState: "approved",
+        sourceTaskId: "task:recover-binding",
+      });
+      finalStore.close();
+    } finally {
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the outer effect binding on failed and inspection-required recovery", async () => {
+    const failedFixture = await workspace("recover-binding-failed");
+    const unknownFixture = await workspace("recover-binding-unknown");
+    try {
+      const failedOperationId = "operation:recover-binding-failed-1";
+      const failedOuterId = "op:recover-binding-failed-outer-1";
+      const failedStore = new DurableBatchStore({
+        path: failedFixture.path,
+        encryptionKey: failedFixture.key,
+      });
+      const failedBatch = createWriteBatch(failedStore, failedOperationId);
+      failedStore.bindGatewayOperation(failedBatch.batch.batchId, "course:9", failedOuterId, "approved");
+      failedStore.beginRun(failedBatch.batch.batchId, catalogDigest);
+      failedStore.claimPending(failedBatch.batch.batchId, 1);
+      const failedJournal = new GatewayOperationJournal({ path: failedFixture.path });
+      prepareGatewayOperation(failedJournal, failedOperationId);
+      failedJournal.close();
+      const recoveredFailedJournal = new GatewayOperationJournal({ path: failedFixture.path });
+      recoveredFailedJournal.close();
+      failedStore.close();
+      const reopenedFailedStore = recoverRunningChild(failedFixture.path, failedFixture.key);
+      reopenedFailedStore.close();
+
+      const failedRecovery = recoverBatchState({
+        path: failedFixture.path,
+        batchId: failedBatch.batch.batchId,
+        mode: "apply_safe",
+      });
+      expect(failedRecovery.children[0]).toMatchObject({
+        action: "failed_before_send",
+        applied: true,
+        gatewayOperationId: failedOuterId,
+      });
+      const failedFinal = new DurableBatchStore({ path: failedFixture.path, encryptionKey: failedFixture.key });
+      expect(failedFinal.get(failedBatch.batch.batchId).children[0]).toMatchObject({
+        state: "failed",
+        gatewayOperationId: failedOuterId,
+      });
+      failedFinal.close();
+
+      const unknownOperationId = "operation:recover-binding-unknown-1";
+      const unknownOuterId = "op:recover-binding-unknown-outer-1";
+      const unknownStore = new DurableBatchStore({
+        path: unknownFixture.path,
+        encryptionKey: unknownFixture.key,
+      });
+      const unknownBatch = createWriteBatch(unknownStore, unknownOperationId);
+      unknownStore.bindGatewayOperation(unknownBatch.batch.batchId, "course:9", unknownOuterId, "dispatching");
+      unknownStore.beginRun(unknownBatch.batch.batchId, catalogDigest);
+      unknownStore.claimPending(unknownBatch.batch.batchId, 1);
+      const unknownJournal = new GatewayOperationJournal({ path: unknownFixture.path });
+      const unknownPrepared = prepareGatewayOperation(unknownJournal, unknownOperationId);
+      unknownJournal.markDispatched(unknownPrepared.operationId);
+      unknownJournal.close();
+      const recoveredUnknownJournal = new GatewayOperationJournal({ path: unknownFixture.path });
+      recoveredUnknownJournal.close();
+      unknownStore.close();
+      const reopenedUnknownStore = recoverRunningChild(unknownFixture.path, unknownFixture.key);
+      reopenedUnknownStore.close();
+
+      const unknownRecovery = recoverBatchState({
+        path: unknownFixture.path,
+        batchId: unknownBatch.batch.batchId,
+        mode: "apply_safe",
+      });
+      expect(unknownRecovery.children[0]).toMatchObject({
+        action: "inspection_required",
+        applied: true,
+        gatewayOperationId: unknownOuterId,
+        gatewayOperationState: "dispatching",
+      });
+      const unknownFinal = new DurableBatchStore({ path: unknownFixture.path, encryptionKey: unknownFixture.key });
+      expect(unknownFinal.get(unknownBatch.batch.batchId).children[0]).toMatchObject({
+        state: "unknown",
+        gatewayOperationId: unknownOuterId,
+        gatewayOperationState: "dispatching",
+      });
+      unknownFinal.close();
+    } finally {
+      await rm(failedFixture.directory, { recursive: true, force: true });
+      await rm(unknownFixture.directory, { recursive: true, force: true });
+    }
+  });
+
   it("completes a recovered staged task once its source settlement is terminal", async () => {
     const fixture = await workspace("recover-task-settled");
     try {

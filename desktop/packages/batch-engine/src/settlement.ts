@@ -426,6 +426,9 @@ export class BatchSourceSettlementStore {
       if (existing.sourceTaskId && existing.sourceTaskId !== sourceTaskId) {
         throw new Error("batch child source task identity changed");
       }
+      // A terminal settlement is final: a late or duplicate staging record
+      // must not move it back to awaiting approval.
+      if (BATCH_SOURCE_SETTLEMENT_TERMINAL_STATES.has(existing.state)) return existing;
       this.database.prepare(`
         UPDATE gateway_batch_source_settlements
         SET source_task_id=?, state='awaiting_approval', task_status=?, task_outcome='awaiting_approval',
@@ -457,7 +460,10 @@ export class BatchSourceSettlementStore {
         : "failed_no_effect";
     const now = this.instant();
     return this.transaction(() => {
-      this.get(batchId, childId);
+      const existing = this.get(batchId, childId);
+      // A terminal settlement is final: a late or duplicate dispatch record
+      // keeps the first terminal outcome instead of replacing it.
+      if (BATCH_SOURCE_SETTLEMENT_TERMINAL_STATES.has(existing.state)) return existing;
       this.database.prepare(`
         UPDATE gateway_batch_source_settlements
         SET state=?, task_outcome=?, stage_gateway_operation_id=COALESCE(stage_gateway_operation_id, ?),
@@ -514,7 +520,10 @@ export class BatchSourceSettlementStore {
     const gateway = exactIdentifier(gatewayOperationId, "gateway operation id");
     const now = this.instant();
     return this.transaction(() => {
-      this.get(batchId, childId);
+      const existing = this.get(batchId, childId);
+      // A terminal settlement is final: a late direct-verified record keeps
+      // the first terminal outcome instead of replacing it.
+      if (BATCH_SOURCE_SETTLEMENT_TERMINAL_STATES.has(existing.state)) return existing;
       this.database.prepare(`
         UPDATE gateway_batch_source_settlements
         SET state='succeeded', task_status='verified', task_outcome='succeeded',

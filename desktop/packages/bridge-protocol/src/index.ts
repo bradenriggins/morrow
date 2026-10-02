@@ -241,6 +241,8 @@ export interface BridgeBinding {
   readonly editOptionsAvailable?: true;
   /** The Bridge matched its durable first-read receipt to this exact current binding. */
   readonly firstReadCompleted?: true;
+  /** Category labels for this one exact binding, when the Bridge sent them. */
+  readonly editCategories?: readonly BridgeEditCategory[];
   /** Compact binding proof. Full rules are read on demand for one binding. */
   readonly editPermission?: BridgeEditPermissionSummary;
   readonly runtimeVerified: boolean;
@@ -1281,6 +1283,9 @@ export function normalizeBridgeUiState(value: unknown): BridgeUiState {
 
 function parseBinding(value: unknown): BridgeBinding {
   if (!isJsonObject(value)) throw new TypeError("bridge binding must be an object");
+  if (Object.keys(value).some((key) => !["sourceBindingId", "provider", "courseId", "courseName", "origin", "siteUrl", "principalFingerprint", "sessionGeneration", "catalogDigest", "editPolicyRevision", "editOptionsAvailable", "firstReadCompleted", "editCategories", "editPermission", "runtimeVerified", "lastSeenAt"].includes(key))) {
+    throw new TypeError("bridge binding has unsupported fields");
+  }
   const sourceBindingId = requiredString(value.sourceBindingId, "sourceBindingId", 160);
   if (!TOOL_OR_SOURCE.test(sourceBindingId)) {
     throw new TypeError("sourceBindingId has an invalid format");

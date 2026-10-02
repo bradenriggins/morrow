@@ -147,6 +147,47 @@ describe("BatchSourceSettlementStore", () => {
     store.close();
   });
 
+  it("never regresses a terminal settlement with a late or duplicate record", () => {
+    const store = new BatchSourceSettlementStore({ path: ":memory:" });
+    store.initialize("bat:test-terminal", [
+      { childId: "course:1", sourceId: "morrow-legacy" },
+      { childId: "course:2", sourceId: "morrow-legacy" },
+      { childId: "course:3", sourceId: "morrow-legacy" },
+    ]);
+    store.markStaged("bat:test-terminal", "course:1", { sourceTaskId: "task-1" });
+    store.applyTaskProjection("bat:test-terminal", "course:1", {
+      taskId: "task-1",
+      status: "completed",
+      outcome: "succeeded",
+      terminal: true,
+      verificationStatus: "verified",
+      resultCounts: { done: 1 },
+    });
+    expect(store.markStaged("bat:test-terminal", "course:1", { sourceTaskId: "task-1" }))
+      .toMatchObject({ state: "succeeded" });
+    expect(store.markDispatchResult("bat:test-terminal", "course:1", "unknown", "op:late-12345678"))
+      .toMatchObject({ state: "succeeded" });
+    expect(store.markDirectVerified("bat:test-terminal", "course:1", "op:late-12345678"))
+      .toMatchObject({ state: "succeeded" });
+
+    expect(store.markDispatchResult("bat:test-terminal", "course:2", "failed", "op:failed-12345678"))
+      .toMatchObject({ state: "failed_no_effect" });
+    expect(store.markStaged("bat:test-terminal", "course:2", {
+      sourceTaskId: "task-2",
+      gatewayOperationId: "op:failed-12345678",
+    })).toMatchObject({ state: "failed_no_effect", sourceTaskId: null });
+    expect(store.markDirectVerified("bat:test-terminal", "course:2", "op:failed-12345678"))
+      .toMatchObject({ state: "failed_no_effect" });
+
+    expect(store.cancelBeforeDispatch("bat:test-terminal", "course:3", "op:cancel-12345678"))
+      .toMatchObject({ state: "cancelled" });
+    expect(store.markStaged("bat:test-terminal", "course:3", { sourceTaskId: "task-3" }))
+      .toMatchObject({ state: "cancelled" });
+    expect(store.markDispatchResult("bat:test-terminal", "course:3", "failed", "op:cancel-12345678"))
+      .toMatchObject({ state: "cancelled" });
+    store.close();
+  });
+
   it("refuses task identity substitution", () => {
     const store = new BatchSourceSettlementStore({ path: ":memory:" });
     store.initialize("bat:test-5678", [
