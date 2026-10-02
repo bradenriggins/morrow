@@ -125,7 +125,10 @@ async function stopOwner(ownerPath: string): Promise<void> {
       const stat = await readFile(`/proc/${observed.pid}/stat`, "utf8");
       if (stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z ")) return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      // A process caught mid-exit answers ESRCH instead of ENOENT; both fall through
+      // to the signal check below, which settles whether the process is gone.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ESRCH") throw error;
     }
     try { process.kill(observed.pid, 0); return false; }
     catch (error) {
