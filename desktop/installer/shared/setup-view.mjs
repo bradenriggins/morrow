@@ -138,7 +138,7 @@ export function progress(current) {
   const course = bridge.selectedCourseName
     || (bridge.runtimeVerifiedCourseCount > 1 ? `${bridge.runtimeVerifiedCourseCount} courses` : "Selected course");
   const courseDetail = firstPreviewCompleted
-    ? `${course}; first read complete — continue in ${assistant ? assistant.title : "your assistant"}`
+    ? `${course}; first read complete; continue in ${assistant ? assistant.title : "your assistant"}`
     : firstPreviewReady
       ? `${course}; first read ready`
       : courseReady

@@ -39,11 +39,12 @@ const HANDLE_UI_STATE_SOURCE = sliceIncluding("async function handleUiState(comm
 
 /**
  * Loads bridgeUiState, applyBridgeUiState and handleUiState out of service-worker.js into an
- * isolated context, with `state`, `refreshBadge`, `bridgeCommandCancelled` and `sendResult`
- * stubbed. Nothing here reaches a real socket, a real tab or the real refreshBadge.
+ * isolated context, with `state`, `refreshBadge`, `bridgeCommandCancelled`, `sendResult` and
+ * `maybeReloadForDeferredUpdate` stubbed. Nothing here reaches a real socket, a real tab or
+ * the real refreshBadge.
  */
 function harness({ generation = 1, cancelled = false } = {}) {
-  const calls = { sendResult: [], refreshBadge: 0, bridgeCommandCancelled: 0, runtimeMessages: [], storedLearnerNames: [], storedPresence: undefined, clearedPresence: 0 };
+  const calls = { sendResult: [], refreshBadge: 0, bridgeCommandCancelled: 0, runtimeMessages: [], storedLearnerNames: [], storedPresence: undefined, clearedPresence: 0, deferredReloadChecks: 0 };
   globalThis.__morrowParseReviewLearnerNames = parseReviewLearnerNames;
   globalThis.__morrowParseReviewApprovalPresence = parseReviewApprovalPresence;
   const script = [
@@ -57,6 +58,7 @@ function harness({ generation = 1, cancelled = false } = {}) {
     "const chrome = { runtime: { sendMessage: async (message) => { calls.runtimeMessages.push(message); } } };",
     "const parseReviewLearnerNames = globalThis.__morrowParseReviewLearnerNames;",
     "const parseReviewApprovalPresence = globalThis.__morrowParseReviewApprovalPresence;",
+    "async function maybeReloadForDeferredUpdate() { calls.deferredReloadChecks += 1; }",
     "async function storeReviewLearnerNames(entries) { calls.storedLearnerNames.push(entries); }",
     "async function storeReviewApprovalPresence(presence) { calls.storedPresence = presence; }",
     "async function clearReviewApprovalPresence() { calls.clearedPresence += 1; }",
@@ -168,6 +170,7 @@ test("a checked ui_state is stored in memory, refreshes the badge once, and tell
   assert.deepEqual(h.state.reviews, [REVIEW, BATCH_REVIEW]);
   assert.equal(h.state.reviewsWaiting, 2);
   assert.equal(h.calls.refreshBadge, 1);
+  assert.equal(h.calls.deferredReloadChecks, 1, "applying state retries a deferred Store reload");
   assert.deepEqual(h.calls.runtimeMessages, [{ type: "morrow_bridge_status_changed" }]);
   assert.equal(h.calls.sendResult.length, 1);
   assert.deepEqual(h.calls.sendResult[0], { ok: true, result: { schema: "morrow.bridge.ui-state.v1", accepted: 2 }, failure: null });
