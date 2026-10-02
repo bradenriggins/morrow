@@ -1,9 +1,8 @@
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:https";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
@@ -14,6 +13,7 @@ import { BLACKBOARD_TOOL_DEFINITIONS } from "../../blackboard-learn-api/src/oper
 import { parseGatewayConfig } from "../src/config.js";
 import { createFullMorrowServer } from "../src/full-server.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
+import { generateLoopbackTls } from "./fixtures/loopback-tls.js";
 
 const COURSE_ID = "_22_1";
 const FOLDER_ID = "_100_1";
@@ -27,8 +27,6 @@ const ANNOUNCEMENT_ID = "_90_1";
 const GROUP_ID = "_66_1";
 const GROUP_SET_ID = "_67_1";
 const CREDENTIAL_REVISION = "8c751fc3-ecf9-4558-b86b-d97a34e93295";
-const TEST_CERTIFICATE = fileURLToPath(new URL("./fixtures/blackboard-test-cert.pem", import.meta.url));
-const TEST_KEY = fileURLToPath(new URL("./fixtures/blackboard-test-key.pem", import.meta.url));
 
 /**
  * The Blackboard tool names, read from the source registry itself
@@ -227,8 +225,7 @@ async function createFixture(): Promise<{
   // process's config-privacy check walks every real ancestor to filesystem
   // root, which fails under Linux's world-writable /tmp.
   const directory = await mkdtemp(join(homedir(), ".morrow-blackboard-surface-test-"));
-  const certificate = await readFile(TEST_CERTIFICATE);
-  const key = await readFile(TEST_KEY);
+  const { key, cert: certificate } = await generateLoopbackTls(directory);
   const requests: string[] = [];
   const server = createServer({ key, cert: certificate }, async (request: IncomingMessage, response: ServerResponse) => {
     const pathname = new URL(request.url || "/", "https://fixture.invalid").pathname;

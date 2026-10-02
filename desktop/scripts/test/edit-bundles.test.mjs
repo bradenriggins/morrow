@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   categoriesForBinding,
+  curatedAvailability,
   CURATED_CATEGORY_SPECS,
   destructiveOperation,
   operationLearnerVisible,
@@ -182,4 +183,23 @@ test("the seven alternative-text specs that canvas_alt_text joins keep their ids
       );
     }
   }
+});
+
+// A curated bundle is a standing grant, so each of its rules clears the same gates as a catalog
+// action. A future bundle naming a DELETE, a New Quiz delete, or an Item Bank destructive change
+// is not offered for Edit, even when the operation is bound, admitted, and exactly readable back.
+test("a curated bundle naming a DELETE is never a standing Edit grant", () => {
+  const deletes = ["canvas_delete_assignment", "canvas_delete_new_quiz"];
+  for (const toolName of deletes) {
+    const operation = byTool.get(toolName);
+    assert.ok(operation, toolName);
+    const spec = {
+      id: "future_delete_bundle",
+      provider: "canvas",
+      rules: [{ provider: "canvas", operationKey: operation.key, toolName: operation.toolName, allowedChangedFields: [] }],
+    };
+    assert.equal(curatedAvailability(spec, canvasOperations, canvasOperations), null, toolName);
+  }
+  const control = CURATED_CATEGORY_SPECS.find((entry) => entry.id === "canvas_assignment_due_date");
+  assert.deepEqual(curatedAvailability(control, canvasOperations, canvasOperations), { availability: "edit" });
 });

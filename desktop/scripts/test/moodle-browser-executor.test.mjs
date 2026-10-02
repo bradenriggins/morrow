@@ -244,6 +244,43 @@ test("Moodle course listing exposes only course IDs and names", async () => {
   });
 });
 
+test("Moodle pins a course-scoped operation to the reviewed binding course", async () => {
+  // A course-scoped operation acts on exactly the reviewed course: the
+  // binding must name one, and the argument must be that same course. An
+  // omitted binding course would leave any course_id unpinned.
+  const pageInput = (bindingCourseId, courseId) => ({
+    mode: "execute",
+    operation: pageReadOperation,
+    arguments: { course_id: courseId, module_id: "6" },
+    binding: { origin: "https://sandbox.moodledemo.net", siteUrl: "https://sandbox.moodledemo.net/", principalId: "3", ...(bindingCourseId === undefined ? {} : { courseId: bindingCourseId }) },
+    expiresAt: Date.now() + 60_000,
+  });
+  for (const [label, request] of [
+    ["an omitted binding course", pageInput(undefined, "2")],
+    ["another reviewed course", pageInput("3", "2")],
+    ["another requested course", pageInput("2", "3")],
+  ]) {
+    await withMoodlePage(async () => {
+      let calls = 0;
+      globalThis.fetch = async () => { calls += 1; return new Response("{}"); };
+      const result = await executeMoodleInPage(JSON.stringify(request));
+      assert.equal(result.error, "moodle_course_mismatch", label);
+      assert.equal(result.sent, false, label);
+      assert.equal(calls, 0, label);
+    });
+  }
+  // The site-level course listing takes no course argument, so its binding
+  // stays course-free.
+  await withMoodlePage(async () => {
+    globalThis.fetch = async () => new Response(JSON.stringify([{ data: { courses: [{ id: 2, fullname: "My first course" }] } }]), { status: 200, headers: { "content-type": "application/json" } });
+    const request = listInput();
+    delete request.binding.courseId;
+    const result = await executeMoodleInPage(JSON.stringify(request));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(result.data.courses, [{ id: "2", name: "My first course" }]);
+  });
+});
+
 function pageForm(state, moduleId = 6, editorItemId = 0) {
   return `<!doctype html><html><body><form method="post" action="/course/modedit.php?update=${moduleId}&amp;return=0">
     <input name="update" value="${moduleId}"><input name="course" value="2"><input name="modulename" value="page"><input name="section" value="4">

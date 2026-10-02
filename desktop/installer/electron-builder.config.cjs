@@ -65,16 +65,37 @@ function packagedPayload(context) {
   return path.join(resources, "MorrowPayload");
 }
 
+/**
+ * The host requirement for the ad-hoc seal below. Unsigned macOS packaging
+ * seals the bundle with the host's codesign, so a darwin build from another
+ * host cannot proceed; it fails here with its requirement named instead of
+ * crashing on a missing codesign binary. Exposed on the hook for tests.
+ */
+function darwinSigningHostError({ signed, electronPlatformName, platform }) {
+  if (!signed && electronPlatformName === "darwin" && platform !== "darwin") {
+    return new Error("Unsigned macOS packaging requires a macOS host to ad-hoc sign the bundle.");
+  }
+  return null;
+}
+
 async function verifyPayloadAndAdHocSign(context) {
   const builtTarget = context.electronPlatformName === "win32" ? "win32-x64"
     : context.electronPlatformName === "darwin" ? "darwin-arm64" : null;
   if (builtTarget !== desktopTarget) throw new Error("Electron builder target does not match the reviewed desktop release graph.");
   verifyPackagerAdmission({ payload: packagedPayload(context), target: desktopTarget, admission: packagerAdmission.admission });
   if (signedRelease || context.electronPlatformName !== "darwin") return;
+  const hostError = darwinSigningHostError({
+    signed: signedRelease,
+    electronPlatformName: context.electronPlatformName,
+    platform: process.platform
+  });
+  if (hostError) throw hostError;
   const bundle = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
   execFileSync("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", "--timestamp=none", bundle], { stdio: "inherit" });
   execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { stdio: "inherit" });
 }
+
+verifyPayloadAndAdHocSign.darwinSigningHostError = darwinSigningHostError;
 
 module.exports = {
   afterPack: verifyPayloadAndAdHocSign,

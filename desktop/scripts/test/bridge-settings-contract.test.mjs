@@ -360,15 +360,14 @@ const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
 
 // Every admitted Canvas DELETE removes what it names, so every one is approved change by change
 // - except the listed personal preference changes, which touch only the educator's own bookmarks,
-// planner, favorites, stream, subscriptions, read state, and AI chats. This mirror of the policy's
+// planner, favorites, stream, subscriptions, and read state. This mirror of the policy's
 // exemption set must name the same tools: a DELETE missing here fails the contract below instead
-// of silently becoming a standing grant.
+// of silently becoming a standing grant. A course AI experience and an AI conversation are not
+// personal preferences, so neither is exempted.
 const CANVAS_DELETE_STANDING_GRANTS = new Set([
   "canvas_delete_bookmark",
   "canvas_delete_planner_note",
   "canvas_delete_planner_override",
-  "canvas_delete_ai_conversation",
-  "canvas_delete_ai_experience",
   "canvas_clear_course_nicknames",
   "canvas_remove_course_nickname",
   "canvas_reset_course_favorites",
@@ -413,7 +412,7 @@ test("Canvas Edit categories are exactly the bound admitted writes with exact re
   const supported = supportedEditableCanvasWrites()
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(supported.length, 338 - reviewOnlyDeleteWrites().length);
+  assert.equal(supported.length, 337 - reviewOnlyDeleteWrites().length);
   assert.ok(reviewOnlyDeleteWrites().length > 0);
   assert.deepEqual(editable, supported);
   // A bound write with no exact readback is offered for review too, one change at a time.
@@ -444,7 +443,8 @@ test("Canvas deletions that remove course content are approved change by change"
   for (const toolName of ["canvas_delete_assignment", "canvas_delete_quiz", "canvas_delete_topic_courses",
       "canvas_delete_entry_courses", "canvas_delete_module", "canvas_delete_file", "canvas_delete_page_courses",
       "canvas_delete_section", "canvas_delete_user_from_root_account",
-      "canvas_conclude_deactivate_or_delete_enrollment", "canvas_delete_calendar_event"]) {
+      "canvas_conclude_deactivate_or_delete_enrollment", "canvas_delete_calendar_event",
+      "canvas_delete_ai_experience", "canvas_delete_ai_conversation"]) {
     const option = canvasOption(options, toolName);
     assert.equal(option.availability, "review", toolName);
     assert.match(option.reviewReason, /Morrow cannot undo it.*one at a time/, toolName);
@@ -499,7 +499,7 @@ test("nonexact Canvas writes are offered for review only, and every granted Canv
     && canvasOperationAdmission(operation).write.state === "admitted"
     && !checkableCanvasWrite(operation)
     && !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName));
-  assert.equal(nonexact.length, 204);
+  assert.equal(nonexact.length, 205);
   for (const operation of supportedWrites) {
     const option = canvasOption(options, operation.toolName);
     assert.equal(option.availability, "edit", operation.toolName);

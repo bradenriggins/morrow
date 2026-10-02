@@ -65,7 +65,10 @@ const TOKEN = "first-use-token-".repeat(4);
 const REVISION = "1.0.0-rc.2";
 const ORIGIN = "https://school.instructure.com";
 const ANCHOR = { siteAnchorId: "canvas:anchor:g1", provider: "canvas", origin: ORIGIN, principalId: "7", principalFingerprint: "a".repeat(64), sessionGeneration: 1, tabId: 1 };
-const BINDING = { ...ANCHOR, sourceBindingId: "canvas:anchor:g1:c42", courseId: "42", courseName: "Course 42", runtimeVerified: true };
+// The tab lives on the anchor, never on the stored binding: the worker attaches it when it
+// materializes a binding for a tab, and the server refuses a published binding that carries it.
+const { tabId: _anchorTabId, ...BINDING_ANCHOR_FIELDS } = ANCHOR;
+const BINDING = { ...BINDING_ANCHOR_FIELDS, sourceBindingId: "canvas:anchor:g1:c42", courseId: "42", courseName: "Course 42", runtimeVerified: true };
 const CONSENT = { morrowCourseDataConsent: "morrow.course-data-consent.v1" };
 const CATALOG = resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json");
 const READ_TOOL = "canvas_show_page_courses";

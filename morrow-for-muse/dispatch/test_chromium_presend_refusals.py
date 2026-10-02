@@ -62,7 +62,7 @@ def reauth_home(tmp_path, monkeypatch):
     monkeypatch.setattr(rsm, "STORE_DIR", str(root))
     for name in ("STATE_PATH", "HALT_PATH", "QUAR_PATH", "NOTIFY_PATH",
                  "APPROVAL_PATH", "SESSION_PATH", "SESSION_PREV",
-                 "LAST_DEATH_PATH", "SESSION_PREV_MONO"):
+                 "LAST_DEATH_PATH", "SESSION_PREV_MONO", "QUAR_LOCK_PATH"):
         monkeypatch.setattr(rsm, name, str(
             root / os.path.basename(getattr(rsm, name))))
     monkeypatch.setattr(lane_state, "STATE_PATH",

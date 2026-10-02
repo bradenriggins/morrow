@@ -37,7 +37,7 @@ from reauth import state_machine as rsm  # noqa: E402
 
 _PATH_NAMES = ("STATE_PATH", "HALT_PATH", "QUAR_PATH", "NOTIFY_PATH",
                "APPROVAL_PATH", "SESSION_PATH", "SESSION_PREV",
-               "LAST_DEATH_PATH", "SESSION_PREV_MONO")
+               "LAST_DEATH_PATH", "SESSION_PREV_MONO", "QUAR_LOCK_PATH")
 MAYBE_APPLIED = "might have made a change"
 
 

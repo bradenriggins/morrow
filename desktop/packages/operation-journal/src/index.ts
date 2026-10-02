@@ -780,11 +780,17 @@ export class GatewayOperationJournal {
       && input.sourceBindingPattern.split("%").length === 2
       ? input.sourceBindingPattern
       : null;
+    // Binding identities legally contain `_`, which LIKE would read as a
+    // single-character wildcard. Only the generation `%` may stay wild; the
+    // literal parts match exactly so a sibling binding never qualifies.
+    const likePattern = pattern
+      ? pattern.split("%").map((part) => part.replace(/\\/gu, "\\\\").replace(/_/gu, "\\_")).join("%")
+      : null;
     const matchActor = input.matchActorDigest !== false;
     const actorDigest = exactDigest(input.actorDigest, "actor digest");
     const row = this.database.prepare(`
       SELECT * FROM gateway_operations
-      WHERE source_id=? AND (source_binding_id=?${pattern ? " OR source_binding_id LIKE ?" : ""})
+      WHERE source_id=? AND (source_binding_id=?${likePattern ? " OR source_binding_id LIKE ? ESCAPE '\\'" : ""})
         AND target_identity_digest=?${matchActor ? " AND actor_digest=?" : ""}
         AND upstream_result_digest=? AND prepared_causal_sequence>?
         AND read_only=1 AND state='response_received' AND response_succeeded=1
@@ -794,7 +800,7 @@ export class GatewayOperationJournal {
     `).get(
       exactName(input.sourceId, "source id"),
       sourceBindingId,
-      ...(pattern ? [pattern] : []),
+      ...(likePattern ? [likePattern] : []),
       exactDigest(input.targetIdentityDigest, "target identity digest"),
       ...(matchActor ? [actorDigest] : []),
       exactDigest(input.upstreamResultDigest, "upstream result digest"),

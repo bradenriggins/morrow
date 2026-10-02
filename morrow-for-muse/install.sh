@@ -145,24 +145,71 @@ _backup_complete() {
   # matches it. A backup interrupted mid-write (ENOSPC) fails here and
   # is NEVER restored over the tree. Count/byte totals are not sufficient:
   # they cannot detect a file with the right size but wrong content.
+  # S4: the check runs in python3 (a hard requirement), not sha256sum:
+  # macOS ships no sha256sum and the prereq gate never listed it.
   local _mf="$1.sha256"
   [ -f "${_mf}" ] || return 1
-  # Verify each file's SHA-256 matches the manifest.
-  (cd "$1" && sha256sum -c --quiet "${_mf}" 2>/dev/null) || return 1
-  # Verify no extra files were added (sha256sum -c doesn't check this).
-  local _m_count _a_count
-  _m_count="$(wc -l < "${_mf}" | tr -d ' ')"
-  _a_count="$(cd "$1" && find . -type f | wc -l | tr -d ' ')"
-  [ "${_m_count}" = "${_a_count}" ] || return 1
-  return 0
+  python3 - "$1" "${_mf}" <<'PYEOF' 2>/dev/null || return 1
+import hashlib, os, sys
+root, manifest = sys.argv[1], sys.argv[2]
+want = {}
+with open(manifest, encoding="utf-8") as fh:
+    for line in fh:
+        line = line.rstrip("\n")
+        if len(line) < 66 or not line[64:].strip().startswith("./"):
+            sys.exit(1)
+        want[line[64:].strip()[2:]] = line[:64]
+seen = 0
+for dirpath, _dirnames, filenames in os.walk(root):
+    for name in filenames:
+        full = os.path.join(dirpath, name)
+        if os.path.islink(full) or not os.path.isfile(full):
+            continue
+        rel = os.path.relpath(full, root)
+        if rel not in want:
+            sys.exit(1)  # extra file the manifest never listed
+        h = hashlib.sha256()
+        with open(full, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        if h.hexdigest() != want[rel]:
+            sys.exit(1)
+        seen += 1
+sys.exit(0 if seen == len(want) else 1)
+PYEOF
 }
 
 _build_backup_manifest() {
   # $1 = tree dir, $2 = output manifest file. Builds a per-path SHA-256
   # manifest of the tree, excluding helper/profile (runtime state).
   # The manifest is sorted for determinism.
-  (cd "$1" && find . -type f -not -path './helper/profile/*' -not -path './helper/profile' | sort | xargs sha256sum) > "$2" \
-    || return 1
+  # S4: pure python3 (a hard requirement), not find|xargs sha256sum:
+  # macOS ships no sha256sum (and the prereq gate never listed it, so
+  # every macOS upgrade failed at backup), and the old pipeline split
+  # filenames on whitespace. Only regular files are listed (find -type
+  # f parity: symlinks excluded). The format stays sha256sum-compatible
+  # ("<hex>  <./path>") so the quarantined manifests stay readable.
+  python3 - "$1" "$2" <<'PYEOF' || return 1
+import hashlib, os, sys
+root, out = sys.argv[1], sys.argv[2]
+names = []
+for dirpath, _dirnames, filenames in os.walk(root):
+    for name in filenames:
+        full = os.path.join(dirpath, name)
+        if os.path.islink(full) or not os.path.isfile(full):
+            continue
+        rel = os.path.relpath(full, root)
+        if rel == "helper/profile" or rel.startswith("helper/profile/"):
+            continue
+        names.append(rel)
+with open(out, "w", encoding="utf-8") as fh:
+    for rel in sorted(names):
+        h = hashlib.sha256()
+        with open(os.path.join(root, rel), "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        fh.write("%s  ./%s\n" % (h.hexdigest(), rel))
+PYEOF
 }
 
 _rollback_cron_entry() {
@@ -579,6 +626,12 @@ if [ "${_UPGRADE}" = "1" ]; then
   # W4: retention. Keep the 3 most recent upgrade backups (this run's
   # plus the two previous); prune older ones loudly so in-place
   # upgrades do not accumulate a full tree copy forever.
+  # S4: newest-first by mtime (ties broken by name), in python3: the
+  # old reverse-lexicographic sort ordered same-second backups by pid
+  # and mktemp randomness instead of age (and BSD sort has no -z, so
+  # the pipeline never worked on macOS). Only backup dirs are listed:
+  # the .sha256/.meta sidecar files never consumed a keep slot, and
+  # quarantined .PARTIAL dirs are forensic evidence, never pruned.
   _keep_n=3; _seen_n=0
   while IFS= read -r -d '' _old_bak; do
     _seen_n=$((_seen_n + 1))
@@ -590,8 +643,23 @@ if [ "${_UPGRADE}" = "1" ]; then
         note "WARNING: could not prune old upgrade backup ${_old_bak}; remove it by hand"
       fi
     fi
-  done < <(find "$(dirname "${TREE}")" -maxdepth 1 \
-    -name "$(basename "${TREE}").bak-*" -print0 2>/dev/null | sort -z -r)
+  done < <(find "$(dirname "${TREE}")" -maxdepth 1 -type d \
+    -name "$(basename "${TREE}").bak-*" ! -name "*.PARTIAL" -print0 \
+    2>/dev/null | python3 -c "
+import os, sys
+items = []
+for raw in sys.stdin.buffer.read().split(b'\0'):
+    if not raw:
+        continue
+    try:
+        items.append((os.stat(raw).st_mtime, raw))
+    except OSError:
+        continue
+items.sort(reverse=True)
+out = sys.stdout.buffer
+for _, raw in items:
+    out.write(raw + b'\0')
+")
   unset _keep_n _seen_n _old_bak
   # P1-15: remove files the new version no longer ships. Stale = in the
   # previous install's manifest but not in this tree's manifest. Each
@@ -978,7 +1046,13 @@ _DEAD_EOF
     # cron's crontab refuses a file whose last line has none.
     printf '%s\n' "${_cron_new}" | crontab - \
       || { flock -u 8; exec 8>&-; fail "cron" "could not install the keepalive cron entry"; }
-    _track_created "cron"
+    # S4: only a genuinely new entry is tracked for rollback. When this
+    # run merely normalized or deduped a PRE-EXISTING entry, tracking
+    # "cron" made a later failure's rollback delete supervision that
+    # predates this run. An untouched canonical entry keeps it too.
+    if [ "${_mine_n}" -eq 0 ]; then
+      _track_created "cron"
+    fi
     # W4-P1-12: per-tree coexistence; no migration, just installation.
     note "installed keepalive cron for this tree (every 5 minutes)"
   fi
@@ -1347,14 +1421,17 @@ fi
 # W4: atomic install records. Write to temp files under MORROW_HOME,
 # validate, then atomic rename. A disk-full failure leaves the old
 # records intact (or no records for a fresh install), never torn.
-_track_created "file:${INSTALLED_MANIFEST_FILE}"
-_track_created "file:${INSTALLED_VERSION_FILE}"
 _manifest_tmp="${INSTALLED_MANIFEST_FILE}.tmp.$$"
 _version_tmp="${INSTALLED_VERSION_FILE}.tmp.$$"
-# Preserve preexisting records so they can be restored on failure.
+# S4: only records this run creates are tracked for rollback. Tracking
+# unconditionally made an install-record failure on a reinstall
+# rollback-delete the PREVIOUS version's records. (The old "_had_*"
+# flags below recorded nothing and restored nothing.)
 _had_manifest=0; _had_version=0
 [ -f "${INSTALLED_MANIFEST_FILE}" ] && _had_manifest=1
 [ -f "${INSTALLED_VERSION_FILE}" ] && _had_version=1
+[ "${_had_manifest}" = "0" ] && _track_created "file:${INSTALLED_MANIFEST_FILE}"
+[ "${_had_version}" = "0" ] && _track_created "file:${INSTALLED_VERSION_FILE}"
 cp "${MANIFEST}" "${_manifest_tmp}" \
   || fail "install-record" "could not write the install manifest temp file ${_manifest_tmp}"
 # Validate: must parse as JSON and have a nonempty "files" object.

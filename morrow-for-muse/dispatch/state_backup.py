@@ -54,14 +54,16 @@ approval signing key, vault key, quarantine secret). It is written in plaintext 
 be stored encrypted (the manifest says so, and create prints a loud
 warning). Never store state-tree backups unencrypted.
 
-Restore is fail-closed by design: it verifies the backup (manifest +
-sha256 of every file) BEFORE copying anything, preserves the
-generation high-water mark, writes the restore marker, and prints the
-ordered recovery steps (journal-reconcile, retired-seal if needed).
+Restore is fail-closed by design: it verifies the backup (manifest
+tamper seal, then sha256 of every file) BEFORE copying anything,
+preserves the generation high-water mark, writes the restore marker,
+and prints the ordered recovery steps (journal-reconcile, retired-seal
+if needed).
 """
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -76,7 +78,11 @@ from config.paths import morrow_home  # noqa: E402
 
 _MANIFEST_NAME = "manifest.json"
 _BACKUP_PREFIX = "morrow-backup-"
-_FORMAT_VERSION = 1
+# Format 2 seals the manifest with the approval tamper-seal HMAC (the
+# same seal as approvals, settings, mode grants, and the consumed set).
+# An unsealed manifest is refused: without the seal a tampered manifest
+# could silently omit files from verify/restore.
+_FORMAT_VERSION = 2
 
 # The anti-stale anchor: never backed up, never restored (W6-P1-2).
 _HIGHWATER_NAME = "journal.generation.highwater"
@@ -221,6 +227,16 @@ def _copy_one(src, dst):
 def create_backup(dest_dir):
     """Create a verified backup under dest_dir. Returns the backup dir."""
     from dispatch import executor as _ex
+    from dispatch import admission as _adm
+    # The manifest seal key must exist BEFORE the snapshot runs, so the
+    # backup's secrets set carries the key the seal verifies under. (A
+    # disaster-recovery restore verifies the manifest against the
+    # backup's own keyring once the live home is gone.)
+    try:
+        _adm._signing_key()
+    except Exception as exc:
+        raise RuntimeError(
+            "cannot mint the manifest-seal key: %s" % exc)
     ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     backup_dir = os.path.join(os.path.abspath(dest_dir),
                               _BACKUP_PREFIX + ts)
@@ -284,6 +300,11 @@ def create_backup(dest_dir):
     outside = _signing_key_outside()
     if outside:
         manifest["signing_key_outside"] = outside
+    try:
+        manifest = _adm._seal_record(manifest)
+    except Exception as exc:
+        raise RuntimeError(
+            "cannot seal the backup manifest: %s" % exc)
     man_path = os.path.join(backup_dir, _MANIFEST_NAME)
     with open(man_path, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -317,7 +338,66 @@ def _load_manifest(backup_dir):
         raise RuntimeError(
             "backup %s has unsupported format %r" %
             (backup_dir, manifest.get("format")))
+    _verify_manifest_seal(manifest, backup_dir)
     return manifest
+
+
+def _verify_manifest_seal(manifest, backup_dir):
+    """Refuse a backup whose manifest seal is missing or does not verify.
+
+    The seal is the approval tamper-seal HMAC (same key as approvals,
+    settings, mode grants, and the consumed set). It is verified against
+    the LIVE keyring when the live signing key exists. When the live key
+    is gone (the home this backup restores was lost: disaster recovery),
+    it is verified against the keyring carried INSIDE the backup, which
+    proves the manifest and the backed-up secrets are internally
+    consistent; provenance is then downgraded to operator attestation,
+    like a journal secret recovery. A live key that exists but does not
+    verify is tamper (or a post-backup key retirement): refused, never
+    downgraded to the backup-internal key.
+    """
+    from dispatch import admission as _adm
+    if os.path.exists(_adm.SIGNING_KEY_PATH):
+        try:
+            _adm._verify_seal(manifest)
+        except _adm.ApprovalMismatch as exc:
+            raise RuntimeError(
+                "backup %s manifest tamper seal does not verify (%s): "
+                "refusing to trust it" % (backup_dir, exc))
+        return
+    try:
+        with open(os.path.join(backup_dir, "secrets",
+                               "approval-signing.key"), "rb") as fh:
+            ring = _adm._parse_signing_keyring(fh.read())
+    except OSError:
+        ring = None
+    if not ring:
+        raise RuntimeError(
+            "backup %s manifest cannot be verified: the live signing key "
+            "is missing and the backup carries no usable keyring"
+            % backup_dir)
+    sig = manifest.get("sig")
+    if not isinstance(sig, str):
+        raise RuntimeError(
+            "backup %s manifest carries no tamper seal: refusing to "
+            "trust it" % backup_dir)
+    body = _adm._canonical_record_bytes(manifest)
+    for key in ring["keys"].values():
+        with _adm.secret_bytes(key) as key_buf:
+            if hmac.compare_digest(
+                    sig, hmac.new(key_buf.view(), body,
+                                  hashlib.sha256).hexdigest()):
+                sys.stderr.write(
+                    "morrow: WARNING: the live signing key is missing, so "
+                    "backup %s verified against its OWN keyring only "
+                    "(manifest/secrets internal consistency). Provenance "
+                    "is downgraded to operator attestation: confirm this "
+                    "backup came from your machine before restoring.\n"
+                    % backup_dir)
+                return
+    raise RuntimeError(
+        "backup %s manifest tamper seal does not verify against the "
+        "backup's own keyring: refusing to trust it" % backup_dir)
 
 
 def verify_backup(backup_dir):

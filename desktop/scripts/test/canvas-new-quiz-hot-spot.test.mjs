@@ -174,6 +174,46 @@ test("initialize proves the binding and the saved list, then returns one signed 
   assert.deepEqual(requests.filter((entry) => entry.method !== "GET"), []);
 });
 
+test("membership follows a same-address next page and refuses a steered one", async () => {
+  const paged = (link) => {
+    const inner = routes();
+    let listReads = 0;
+    return (url, method) => {
+      if (url.pathname === `${QUIZ_PATH}/items` && method === "GET") {
+        listReads += 1;
+        if (listReads === 1) return response(url.href, [SAVED[0]], { headers: link ? { Link: link } : {} });
+        return response(url.href, [SAVED[1]]);
+      }
+      return inner(url, method);
+    };
+  };
+  const next = (query, path = `${QUIZ_PATH}/items`) => `<${ORIGIN}${path}?${query}>; rel="next"`;
+  const initialize = baseInput({ mode: "initialize" });
+  const followed = await runInPage(initialize, paged(next("per_page=100&page=2")));
+  assert.equal(followed.result.ok, true, JSON.stringify(followed.result));
+  assert.equal(followed.result.data.item_count, SAVED.length);
+  assert.deepEqual(
+    followed.requests.filter((entry) => entry.pathname === `${QUIZ_PATH}/items`).map((entry) => entry.search),
+    ["?per_page=100", "?per_page=100&page=2"],
+  );
+  for (const [label, link] of [
+    ["another path", next("per_page=100&page=2", `${QUIZ_PATH}/items_evil`)],
+    ["another quiz", next("per_page=100&page=2", `/api/quiz/v1/courses/${COURSE_ID}/quizzes/78/items`)],
+    ["a widening query", next("per_page=100&page=2&entry_type=Item")],
+    ["a missing page cursor", next("per_page=100")],
+    ["an inflated page size", next("per_page=500&page=2")],
+    ["a repeated cursor", next("per_page=100&page=2&page=3")],
+    ["a fragment", `<${ORIGIN}${QUIZ_PATH}/items?per_page=100&page=2#top>; rel="next"`],
+    ["another origin", `<https://canvas.evil.test${QUIZ_PATH}/items?per_page=100&page=2>; rel="next"`],
+  ]) {
+    const { result, requests } = await runInPage(initialize, paged(link));
+    assert.equal(result.ok, false, label);
+    assert.equal(result.sent, false, label);
+    assert.equal(result.error, "canvas_hot_spot_item_list_incomplete", label);
+    assert.equal(requests.some((entry) => entry.pathname.endsWith("/media_upload_url")), false, label);
+  }
+});
+
 test("initialize refuses a saved question list that changed after review", async () => {
   const { result, requests } = await runInPage(
     baseInput({ mode: "initialize", beforeItemsSha256: digest([...SAVED, { id: "14", position: 3, entry_type: "Item" }]) }),

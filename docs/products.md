@@ -16,16 +16,17 @@ Start: [`desktop/README.md`](../desktop/README.md). Current limits: [`desktop/LI
 
 ## Morrow for Muse (`morrow-for-muse/`)
 
-The 0.4.6 release includes the Canvas connector and a separate
-Moodle HTTPS module. Canvas uses the educator's browser sign-in and the
-live-proven operation catalog. The Moodle module has public-demo proof and a
-site capability probe, but this package does not connect a signed-in Muse
-browser session to that module or enforce Plan/Edit approval for its writes.
-See `morrow-for-muse/SCOPE.md` for each provider's exact scope and evidence.
+The 0.4.9 release includes the Canvas connector and Moodle browser
+operations. Canvas uses the educator's browser sign-in and the
+live-proven operation catalog. Moodle runs through installed Chromium
+with pinned adapters, but native first-use, production admission, and
+live provider proof remain required. The old Python HTTPS
+authentication modules are source-only test tools and are excluded from
+the package. See `morrow-for-muse/SCOPE.md` for each provider's exact scope and evidence.
 
 - Canvas Plan and Edit: reading a course never needs approval, and Plan asks before each change. Edit is one grant, for the account or for one conversation, to make changes without asking each time. It has no time limit: it stays on until the educator turns it off.
 - Morrow Direct: our open format that describes each course-site action Morrow can take and how it runs. It lives inside Morrow for Muse until a second product uses it.
 - Privacy boundary: Canvas student identifiers are replaced with course-scoped labels before supported records reach the assistant. Moodle instructions restrict analytics to approved course-level aggregates. See `morrow-for-muse/privacy/`.
-- Capability claims follow provider-specific evidence. Canvas actions use the live-proven operation catalog; the Moodle module probes site capabilities after it has a session. See `morrow-for-muse/SCOPE.md` and `morrow-for-muse/moodle/README.md`.
+- Capability claims follow provider-specific evidence. Canvas actions use the live-proven operation catalog; Moodle browser operations use pinned adapters, and their native setup and live proof remain required. See `morrow-for-muse/SCOPE.md` and `morrow-for-muse/moodle/README.md`.
 
 Start: [`morrow-for-muse/SKILL.md`](../morrow-for-muse/SKILL.md). Current scope: [`morrow-for-muse/SCOPE.md`](../morrow-for-muse/SCOPE.md).

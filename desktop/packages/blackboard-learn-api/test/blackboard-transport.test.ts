@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { deriveBlackboardSourceBindingId } from "../src/binding.js";
 import { BlackboardLearnClient } from "../src/client.js";
 import { loadBlackboardLearnConfig } from "../src/config.js";
@@ -489,5 +489,44 @@ describe("Blackboard configuration path", () => {
     releaseToken();
     await expect(kept).resolves.toEqual({ id: contentId });
     expect(tokens).toBe(1);
+  });
+
+  it("bounds the shared credential exchange with its own timeout and retries after it", async () => {
+    const timeouts: number[] = [];
+    const createTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+      timeouts.push(ms);
+      return createTimeout(ms);
+    });
+    try {
+      let tokens = 0;
+      const seen: Array<AbortSignal | undefined> = [];
+      const fetcher = (async (input: URL | RequestInfo, init: RequestInit = {}) => {
+        const url = new URL(String(input));
+        if (url.pathname === tokenPath) {
+          tokens += 1;
+          seen.push(init.signal ?? undefined);
+          // What a hung Learn produces once the exchange's own timeout fires.
+          if (tokens === 1) throw new DOMException("The operation timed out.", "TimeoutError");
+          return new Response(JSON.stringify({ access_token: "retry-token", expires_in: 3600 }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ id: contentId }), { status: 200 });
+      }) as typeof fetch;
+      const client = new BlackboardLearnClient(tenant, fetcher);
+      const caller = new AbortController();
+      await expect(client.get(contentPath, caller.signal)).rejects.toMatchObject({ code: "blackboard_request_cancelled" });
+      // The exchange carried its own timeout signal, never the caller's.
+      expect(timeouts).toEqual([30_000]);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toBeInstanceOf(AbortSignal);
+      expect(seen[0]).not.toBe(caller.signal);
+      // The failed exchange settled the shared promise: the next read retries
+      // it instead of wedging behind an exchange that never answered.
+      await expect(client.get(contentPath)).resolves.toEqual({ id: contentId });
+      expect(tokens).toBe(2);
+      expect(timeouts).toEqual([30_000, 30_000]);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 });

@@ -34,13 +34,14 @@ if TREE not in sys.path:
 from helper import supervisor as sup  # noqa: E402
 
 
-def _fake_tree(tmp_path):
-    tree = tmp_path / "tree"
+def _fake_tree(tmp_path, name="tree"):
+    tree = tmp_path / name
     (tree / "helper").mkdir(parents=True)
     (tree / ".morrow-tree-id").write_text(uuid.uuid4().hex + "\n")
     shutil.copy(os.path.join(HERE, "supervisor.py"),
                 str(tree / "helper" / "supervisor.py"))
-    ticks = tmp_path / "ticks.log"
+    ticks = tmp_path / ("ticks.log" if name == "tree"
+                        else "ticks-%s.log" % name)
     ka = tree / "helper" / "keepalive.sh"
     ka.write_text("#!/bin/sh\necho tick >> '%s'\n" % ticks)
     ka.chmod(ka.stat().st_mode | stat.S_IXUSR)
@@ -140,6 +141,59 @@ def test_loop_restarts_after_its_process_died(tmp_path):
         assert second["started"] is True and second["pid"] != first["pid"]
     finally:
         sup.stop(str(tree))
+
+
+def test_is_our_loop_matches_the_exact_tree_argument(monkeypatch):
+    # S4: the tree must match as the exact --tree argument. A
+    # substring match adopted prefix-path neighbors: the loop for
+    # /x/morrow2 contains "/x/morrow" in its cmdline, so morrow's
+    # status/ensure/stop stole or killed morrow2's loop.
+    me = os.getpid()
+    run = "python3 /x/morrow/helper/supervisor.py run"
+    monkeypatch.setattr(
+        sup, "_cmdline",
+        lambda pid: "%s --tree /x/morrow --state-dir /s --interval 300 "
+                    "--first-delay 300" % run)
+    assert sup._is_our_loop(me, "/x/morrow") is True
+    monkeypatch.setattr(
+        sup, "_cmdline",
+        lambda pid: "%s --tree=/x/morrow --state-dir /s" % run)
+    assert sup._is_our_loop(me, "/x/morrow") is True
+    monkeypatch.setattr(
+        sup, "_cmdline",
+        lambda pid: "python3 /x/morrow2/helper/supervisor.py run "
+                    "--tree /x/morrow2 --state-dir /s --interval 300 "
+                    "--first-delay 300")
+    assert sup._is_our_loop(me, "/x/morrow") is False
+
+
+def test_prefix_path_trees_keep_separate_loops(tmp_path):
+    # S4 end to end: tree1 (<d>/morrow) holds a stale loop pid that the
+    # OS has since recycled to tree2's (<d>/morrow2) live loop. The
+    # neighbor's cmdline contains tree1's path as a substring, but
+    # tree1 must not adopt, report, or stop it: status stays down,
+    # stop refuses, ensure starts tree1's own loop, and tree2's loop
+    # survives all of it.
+    tree1, _ticks1 = _fake_tree(tmp_path, name="morrow")
+    tree2, _ticks2 = _fake_tree(tmp_path, name="morrow2")
+    assert str(tree1) in str(tree2)  # the test's premise: prefix path
+    second = sup.ensure(str(tree2), interval=30, first_delay=30)
+    try:
+        assert second["started"] is True
+        sup._write_state(str(tree1), {"method": "loop", "installed": True,
+                                      "pid": second["pid"]})
+        assert sup.status(str(tree1))["running"] is False
+        assert sup.stop(str(tree1))["stopped"] is False
+        assert sup.status(str(tree2))["running"] is True
+        first = sup.ensure(str(tree1), interval=30, first_delay=30)
+        assert first["started"] is True
+        assert first["pid"] != second["pid"]
+        assert sup.status(str(tree2))["running"] is True
+    finally:
+        sup.stop(str(tree1), forget=True)
+        sup.stop(str(tree2), forget=True)
+    assert sup.status(str(tree1))["running"] is False
+    assert sup.status(str(tree2))["running"] is False
 
 
 def test_ensure_if_installed_is_a_noop_without_loop_install(tmp_path):

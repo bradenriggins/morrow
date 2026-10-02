@@ -296,11 +296,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--base", default="https://sandbox.moodledemo.net")
     p.add_argument("--username", default="teacher")
     p.add_argument("--password", default=None,
-                   help="DISCOURAGED: visible in the process table and shell "
-                        "history. Prefer the MOODLE_PASSWORD environment "
-                        "variable or the stdin prompt. Never put a real "
-                        "credential here; argv is for the published demo "
-                        "password only.")
+                   help="REFUSED unless it is exactly the published sandbox demo "
+                        "password for the sandbox host: argv is visible in "
+                        "the process table and shell history. Prefer the "
+                        "MOODLE_PASSWORD environment variable or the "
+                        "stdin prompt for any real credential.")
     p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     p.add_argument("--json", action="store_true")
     args = p.parse_args(argv)

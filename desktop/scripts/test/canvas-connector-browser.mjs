@@ -204,6 +204,7 @@ function startCanvas(directory) {
   // for themselves outside any course, and 93 reads as this course's group while the course's own
   // listing of its groups does not name it.
   const groups = new Map([
+    ["9", { id: "9", course_id: "42", context_type: "Course", name: "Course 42 study group" }],
     ["88", { id: "88", course_id: "42", context_type: "Course", name: "Lab team 1" }],
     ["91", { id: "91", course_id: "43", context_type: "Course", name: "Anatomy team" }],
     ["92", { id: "92", course_id: null, context_type: "User", name: "Study buddies" }],
@@ -237,7 +238,12 @@ function startCanvas(directory) {
   ]);
   const courseFiles = new Set(["601", "602"]);
   // 84 holds the course files, 85 is where a file moves to, and 86 belongs to the other course.
+  // 81 and 82 are the reviewed file-transfer targets in courses 42 and 43, and group 9 is the
+  // reviewed group transfer target in course 42: the transfer proves each target's course before
+  // it uploads.
   const folders = new Map([
+    ["81", { id: "81", context_type: "Course", context_id: "42", name: "Reviewed materials", parent_folder_id: "80", updated_at: "2026-09-06T12:00:00Z" }],
+    ["82", { id: "82", context_type: "Course", context_id: "43", name: "Anatomy reviewed materials", parent_folder_id: "83", updated_at: "2026-09-06T12:00:00Z" }],
     ["84", { id: "84", context_type: "Course", context_id: "42", name: "Week 1", parent_folder_id: "80", updated_at: "2026-09-06T12:00:00Z" }],
     ["85", { id: "85", context_type: "Course", context_id: "42", name: "Handouts", parent_folder_id: "80", updated_at: "2026-09-06T12:00:00Z" }],
     ["86", { id: "86", context_type: "Course", context_id: "43", name: "Anatomy handouts", parent_folder_id: "83", updated_at: "2026-09-06T12:00:00Z" }],
@@ -1961,8 +1967,8 @@ try {
   // Every other scoped, admitted write with exact readback is an ordinary
   // standing Edit grant - except a DELETE, which removes what it names and is
   // approved change by change too, unless it only touches the educator's own
-  // bookmarks, planner, favorites, stream, subscriptions, read state, or AI
-  // chats. That includes the general New Quiz question update (its
+  // bookmarks, planner, favorites, stream, subscriptions, or read state. That
+  // includes the general New Quiz question update (its
   // id-preserving guard lives in new-quiz-item-guard.js, not in what is
   // grantable) and creating a New Quiz or any non-destructive Item Bank write.
   const reviewOnlyAdmittedCanvasWrites = new Set([
@@ -1971,7 +1977,6 @@ try {
   ]);
   const standingGrantDeleteTools = new Set([
     "canvas_delete_bookmark", "canvas_delete_planner_note", "canvas_delete_planner_override",
-    "canvas_delete_ai_conversation", "canvas_delete_ai_experience",
     "canvas_clear_course_nicknames", "canvas_remove_course_nickname", "canvas_reset_course_favorites",
     "canvas_remove_group_from_favorites", "canvas_reset_group_favorites",
     "canvas_hide_stream_item", "canvas_hide_all_stream_items",
@@ -2000,7 +2005,7 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.equal(expectedCanvasEditActions.length, 261);
+  assert.equal(expectedCanvasEditActions.length, 258);
   // A bound write with no exact readback is offered for approval one change at a time.
   const nonexactCanvasActions = canvasWriteOperations
     .filter((operation) => {
@@ -2011,7 +2016,7 @@ try {
     })
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(nonexactCanvasActions.length, 204);
+  assert.equal(nonexactCanvasActions.length, 205);
   const expectedCanvasReviewActions = [...new Set([
     ...[...reviewOnlyAdmittedCanvasWrites].map((toolName) => `action:canvas:${toolName}`),
     ...nonexactCanvasActions,

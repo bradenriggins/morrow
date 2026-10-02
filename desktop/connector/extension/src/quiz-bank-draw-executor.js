@@ -342,9 +342,20 @@ export async function executeQuizBankDrawInPage(input) {
     if (!quizEntryId || !itemId || !target || entryType(target) !== "item" || id(value?.entry?.id) !== itemId) {
       return { matched: true, ok: false, sent: false, error: "quiz_bank_question_not_in_this_quiz" };
     }
+    // The whole bank entry list, not its first page: the duplicate pre-check
+    // below must see a question wherever it sits, and so must the readback
+    // after the move. A bank past the cap refuses instead of claiming a
+    // complete list it did not read to the end.
     const bankEntries = async () => {
-      const result = await request("GET", `/api/banks/${encodeURIComponent(bankId)}/bank_entries?page=1&per_page=100`);
-      return result.ok && result.parsed === true && Array.isArray(result.data) ? { rows: result.data } : { error: result };
+      const rows = [];
+      for (let page = 1; page <= MAX_ENTRY_PAGES; page += 1) {
+        const result = await request("GET", `/api/banks/${encodeURIComponent(bankId)}/bank_entries?page=${page}&per_page=100`);
+        if (!result.ok || result.parsed !== true || !Array.isArray(result.data)) return { error: result };
+        if (result.data.length === 0) return { rows };
+        if (rows.length + result.data.length > MAX_ENTRIES) return { error: { paginationLimit: true } };
+        rows.push(...result.data);
+      }
+      return { error: { paginationLimit: true } };
     };
     const holds = (rows) => rows.some((row) => plain(row) && String(row.entry_type) === "Item" && id(row.entry?.id ?? row.entry_id) === itemId);
     const already = await bankEntries();

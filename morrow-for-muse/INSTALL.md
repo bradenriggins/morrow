@@ -499,7 +499,7 @@ bring the previous release back. The installer:
   backup, which undoes the installer's own changes (the tree still
   holds the new release), but ONLY from a verified-complete backup:
   the installer records a per-path SHA-256 manifest of the backup at
-  backup time and re-verifies it with `sha256sum -c` before any
+  backup time and re-verifies every file against it before any
   restore. Fix what failed and run `bash install.sh` again to finish
   the upgrade. A backup
   interrupted mid-write (e.g. disk full) is NEVER restored over the

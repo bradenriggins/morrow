@@ -56,6 +56,8 @@ import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 
 # W4-P1-17: single source of truth for the morrow state root (rig script
@@ -78,6 +80,67 @@ from cdp import (cdp_call, find_tab, read_document_cookie, tab_fetch)
 BASE = os.environ.get("CANVAS_BASE", "https://example.instructure.com")
 STORE_DIR = morrow_home()
 STORE_PATH = os.path.join(STORE_DIR, "session.json")
+
+
+class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Redirect policy for the --verify-direct probe (lane contract).
+
+    The probe carries the raw session cookies, and the stock
+    HTTPRedirectHandler follows 301/302/303/307/308 silently and
+    re-sends the Cookie header to the redirect target, cross-host.
+    Same policy as the executor's _NoDowngradeRedirectHandler: refuse
+    a redirect off the tenant host (or port), refuse an https->http
+    downgrade, follow same-origin redirects as before.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old = urllib.parse.urlparse(req.full_url)
+        new = urllib.parse.urlparse(
+            urllib.parse.urljoin(req.full_url, newurl))
+        if (new.hostname or "").lower() != (old.hostname or "").lower() \
+                or (new.port or None) != (old.port or None):
+            raise urllib.error.HTTPError(
+                req.full_url, code,
+                "refused redirect off the tenant host: %s -> %s "
+                "(the probe's session cookies stay on the tenant)"
+                % (req.full_url, newurl),
+                headers, fp)
+        if old.scheme == "https" and new.scheme == "http":
+            raise urllib.error.HTTPError(
+                req.full_url, code,
+                "refused https->http redirect downgrade: %s -> %s "
+                "(the probe's session cookies would cross plaintext)"
+                % (req.full_url, newurl),
+                headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers,
+                                        newurl)
+
+
+# The --verify-direct probe goes through this opener so the captured
+# cookies can never leak cross-host on a redirect; nothing else is
+# affected (no global install_opener).
+_SAFE_OPENER = urllib.request.build_opener(_SameOriginRedirectHandler())
+
+
+def direct_probe(base, cookie_header, timeout=20):
+    """One direct-HTTPS GET /api/v1/users/self carrying cookie_header.
+
+    Returns the status (an int, or "error:<Exc>" when no response
+    arrived). Redirects off the tenant host or down to http are
+    refused, never followed with the cookies.
+    """
+    rq = urllib.request.Request(
+        base + "/api/v1/users/self",
+        headers={"Cookie": cookie_header,
+                 "Accept": "application/json",
+                 "User-Agent": "morrow-capture/1.0"})
+    try:
+        with _SAFE_OPENER.open(rq, timeout=timeout) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception as e:
+        return "error:%s" % type(e).__name__
 
 
 def discover_session_cookie(cookies, base):
@@ -167,17 +230,7 @@ def main():
     # 4. Optional direct-HTTPS probe from this host (informational only).
     if verify_direct:
         cj = f"{sess_name}={session_cookie['value']}; _csrf_token={live_csrf}"
-        rq = urllib.request.Request(base + "/api/v1/users/self",
-                                    headers={"Cookie": cj,
-                                             "Accept": "application/json",
-                                             "User-Agent": "morrow-capture/1.0"})
-        try:
-            with urllib.request.urlopen(rq, timeout=20) as r:
-                direct_status = r.status
-        except urllib.error.HTTPError as e:
-            direct_status = e.code
-        except Exception as e:
-            direct_status = f"error:{type(e).__name__}"
+        direct_status = direct_probe(base, cj)
         print(f"direct-https probe status: {direct_status} "
               "(302 here = tenant OTP device-binding, not a bad capture)")
 

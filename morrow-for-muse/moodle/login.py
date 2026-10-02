@@ -93,16 +93,22 @@ def resolve_password(cli_password: Optional[str], base: str) -> str:
     Precedence: --password > MOODLE_PASSWORD env > the published
     sandbox demo default (sandbox host only) > getpass stdin prompt.
 
-    --password is kept for one-liner demo use but prints a loud
-    warning: argv is visible in the process table and shell history,
-    so a REAL credential must never travel on the command line.
+    --password is kept for one-liner demo use only, and it is REFUSED
+    unless it carries exactly the published sandbox demo password for
+    the sandbox host: argv is visible in the process table and shell
+    history, so a REAL credential must never travel on the command
+    line, and a warning alone does not stop one.
     """
     if cli_password:
-        print("WARNING: password supplied on the command line (argv). "
-              "It is visible in the process table and shell history. "
-              "Use the MOODLE_PASSWORD environment variable or the "
-              "stdin prompt for any real credential; argv is for the "
-              "published demo password only.", file=sys.stderr)
+        if base.strip().rstrip("/") != SANDBOX_BASE \
+                or cli_password != SANDBOX_DEMO_PASSWORD:
+            raise RuntimeError(
+                "refusing --password: argv is visible in the process "
+                "table and shell history, so only the published sandbox "
+                "demo password may travel on the command line (and only "
+                "for %s). Use the MOODLE_PASSWORD environment variable "
+                "or the stdin prompt for any real credential."
+                % SANDBOX_BASE)
         return cli_password
     env_pw = os.environ.get("MOODLE_PASSWORD")
     if env_pw:
@@ -256,11 +262,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--base", default="https://sandbox.moodledemo.net")
     p.add_argument("--username", default="teacher")
     p.add_argument("--password", default=None,
-                   help="DISCOURAGED: visible in the process table and shell "
-                        "history. Prefer the MOODLE_PASSWORD environment "
-                        "variable or the stdin prompt. Never put a real "
-                        "credential here; argv is for the published demo "
-                        "password only.")
+                   help="REFUSED unless it is exactly the published sandbox demo "
+                        "password for the sandbox host: argv is visible in "
+                        "the process table and shell history. Prefer the "
+                        "MOODLE_PASSWORD environment variable or the "
+                        "stdin prompt for any real credential.")
     p.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     return p.parse_args(argv)
 

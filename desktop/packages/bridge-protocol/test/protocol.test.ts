@@ -307,6 +307,26 @@ describe("bridge protocol", () => {
     ]).map((binding) => binding.sourceBindingId)).toEqual(["a-binding", "canvas:22"]);
   });
 
+  it("rejects unknown binding fields while admitting declared edit categories", () => {
+    expect(() => normalizeBridgeBindings([
+      { sourceBindingId: "canvas:22", provider: "canvas", runtimeVerified: true, tenantId: "t-1" },
+    ])).toThrow("bridge binding has unsupported fields");
+    expect(normalizeBridgeBindings([
+      {
+        sourceBindingId: "canvas:22",
+        provider: "canvas",
+        courseId: "42",
+        runtimeVerified: true,
+        editCategories: [{ id: "pages", label: "Pages", description: "Page content." }],
+      },
+    ])).toEqual([
+      expect.objectContaining({
+        sourceBindingId: "canvas:22",
+        editCategories: [{ id: "pages", label: "Pages", description: "Page content." }],
+      }),
+    ]);
+  });
+
   it("keeps 500 ordinary binding summaries below the bridge limit and reads full options on demand", () => {
     const bindings = Array.from({ length: 500 }, (_, index) => {
       const sourceBindingId = `canvas:course-${index + 1}`;

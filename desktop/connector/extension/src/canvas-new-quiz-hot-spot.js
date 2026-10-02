@@ -265,13 +265,53 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
       const quiz = await canvasJson(quizPath);
       if (decimalId(quiz?.id) !== assignmentId) throw new Error("canvas_hot_spot_quiz_changed");
     };
+    // A later page must stay on the exact items address Morrow requested and preserve every
+    // query that defined the first page. Canvas may add one bounded page cursor and echo its own
+    // per_page cap; it may not remove a filter, change a value, or add a query that widens the
+    // read. Matches sameRequestParameters in canvas-content.js: the membership set is the
+    // freshness and readback authority, so a steered page refuses the list.
+    const sameHotSpotPage = (resumed, requested) => {
+      const requestedNames = new Set(requested.searchParams.keys());
+      const resumedNames = new Set(resumed.searchParams.keys());
+      for (const name of requestedNames) {
+        if (name === "page" || name === "per_page") continue;
+        const expected = requested.searchParams.getAll(name);
+        const observed = resumed.searchParams.getAll(name);
+        if (observed.length !== expected.length || expected.some((value, index) => observed[index] !== value)) return false;
+      }
+      const echoed = (name) => {
+        if (name === "format") return resumed.searchParams.getAll(name).join() === "json";
+        const values = resumed.searchParams.getAll(name);
+        const owned = /(?:^|_)id$/.test(name) && values.length === 1 && /^[1-9][0-9]*$/.test(values[0]);
+        return owned && resumed.pathname.split("/").includes(values[0]);
+      };
+      for (const name of resumedNames) {
+        if (name === "page" || name === "per_page" || requestedNames.has(name)) continue;
+        if (!echoed(name)) return false;
+      }
+      const pages = resumed.searchParams.getAll("page");
+      if (pages.length !== 1 || pages[0].length < 1 || pages[0].length > 1_024) return false;
+      const expectedPerPage = requested.searchParams.getAll("per_page");
+      const observedPerPage = resumed.searchParams.getAll("per_page");
+      const pageSize = (value) => (/^[1-9][0-9]{0,3}$/.test(value) ? Number(value) : null);
+      if (observedPerPage.length > 1) return false;
+      if (expectedPerPage.length > 0) {
+        if (expectedPerPage.length > 1 || observedPerPage.length !== 1) return false;
+        const asked = pageSize(expectedPerPage[0]);
+        const given = pageSize(observedPerPage[0]);
+        if (asked === null || given === null || given > asked) return false;
+      } else if (observedPerPage.length === 1 && !/^(?:[1-9]|[1-9][0-9]|100)$/.test(observedPerPage[0])) return false;
+      return true;
+    };
     // The complete saved question list is the authority on what this quiz
     // holds. A partial list would make both the freshness check and the
     // readback meaningless, so an incomplete read is an error, never a shorter
     // list.
     const membership = async () => {
       const rows = [];
-      let next = `${quizPath}/items?per_page=${PAGE_LIMIT}`;
+      const itemsPath = `${quizPath}/items`;
+      const firstPage = new URL(`${itemsPath}?per_page=${PAGE_LIMIT}`, canvasOrigin);
+      let next = `${itemsPath}?per_page=${PAGE_LIMIT}`;
       let pages = 0;
       while (next && pages < Math.ceil(MAX_ITEMS / PAGE_LIMIT)) {
         const response = await canvasFetch(next);
@@ -289,7 +329,7 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
         if (!href) { next = null; break; }
         let parsed;
         try { parsed = new URL(href, canvasOrigin); } catch { throw new Error("canvas_hot_spot_item_list_incomplete"); }
-        if (parsed.origin !== canvasOrigin || !parsed.pathname.startsWith(quizPath + "/items")) {
+        if (parsed.origin !== canvasOrigin || parsed.pathname !== itemsPath || parsed.hash !== "" || !sameHotSpotPage(parsed, firstPage)) {
           throw new Error("canvas_hot_spot_item_list_incomplete");
         }
         next = parsed.pathname + parsed.search;
