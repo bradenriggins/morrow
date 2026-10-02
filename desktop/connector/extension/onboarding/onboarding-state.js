@@ -108,7 +108,7 @@ function readiness(state) {
 
 export function setupGuideState(status) {
   const known = Boolean(status) && typeof status === "object";
-  const state = { canReconnect: false, canTakeOver: false, ...(known ? readState(status) : unreadState()), known };
+  const state = { canReconnect: false, canTakeOver: false, canReload: false, ...(known ? readState(status) : unreadState()), known };
   return { ...state, ...readiness(state) };
 }
 
@@ -140,7 +140,7 @@ function readState(status) {
       id: "assistant",
       done: paired,
       text: paired
-        ? "Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself."
+        ? "Morrow Bridge is paired with the Morrow app on this computer."
         : authenticationFailed
           ? "Morrow no longer accepts this saved connection, so it needs to connect again"
           : "Morrow Bridge is not set up to work with Morrow yet",
@@ -224,7 +224,7 @@ function readState(status) {
   if (open === "assistant") return {
     ...state,
     title: "Open Morrow",
-    detail: "Open Morrow and choose your assistant. Then return to Morrow Bridge and select Pair Morrow.",
+    detail: "Open Morrow and choose your assistant. Then open the Morrow Bridge popup and select Pair Morrow.",
     canOpenSettings: false,
   };
   if (open === "connection") return {
@@ -237,7 +237,7 @@ function readState(status) {
     ...state,
     title: "Reload Morrow Bridge",
     detail: `Morrow and Morrow Bridge report different versions. ${VERSION_MISMATCH_RECOVERY}`,
-    canOpenSettings: false,
+    canOpenSettings: false, canReload: true,
   };
   if (open === "course" && readySites === 0) return {
     ...state,

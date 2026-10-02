@@ -205,7 +205,7 @@ function staleAnchorDetail(platform) {
 
 export function detailText(status, detectedProvider = null) {
   if (!status) return "Morrow could not read this connection state. Select Try again. If the state does not change, close this popup and open it again.";
-  if (runtimeNeedsReload(status)) return `The Morrow app and Morrow Bridge versions do not match. ${VERSION_MISMATCH_RECOVERY}`;
+  if (runtimeNeedsReload(status)) return `The Morrow app and Morrow Bridge versions do not match. ${VERSION_MISMATCH_RECOVERY}${versionDetail(status)}`;
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   const platform = currentPlatform(status, detectedProvider);
@@ -215,7 +215,7 @@ export function detailText(status, detectedProvider = null) {
     : status.otherProfileOwnsConnection === true
       ? "Morrow is working with Morrow Bridge in another Chrome profile. Only one profile connects at a time, so this profile waits and connects on its own when that profile closes. Select Use Morrow in this profile to move the connection here now."
     : !status.paired
-      ? "Add Morrow to your assistant, then open it. Select Pair Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses."
+      ? "Add Morrow to your assistant, then open it. Select Pair Morrow to connect this extension to the Morrow app on this computer. Connecting does not approve changes to your courses."
       : status.connecting
         ? "Connecting to Morrow. Morrow Bridge retries within 30 seconds while active and checks about once a minute after Chrome idles. Keep this popup open or return in a moment."
         : !status.connected
@@ -225,7 +225,7 @@ export function detailText(status, detectedProvider = null) {
         : binding?.runtimeVerified === true
           ? status.courseAccessMode === "account"
             ? `Your assistant can work across ${plural(status.bindingCount || status.bindings?.length || 1, "course")} together. Give it a course name, course ID, or course link. Keep one signed-in ${platform || "learning platform"} tab open for this account.`
-            : `This selected course is connected. Keep one signed-in ${courseTabName(platform)} tab open while you work in Morrow.`
+            : `This selected course is connected. Keep one signed-in ${courseTabName(platform)} tab open while you work in your assistant.`
           : binding
             ? closedBindingDetail(platform, savedPlatform)
             : anchor?.runtimeVerified === true
@@ -259,4 +259,16 @@ export function controlState(status, { actionInFlight = false, detectedProvider 
 export function nextError(current, { source, cause } = {}) {
   if (cause) return { source, code: problemCode(cause) };
   return source === "status" && current?.source === "action" ? current : null;
+}
+
+// A version mismatch names the two versions when the status already returned carries them: this
+// Bridge's own build and the one Morrow expects. Either may be absent (the worker sends neither
+// today), and an absent one is left out rather than invented.
+export function versionDetail(status) {
+  const bridge = typeof status?.bridgeVersion === "string" ? status.bridgeVersion.trim() : "";
+  const expected = typeof status?.expectedBridgeVersion === "string" ? status.expectedBridgeVersion.trim() : "";
+  if (bridge && expected) return ` This Morrow Bridge is version ${bridge}; Morrow expects version ${expected}.`;
+  if (bridge) return ` This Morrow Bridge is version ${bridge}, which Morrow does not expect.`;
+  if (expected) return ` Morrow expects Morrow Bridge version ${expected}.`;
+  return "";
 }
