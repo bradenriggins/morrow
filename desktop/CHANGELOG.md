@@ -4,7 +4,7 @@ Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/
 
 ## 1.0.9 (2026-10-01)
 
-This release includes Morrow Bridge 1.0.133 and unsigned installers for Mac with Apple silicon and Windows x64.
+This release includes Morrow Bridge 1.0.134 and unsigned installers for Mac with Apple silicon and Windows x64.
 
 - Approve each deletion separately. Morrow no longer grants standing permission to delete course content; every delete is prepared on its own with the exact item, so you approve them one at a time. Your own bookmarks, planner notes, favorites, and read state still work without asking each time.
 - Withdraw course-data consent from Plan and Edit settings. Withdrawing disconnects Morrow, removes its saved courses and permissions, and returns every surface to the consent question.
