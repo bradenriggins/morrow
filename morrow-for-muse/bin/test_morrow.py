@@ -118,7 +118,7 @@ class _FakeResp:
 def test_doctor_healthy(cli, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True}))
     assert cli.main(["doctor"]) == 0
     out = capsys.readouterr().out
@@ -129,14 +129,14 @@ def test_doctor_healthy(cli, monkeypatch, capsys):
 def test_doctor_unhealthy_session(cli, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": False, "chromium_alive": True}))
     assert cli.main(["doctor"]) == 1
     assert "logged_in=False" in capsys.readouterr().out
 
 
 def test_doctor_unreachable(cli, monkeypatch, capsys):
-    def _boom(url, timeout=10):
+    def _boom(url, timeout=10, context=None):
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(cli.urllib.request, "urlopen", _boom)
@@ -156,7 +156,7 @@ def test_doctor_reads_no_auth_material(cli, monkeypatch, capsys):
 
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True}))
     import builtins
     monkeypatch.setattr(builtins, "open", spy_open)
@@ -270,7 +270,7 @@ def test_failure_reads_no_auth_material(cli, capsys, monkeypatch):
 def test_doctor_json_parses_and_matches_exit(cli, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True}))
     assert cli.main(["doctor", "--json"]) == 0
     facts = json.loads(capsys.readouterr().out)
@@ -284,7 +284,7 @@ def test_doctor_json_parses_and_matches_exit(cli, monkeypatch, capsys):
 def test_doctor_json_unhealthy(cli, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": False, "chromium_alive": True}))
     assert cli.main(["doctor", "--json"]) == 1
     facts = json.loads(capsys.readouterr().out)
@@ -295,7 +295,7 @@ def test_doctor_json_unhealthy(cli, monkeypatch, capsys):
 def test_doctor_default_output_unchanged(cli, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True}))
     assert cli.main(["doctor"]) == 0
     out = capsys.readouterr().out
@@ -321,7 +321,7 @@ def _tree_version():
 def test_doctor_flags_helper_version_drift(cli, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True,
              "helper_version": "0.0.0-drifted"}))
     assert cli.main(["doctor"]) == 1
@@ -333,7 +333,7 @@ def test_doctor_flags_helper_version_drift(cli, monkeypatch, capsys):
 def test_doctor_accepts_matching_helper_version(cli, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True,
              "helper_version": _tree_version()}))
     assert cli.main(["doctor"]) == 0
@@ -343,7 +343,7 @@ def test_doctor_accepts_matching_helper_version(cli, monkeypatch, capsys):
 def test_doctor_reports_tree_id_and_supervision(cli, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True}))
     assert cli.main(["doctor"]) == 0
     out = capsys.readouterr().out
@@ -363,7 +363,7 @@ def test_doctor_fails_a_deleted_tree_id(cli, monkeypatch, capsys,
     monkeypatch.setenv("MORROW_HOME", str(home))
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True}))
     assert cli.main(["doctor"]) == 1
     out = capsys.readouterr().out
@@ -380,7 +380,7 @@ def test_doctor_local_identity_failure_is_not_unreachable(
     monkeypatch.setattr(_tc, "normalize_lms_base", _boom)
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True}))
     assert cli.main(["doctor"]) == 1
     out = capsys.readouterr().out
@@ -391,7 +391,7 @@ def test_doctor_local_identity_failure_is_not_unreachable(
 def test_doctor_starts_no_supervision(cli, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": True, "chromium_alive": True}))
     calls = []
     monkeypatch.setattr(cli, "_resume_supervision",
@@ -434,7 +434,7 @@ def test_every_hint_names_the_command_as_bin_morrow(cli, capsys, argv,
 def _stub_helper(monkeypatch, cli, logged_in=True, alive=True):
     monkeypatch.setattr(
         cli.urllib.request, "urlopen",
-        lambda url, timeout=10: _FakeResp(
+        lambda url, timeout=10, context=None: _FakeResp(
             {"logged_in": logged_in, "chromium_alive": alive}))
 
 
@@ -477,3 +477,65 @@ def test_doctor_json_carries_pin_fact(cli, monkeypatch, capsys, tmp_path):
     assert cli.main(["doctor", "--json"]) == 0
     facts = json.loads(capsys.readouterr().out)
     assert facts["pin"] == {"pinned": False}
+
+
+def test_doctor_status_probe_outlasts_slow_helper(cli, monkeypatch, capsys):
+    # S4: /status runs CDP calls with timeout=15s each, so a
+    # healthy-but-slow helper legitimately takes ~15s+ (keepalive.sh
+    # documents this with a 20s probe budget). Doctor's old 10s
+    # timeout read those helpers as UNREACHABLE.
+    seen = {}
+
+    def _capture(url, timeout=10, context=None):
+        seen["timeout"] = timeout
+        seen["context"] = context
+        seen["url"] = url
+        return _FakeResp({"logged_in": True, "chromium_alive": True})
+
+    monkeypatch.delenv("MORROW_HELPER_STATUS_URL", raising=False)
+    monkeypatch.delenv("LOGIN_HELPER_TLS_CERT", raising=False)
+    monkeypatch.delenv("LOGIN_HELPER_TLS_KEY", raising=False)
+    monkeypatch.setattr(cli.urllib.request, "urlopen", _capture)
+    assert cli.main(["doctor"]) == 0
+    assert seen["timeout"] >= 20, seen
+    assert seen["url"].startswith("http://"), seen
+    assert seen["context"] is None
+
+
+def test_doctor_probes_tls_helper_over_https(cli, monkeypatch, capsys,
+                                             tmp_path):
+    # S4: with LOGIN_HELPER_TLS_CERT/KEY set (the same condition
+    # helper/server.py uses to wrap its listener), doctor must probe
+    # https with a verifying context instead of plain http.
+    cert = tmp_path / "helper-cert.pem"
+    key = tmp_path / "helper-key.pem"
+    cert.write_text("cert-bytes")
+    key.write_text("key-bytes")
+    monkeypatch.setenv("LOGIN_HELPER_TLS_CERT", str(cert))
+    monkeypatch.setenv("LOGIN_HELPER_TLS_KEY", str(key))
+    monkeypatch.setenv("LOGIN_HELPER_TLS_INSECURE", "1")
+    monkeypatch.delenv("MORROW_HELPER_STATUS_URL", raising=False)
+    seen = {}
+
+    def _capture(url, timeout=10, context=None):
+        seen["url"] = url
+        seen["context"] = context
+        return _FakeResp({"logged_in": True, "chromium_alive": True})
+
+    monkeypatch.setattr(cli.urllib.request, "urlopen", _capture)
+    assert cli.main(["doctor"]) == 0
+    assert seen["url"].startswith("https://"), seen
+    assert seen["context"] is not None
+    assert "helper: reachable (https://" in capsys.readouterr().out
+
+
+def test_doctor_status_url_override_still_wins(cli, monkeypatch):
+    # MORROW_HELPER_STATUS_URL keeps overriding TLS detection, with
+    # no context attached (the caller owns that URL).
+    monkeypatch.setenv("MORROW_HELPER_STATUS_URL",
+                       "http://127.0.0.1:9999/status")
+    monkeypatch.setenv("LOGIN_HELPER_TLS_CERT", "/nonexistent-cert")
+    monkeypatch.setenv("LOGIN_HELPER_TLS_KEY", "/nonexistent-key")
+    url, ctx = cli._helper_status_url()
+    assert url == "http://127.0.0.1:9999/status"
+    assert ctx is None

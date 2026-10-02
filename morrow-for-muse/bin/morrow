@@ -61,12 +61,37 @@ _COMMANDS = {
 # audit/plan need their runner subcommand prepended.
 _PREPEND = {"audit": ["audit"], "plan": ["plan"]}
 
+# S4: one /status attempt must outlast a healthy-but-slow helper.
+# server.py's status() runs CDP calls with timeout=15s each, and
+# helper/keepalive.sh documents ~15s+ as legitimate with a 20s
+# per-attempt probe budget. Doctor gets one attempt, so 25s: any
+# helper keepalive accepts, doctor accepts.
+_DOCTOR_STATUS_TIMEOUT = 25
+
+
 def _helper_status_url():
-    """This tree's helper /status: LOGIN_HELPER_PORT from the
-    environment, then helper/env (MORROW_HELPER_STATUS_URL overrides)."""
+    """(url, tls_context) for this tree's helper /status.
+
+    LOGIN_HELPER_PORT from the environment, then helper/env
+    (MORROW_HELPER_STATUS_URL overrides). S4: https with the
+    cert-pinned context when LOGIN_HELPER_TLS_CERT/KEY put the helper
+    in TLS mode (transport.local_chromium._helper_tls_context, the
+    same condition helper/server.py and keepalive.sh use); doctor
+    probed plain http unconditionally before and read every
+    TLS-enabled helper as UNREACHABLE. No auth material is read
+    or sent: the token stays out of it (/status is open).
+    """
     from config import tree_config
-    return os.environ.get("MORROW_HELPER_STATUS_URL") \
-        or "http://127.0.0.1:%d/status" % tree_config.helper_port()
+    override = os.environ.get("MORROW_HELPER_STATUS_URL")
+    if override:
+        return override, None
+    try:
+        from transport import local_chromium as lc
+        scheme, ctx = lc._helper_tls_context()
+    except Exception:
+        scheme, ctx = "http", None
+    return "%s://127.0.0.1:%d/status" % (scheme,
+                                         tree_config.helper_port()), ctx
 
 
 def _page_link():
@@ -278,9 +303,11 @@ def _doctor(json_mode=False):
     facts = {"helper": {}, "tree": {}, "entries": {}}
 
     # 1. Helper reachability and session state (read-only).
-    status_url = _helper_status_url()
+    status_url, status_ctx = _helper_status_url()
     try:
-        with urllib.request.urlopen(status_url, timeout=10) as resp:
+        with urllib.request.urlopen(status_url,
+                                    timeout=_DOCTOR_STATUS_TIMEOUT,
+                                    context=status_ctx) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:
         lines.append("helper: UNREACHABLE (%s: %s)"

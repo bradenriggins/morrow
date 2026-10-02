@@ -121,12 +121,15 @@ def find_tab(base):
         "tenant open (signed in through the helper page)" % origin)
 
 
-def tab_fetch(base, path):
-    """GET path inside the authenticated tab. Returns (status, body_text).
+def tab_fetch(base, path, want_url=False):
+    """GET path inside the authenticated tab. Returns (status, body_text),
+    or (status, body_text, final_url) with want_url=True.
 
     The fetch runs in an isolated world (W4-P1-12), so page JS cannot
     forge the response by replacing window.fetch. Read-only for GET
-    paths.
+    paths. S4: fetch follows redirects, so a 302-to-/login surfaces as
+    the login page's URL in final_url (r.url), not as a 3xx status;
+    the JS already captured it, it was just never returned.
     """
     target_id = find_tab(base)
     js = ("fetch(%s, {headers: {'Accept': 'application/json'}})"
@@ -138,6 +141,9 @@ def tab_fetch(base, path):
         resp = json.loads(value) if isinstance(value, str) else {}
     except ValueError:
         resp = {}
+    if want_url:
+        return resp.get("status"), resp.get("body", ""), \
+            resp.get("url", "")
     return resp.get("status"), resp.get("body", "")
 
 

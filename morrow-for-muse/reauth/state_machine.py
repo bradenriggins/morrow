@@ -169,22 +169,33 @@ def _ledger_locked():
     and two mutators cannot interleave partial rewrites. Readers take
     no lock: the append path is O_APPEND-atomic per entry and the
     mutators publish via atomic rename, so readers always see whole
-    lines or a whole file. Best-effort: if the lock cannot be taken
-    the mutation still proceeds (a stuck lock must never wedge the
-    educator's recovery commands).
+    lines or a whole file. S4 fail-closed: if the lock cannot be taken
+    (or even opened) the mutation RAISES instead of proceeding
+    unlocked. The old best-effort fallback let concurrent rewrites
+    interleave through one shared tmp path and silently drop entries;
+    a loud error beats silent approval-gate corruption. The failure is
+    a QuarantineLedgerError carrying the underlying errno (a full disk
+    still reports exactly as a failed append does). Compaction is the
+    one exception: it is a pure optimization, so its standalone entry
+    point catches this and skips (see _maybe_compact_ledger).
     """
     try:
         os.makedirs(STORE_DIR, mode=0o700, exist_ok=True)
         fd = os.open(QUAR_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o600)
-    except OSError:
-        yield
-        return
+    except OSError as exc:
+        raise QuarantineLedgerError(
+            exc.errno,
+            "quarantine ledger lock %s cannot be opened: %s; refusing "
+            "an unlocked mutation" % (QUAR_LOCK_PATH, exc))
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
-        except OSError:
-            yield
-            return
+        except OSError as exc:
+            raise QuarantineLedgerError(
+                exc.errno,
+                "quarantine ledger lock %s cannot be taken: %s; refusing "
+                "an unlocked mutation (a concurrent rewrite could "
+                "silently drop entries)" % (QUAR_LOCK_PATH, exc))
         yield
     finally:
         try:
@@ -513,7 +524,9 @@ def _compact_ledger():
     keep_offsets = {offset for _, offset in terminal_heap}
     # Pass 2: stream again, copying kept lines in original order.
     kept = 0
-    tmp = QUAR_PATH + ".compact"
+    # S4: pid-suffixed (never one shared tmp path): two concurrent
+    # rewrites must not truncate each other's staging file.
+    tmp = "%s.compact.%d" % (QUAR_PATH, os.getpid())
     with open(QUAR_PATH, "rb") as src, open(tmp, "wb") as dst:
         while True:
             offset = src.tell()
@@ -542,8 +555,15 @@ def _maybe_compact_ledger():
     entry just appended is fsync'd before compaction runs, so a failed
     compaction loses nothing.
     """
-    with _ledger_locked():
-        _maybe_compact_ledger_locked()
+    try:
+        with _ledger_locked():
+            _maybe_compact_ledger_locked()
+    except OSError as exc:
+        # S4: the lock is fail-closed for mutations, but compaction is
+        # a pure optimization: skipping it loses nothing, so an
+        # untakable lock skips loudly instead of raising.
+        print("warning: quarantine ledger compaction skipped (%s)" % exc,
+              file=sys.stderr)
 
 
 def _maybe_compact_ledger_locked():
@@ -792,7 +812,8 @@ def mark_ops_awaiting_approval():
     """
     moved = 0
     with _ledger_locked():
-        tmp = QUAR_PATH + ".mutate"
+        # S4: pid-suffixed, never the one shared ".mutate" path.
+        tmp = "%s.mutate.%d" % (QUAR_PATH, os.getpid())
         try:
             # W6-P0-1: every rewritten entry is re-sealed with the
             # current secret, so the ledger never carries an unsealed
@@ -920,7 +941,8 @@ def approve_op(op_id, authorization=None):
         raise ValueError("approve_op refuses an explicit denial or uncertain reply")
     changed = False
     with _ledger_locked():
-        tmp = QUAR_PATH + ".mutate"
+        # S4: pid-suffixed, never the one shared ".mutate" path.
+        tmp = "%s.mutate.%d" % (QUAR_PATH, os.getpid())
         try:
             # W6-P0-1: rewritten entries are re-sealed (see
             # mark_ops_awaiting_approval); only a sealed "approved"
@@ -991,7 +1013,8 @@ def approve_all_awaiting(authorization=None):
             "approve_all_awaiting refuses an explicit denial or uncertain reply")
     approved = []
     with _ledger_locked():
-        tmp = QUAR_PATH + ".mutate"
+        # S4: pid-suffixed, never the one shared ".mutate" path.
+        tmp = "%s.mutate.%d" % (QUAR_PATH, os.getpid())
         try:
             secret = _load_or_mint_quarantine_secret()
             with open(QUAR_PATH) as src, open(tmp, "w") as dst:
