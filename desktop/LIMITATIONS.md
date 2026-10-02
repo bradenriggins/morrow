@@ -1,6 +1,6 @@
 # Limitations
 
-Morrow Desktop `1.0.8` runs on Mac with Apple silicon and Windows x64. No Windows 1.0.6 or 1.0.7 asset was published. Live provider verification remains subject to the evidence below. The version is not an Instructure authorization claim.
+Morrow Desktop `1.0.9` runs on Mac with Apple silicon and Windows x64. No Windows 1.0.6 or 1.0.7 asset was published. Live provider verification remains subject to the evidence below. The version is not an Instructure authorization claim.
 
 ## Platform coverage
 
