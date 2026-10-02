@@ -2,9 +2,28 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
-## 1.0.8 (2026-10-01)
+## 1.0.9 (2026-10-01)
 
 This release includes Morrow Bridge 1.0.131 and unsigned installers for Mac with Apple silicon and Windows x64.
+
+- Approve each deletion separately. Morrow no longer grants standing permission to delete course content; every delete is prepared on its own with the exact item, so you approve them one at a time. Your own bookmarks, planner notes, favorites, and read state still work without asking each time.
+- Withdraw course-data consent from Plan and Edit settings. Withdrawing disconnects Morrow, removes its saved courses and permissions, and returns every surface to the consent question.
+- Reload Morrow Bridge from the popup when the app and Bridge versions do not match, instead of opening the Chrome extensions page.
+- Read clearer explanations when a review cannot be signed, and retry an update from the setup window when Morrow is busy instead of reaching a dead end.
+
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+
+### Technical notes
+
+- Canvas DELETE routes are review-only unless they touch only educator-owned preference state (bookmarks, planner, favorites, stream, subscriptions, read state, AI chats). The exemption list fails closed.
+- Consent withdrawal disconnects the connector, removes the consent key, and invalidates the course-data authority generation; the worker accepts withdrawal only from a settings-page sender and explains `bridge_consent_sender_refused` on other senders.
+- Blackboard token exchange carries no caller signal per waiter and aborts cleanly; Item Bank execution returns no tabs for an unrecognized origin.
+
+## 1.0.8 (2026-10-01)
+
+This release includes Morrow Bridge 1.0.130 and unsigned installers for Mac with Apple silicon and Windows x64.
 
 - Pair Canvas or Moodle accounts once. Choose Selected courses to restrict access to courses you allow, or Account access to work across available courses. Switching modes keeps the pairing. Site-wide actions require Account access. New courses start in Plan; Edit permission stays separate.
 - Give your assistant course names, course IDs, or course links. Neither mode has a course-count limit. Account access refreshes courses automatically, saves progress for large scans, and sends large inventories in bounded parts.

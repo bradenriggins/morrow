@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.4.9 (unreleased)
+## 0.4.9 (2026-10-01)
 
-The `morrow-muse-connector-0.4.9.zip` package is not published yet.
-Build the candidate from committed source as described in
-`INSTALL.md`.
+Install `morrow-muse-connector-0.4.9.zip` from the `muse/v0.4.9`
+release and verify it with `SHA256SUMS` before unzipping, as described
+in `INSTALL.md`.
 
 ### Adversarial audit fixes
 
@@ -15,6 +15,11 @@ Build the candidate from committed source as described in
 - Approval displays open with plain words; the full payload still follows.
 - Purge accounting states in-flight retention honestly.
 - Setup, consent, and guide copy corrected and de-duplicated.
+- Course writes require a course; account-level reads need none.
+- Install backups land in unique folders, and onboarding is tracked
+  per tree.
+- Keepalive stops supervising removed trees, and the doctor tells an
+  unreachable helper apart from a local identity problem.
 
 ## 0.4.8 (2026-10-01)
 

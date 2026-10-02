@@ -48,7 +48,8 @@ Native Moodle helper onboarding still needs release qualification.
   background loop instead (step 7).
 - Network egress from the VM, direct or via the VM's
   `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
-  needs your Canvas or Moodle site, and `pypi.org` and
+  needs `github.com` and `release-assets.githubusercontent.com` for the
+  package, your Canvas or Moodle site, and `pypi.org` and
   `files.pythonhosted.org` to install the optional runtime packages. It
   probes the Canvas tenant when Canvas is configured.
 - The URL for your Canvas or Moodle site and the ability to sign in to it
@@ -56,24 +57,15 @@ Native Moodle helper onboarding still needs release qualification.
 
 ## Step 1: get the package and unzip it
 
-The current 0.4.9 candidate is not published yet. Do not use a draft release
-as a public download. An operator can build the candidate from a clean,
-committed checkout of the [source repository](https://github.com/bradenriggins/morrow).
-The source build script is not shipped in the release:
-
+Download the versioned package and its checksums from the GitHub release. Run these commands in an empty download folder. Verify the package before you unzip it.
 
 ```
-python3 scripts/carve.py --zip
+curl -fL -o morrow-muse-connector-0.4.9.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.9/morrow-muse-connector-0.4.9.zip
+curl -fL -o SHA256SUMS https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.9/SHA256SUMS
+sha256sum --check SHA256SUMS
 ```
 
-Run that command from `morrow-for-muse/`. It creates
-`dist/morrow-muse-connector-0.4.9.zip` at the repository root and records
-the source commit and file hashes in `pack/carve-manifest.json`. The
-carver refuses uncommitted source changes and runs the package secrets
-gate. Copy the ZIP to an empty download folder on the Muse VM.
-
-This source build is a private release candidate. Published install
-instructions must name the exact verified assets.
+The checksum check must print `morrow-muse-connector-0.4.9.zip: OK`. Stop if a download or checksum check fails.
 
 Unzip the release into the skills directory. Run these commands from
 the folder that holds the zip. Running them again is safe: they update
