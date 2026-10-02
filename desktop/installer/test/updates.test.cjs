@@ -1074,3 +1074,182 @@ test("an unreadable attempt record blocks checks and downloads with an explicit 
   assert.equal(adapter.checks, 0);
   controller.stop();
 });
+
+test("repair removes a damaged attempt record so checks work again", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-repair-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  await fs.promises.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  const file = path.join(stateDirectory, "update-attempt.json");
+  fs.writeFileSync(file, "{ not json");
+  if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+  const attempts = createUpdateAttemptStore({ stateDirectory });
+  assert.equal((await attempts.read()).status, "damaged");
+
+  const adapter = createAdapter();
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy(),
+    updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
+    ...grantedRestartLease(),
+    clock: testClock()
+  });
+  const blocked = await controller.start();
+  assert.equal(blocked.status, "error");
+  assert.equal(blocked.reason, "update_attempt_repair_required");
+  assert.equal(adapter.checks, 0);
+
+  const recovered = await controller.reconcileAfterRepair();
+  assert.equal(recovered.status, "idle");
+  assert.equal(fs.existsSync(file), false);
+  assert.deepEqual(await attempts.read(), { status: "absent", record: null, reason: null });
+
+  await controller.check();
+  assert.equal(adapter.checks, 1);
+  controller.stop();
+});
+
+test("repair keeps a damaged attempt record it cannot remove blocked", async () => {
+  const attempts = memoryAttempts(null, { unreadable: true });
+  const adapter = createAdapter();
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy(),
+    updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
+    ...grantedRestartLease(),
+    clock: testClock()
+  });
+  await controller.start();
+  assert.equal(typeof attempts.clearDamaged, "undefined");
+  const recovered = await controller.reconcileAfterRepair();
+  assert.equal(recovered.status, "error");
+  assert.equal(recovered.reason, "update_attempt_repair_required");
+  assert.equal(adapter.checks, 0);
+  controller.stop();
+});
+
+test("the attempt store removes only a damaged record through clearDamaged", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-clear-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const store = createUpdateAttemptStore({ stateDirectory });
+  const file = path.join(stateDirectory, "update-attempt.json");
+  assert.equal(await store.clearDamaged(), true);
+
+  const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  assert.equal(await store.clearDamaged(), false);
+  assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
+
+  fs.writeFileSync(file, "{ not json");
+  if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+  assert.equal((await store.read()).status, "damaged");
+  assert.equal(await store.clearDamaged(), true);
+  assert.equal(fs.existsSync(file), false);
+  assert.deepEqual(await store.read(), { status: "absent", record: null, reason: null });
+});
+
+function windowsAccessStub({ directory = true, file = true, harden = true } = {}) {
+  const calls = { directory: 0, file: 0, harden: 0, options: [] };
+  return {
+    calls,
+    access: {
+      privateDirectoryAccessAccepted: (_directoryPath, options) => { calls.directory += 1; calls.options.push(options); return directory; },
+      privateFileAccessAccepted: (_filePath, _mode, options) => { calls.file += 1; calls.options.push(options); return file; },
+      hardenPrivateDirectory: (_directoryPath, options) => { calls.harden += 1; calls.options.push(options); return harden; }
+    }
+  };
+}
+
+test("the attempt store enforces Windows access control instead of relying on startup hardening", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-windows-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+
+  const accepting = windowsAccessStub();
+  const store = createUpdateAttemptStore({
+    stateDirectory,
+    trustedRoot: root,
+    platform: "win32",
+    windowsPrivateAccess: accepting.access
+  });
+  const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  assert.equal(accepting.calls.harden, 1);
+  assert.deepEqual(accepting.calls.options[0], { trustedRoot: root });
+  assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
+
+  const openFile = windowsAccessStub({ file: false });
+  const readable = createUpdateAttemptStore({
+    stateDirectory,
+    trustedRoot: root,
+    platform: "win32",
+    windowsPrivateAccess: openFile.access
+  });
+  assert.deepEqual(
+    await readable.read(),
+    { status: "damaged", record: null, reason: "update_attempt_not_private" }
+  );
+
+  const openDirectory = windowsAccessStub({ directory: false });
+  const exposed = createUpdateAttemptStore({
+    stateDirectory,
+    trustedRoot: root,
+    platform: "win32",
+    windowsPrivateAccess: openDirectory.access
+  });
+  assert.deepEqual(
+    await exposed.read(),
+    { status: "damaged", record: null, reason: "update_attempt_state_not_private" }
+  );
+  assert.equal(await exposed.clear(written), false);
+
+  const unhardenable = windowsAccessStub({ harden: false });
+  const unhardened = createUpdateAttemptStore({
+    stateDirectory: path.join(root, "Fresh"),
+    trustedRoot: root,
+    platform: "win32",
+    windowsPrivateAccess: unhardenable.access
+  });
+  await assert.rejects(
+    () => unhardened.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT }),
+    /not private/
+  );
+});
+
+test("the attempt store keeps shape-only Windows checks without an access injection", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-win32-plain-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const store = createUpdateAttemptStore({ stateDirectory, platform: "win32" });
+  const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
+  assert.equal(await store.clear(written), true);
+});
+
+test("the attempt store ignores a Windows access injection off Windows", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-posix-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const denying = windowsAccessStub({ directory: false, file: false, harden: false });
+  const store = createUpdateAttemptStore({
+    stateDirectory,
+    trustedRoot: root,
+    platform: "darwin",
+    windowsPrivateAccess: denying.access
+  });
+  const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
+  assert.deepEqual([denying.calls.directory, denying.calls.file, denying.calls.harden], [0, 0, 0]);
+});
+
+test("the attempt store refuses an incomplete Windows access injection", () => {
+  assert.throws(
+    () => createUpdateAttemptStore({ stateDirectory: path.join(os.tmpdir(), "State"), platform: "win32", windowsPrivateAccess: {} }),
+    /windows access is incomplete/
+  );
+  assert.throws(
+    () => createUpdateAttemptStore({ stateDirectory: path.join(os.tmpdir(), "State"), trustedRoot: "relative" }),
+    /trustedRoot/
+  );
+});

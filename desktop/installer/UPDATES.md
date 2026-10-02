@@ -172,7 +172,10 @@ Morrow writes one record to `State/update-attempt.json`:
 ```
 
 The file is mode `0600` inside the `0700` state directory, holds no user data
-and no updater path, and is written to a temporary name and renamed. If Morrow
+and no updater path, and is written to a temporary name and renamed. On Windows
+the same privacy is proven through access-control lists instead of mode bits:
+the store refuses a state directory or record another account can read, and
+hardens the directory before it writes. If Morrow
 cannot write it, it does not hand the update to the updater: the verified update
 stays `ready` and reports `active_or_uncertain_operations`, because a new
 version that never starts could not otherwise be told apart from an ordinary
@@ -202,8 +205,10 @@ start.
 - The record names neither version. It cannot describe this installation, so it
   is removed rather than acted on.
 
-An unreadable record leaves the update route working and makes no claim about
-the last attempt.
+An unreadable record blocks checks and downloads with
+`update_attempt_repair_required` and makes no claim about the last attempt.
+Repair removes the damaged file without guessing at its contents, and the next
+reconciliation then proceeds as if no attempt was recorded.
 
 Reacquiring the previous signed desktop artifact is **not implemented**. Morrow
 keeps no copy of the version it replaced, and the `electron-updater` cache holds

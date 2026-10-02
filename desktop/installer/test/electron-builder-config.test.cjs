@@ -390,6 +390,51 @@ test("afterPack verifies the copied resources against the same reviewed release 
   await assert.rejects(config.afterPack(context), /does not match the reviewed release graph/);
 });
 
+test("unsigned macOS packaging names its macOS host requirement instead of crashing on codesign", async (t) => {
+  const { payload } = await preparedPayload(t);
+  const config = loadConfig({ payload });
+  const check = config.afterPack.darwinSigningHostError;
+  assert.equal(typeof check, "function");
+  assert.equal(check({ signed: true, electronPlatformName: "darwin", platform: "win32" }), null);
+  assert.equal(check({ signed: false, electronPlatformName: "win32", platform: "win32" }), null);
+  assert.equal(check({ signed: false, electronPlatformName: "darwin", platform: "darwin" }), null);
+  assert.match(
+    check({ signed: false, electronPlatformName: "darwin", platform: "win32" }).message,
+    /requires a macOS host/
+  );
+  assert.match(
+    check({ signed: false, electronPlatformName: "darwin", platform: "linux" }).message,
+    /requires a macOS host/
+  );
+});
+
+test("afterPack refuses an unsigned darwin build from another host before it reaches codesign", async (t) => {
+  if (PAYLOAD_TARGET !== "darwin-arm64") {
+    t.skip("the unsigned darwin build the guard refuses needs a darwin payload fixture");
+    return;
+  }
+  const { payload } = await preparedPayload(t);
+  const config = loadConfig({ payload });
+  const output = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-output-"));
+  t.after(() => fs.rm(output, { recursive: true, force: true }));
+  const resources = path.join(output, "resources");
+  await fs.mkdir(resources, { recursive: true });
+  await fs.cp(payload, path.join(resources, "MorrowPayload"), { recursive: true });
+  const context = {
+    appOutDir: output,
+    electronPlatformName: "darwin",
+    packager: { getResourcesDir: () => resources, appInfo: { productFilename: "Morrow" } }
+  };
+  if (process.platform === "darwin") {
+    // A native build passes the guard and reaches codesign, which refuses the
+    // fixture because it is not an application bundle. The guard must not
+    // block it.
+    await assert.rejects(config.afterPack(context), (error) => !/requires a macOS host/.test(String(error?.message)));
+    return;
+  }
+  await assert.rejects(config.afterPack(context), /requires a macOS host to ad-hoc sign the bundle/);
+});
+
 test("the signed build publishes to, and looks for updates on, the GitHub stable feed", async (t) => {
   const { payload, admission, admissionPath } = await preparedPayload(t);
   const config = loadConfig({ payload, signedRelease: true, version: "1.0.0", admissionPath, reviewedGraphSha256: admission.graphSha256 });

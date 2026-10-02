@@ -120,7 +120,32 @@ function updaterCacheDirectory() {
   return process.env.XDG_CACHE_HOME || path.join(home, ".cache");
 }
 
-function createAppUpdateController() {
+/**
+ * The Windows access checks the update attempt store enforces itself. Startup
+ * may have skipped the runtime directory hardening below, so the store proves
+ * the state directory and record private on every read and hardens the
+ * directory before every write instead of relying on it. Without the gateway
+ * module the store keeps its shape-only Windows checks.
+ */
+async function updateAttemptWindowsAccess() {
+  if (process.platform !== "win32" || !installer) return null;
+  try {
+    const gatewayCore = await installer.gatewayCoreModule();
+    if (gatewayCore
+      && typeof gatewayCore.privateDirectoryAccessAccepted === "function"
+      && typeof gatewayCore.privateFileAccessAccepted === "function"
+      && typeof gatewayCore.hardenPrivateDirectory === "function") {
+      return {
+        privateDirectoryAccessAccepted: gatewayCore.privateDirectoryAccessAccepted,
+        privateFileAccessAccepted: gatewayCore.privateFileAccessAccepted,
+        hardenPrivateDirectory: gatewayCore.hardenPrivateDirectory
+      };
+    }
+  } catch { /* The attempt store then keeps its shape-only Windows checks. */ }
+  return null;
+}
+
+function createAppUpdateController(windowsPrivateAccess = null) {
   const { autoUpdater } = require("electron-updater");
   const adapter = createElectronUpdaterAdapter({
     updater: autoUpdater,
@@ -134,7 +159,9 @@ function createAppUpdateController() {
     adapter,
     policy: updatePolicy(),
     updateAttempts: createUpdateAttemptStore({
-      stateDirectory: payloadLayout(fixedPayloadRoot(), app.getPath("userData")).state
+      stateDirectory: payloadLayout(fixedPayloadRoot(), app.getPath("userData")).state,
+      trustedRoot: app.getPath("userData"),
+      windowsPrivateAccess
     }),
     confirmUpdatedRuntime,
     acquireRestartLease: async () => installer?.acquireRestartLease() || { status: "uncertain" },
@@ -813,7 +840,7 @@ async function startMorrow(lifecycle) {
   });
   await installer.initializeBridgeAtStartup().catch(() => {});
   if (lifecycle.isClosing()) return false;
-  updateController = createAppUpdateController();
+  updateController = createAppUpdateController(await updateAttemptWindowsAccess());
   if (lifecycle.isClosing() || await runDesktopSmokeIfRequested()) return false;
   if (lifecycle.isClosing()) return false;
   // Check status is the one state read that looks at this computer again. Every

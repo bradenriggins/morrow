@@ -187,14 +187,14 @@ function attemptState(status, record = null, reason = null) {
   return Object.freeze({ status, record, reason });
 }
 
-function privateStateEntry(info, kind) {
+function privateStateEntry(info, kind, platform) {
   if (!info || (kind === "directory" ? !info.isDirectory() : !info.isFile()) || info.isSymbolicLink()) return false;
   if (typeof process.getuid === "function" && info.uid !== process.getuid()) return false;
-  if (process.platform !== "win32" && (info.mode & 0o077) !== 0) return false;
+  if (platform !== "win32" && (info.mode & 0o077) !== 0) return false;
   return true;
 }
 
-async function privateStateDirectory(stateDirectory) {
+async function privateStateDirectory(stateDirectory, context) {
   let info;
   try { info = await fs.lstat(stateDirectory); }
   catch (error) {
@@ -202,23 +202,29 @@ async function privateStateDirectory(stateDirectory) {
       ? attemptState("absent")
       : attemptState("damaged", null, "update_attempt_state_unreadable");
   }
-  return privateStateEntry(info, "directory")
-    ? attemptState("valid")
-    : attemptState("damaged", null, "update_attempt_state_not_private");
+  if (!privateStateEntry(info, "directory", context.platform)) {
+    return attemptState("damaged", null, "update_attempt_state_not_private");
+  }
+  if (context.windows && !context.windows.directoryAccepted(stateDirectory)) {
+    return attemptState("damaged", null, "update_attempt_state_not_private");
+  }
+  return attemptState("valid");
 }
 
-async function ensurePrivateStateDirectory(stateDirectory) {
+async function ensurePrivateStateDirectory(stateDirectory, context) {
   await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
   const info = await fs.lstat(stateDirectory);
   if (!info.isDirectory() || info.isSymbolicLink()
     || (typeof process.getuid === "function" && info.uid !== process.getuid())) {
     throw new Error("update attempt state directory is invalid");
   }
-  if (process.platform !== "win32") {
+  if (context.platform !== "win32") {
     await fs.chmod(stateDirectory, 0o700);
-    if (!privateStateEntry(await fs.lstat(stateDirectory), "directory")) {
+    if (!privateStateEntry(await fs.lstat(stateDirectory), "directory", context.platform)) {
       throw new Error("update attempt state directory is not private");
     }
+  } else if (context.windows && !context.windows.hardenDirectory(stateDirectory)) {
+    throw new Error("update attempt state directory is not private");
   }
 }
 
@@ -233,10 +239,35 @@ async function boundedFileBytes(handle) {
   return offset > MAX_UPDATE_ATTEMPT_BYTES ? null : output.subarray(0, offset);
 }
 
-async function syncDirectory(directory) {
-  if (process.platform === "win32") return;
+async function syncDirectory(directory, platform) {
+  if (platform === "win32") return;
   const handle = await fs.open(directory, "r");
   try { await handle.sync(); } finally { await handle.close(); }
+}
+
+/**
+ * The Windows access-control checks the store enforces itself, so it never
+ * relies on a hardening step startup may have skipped. The three functions
+ * are gateway-core's `privateDirectoryAccessAccepted`,
+ * `privateFileAccessAccepted`, and `hardenPrivateDirectory`, injected by main.
+ * `null` keeps the shape-only Windows checks for contexts without them, and
+ * any other platform ignores the injection because POSIX mode checks decide.
+ */
+function normalizeWindowsPrivateAccess(value, { platform, trustedRoot }) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object"
+    || typeof value.privateDirectoryAccessAccepted !== "function"
+    || typeof value.privateFileAccessAccepted !== "function"
+    || typeof value.hardenPrivateDirectory !== "function") {
+    throw new TypeError("update attempt windows access is incomplete");
+  }
+  if (platform !== "win32") return null;
+  const options = trustedRoot === null ? {} : { trustedRoot };
+  return Object.freeze({
+    directoryAccepted: (directory) => value.privateDirectoryAccessAccepted(directory, options) === true,
+    fileAccepted: (file, mode) => value.privateFileAccessAccepted(file, mode, options) === true,
+    hardenDirectory: (directory) => value.hardenPrivateDirectory(directory, options) === true
+  });
 }
 
 /**
@@ -245,13 +276,20 @@ async function syncDirectory(directory) {
  * next start can tell a completed update from a new version that never started.
  * It holds no user data and no updater path.
  */
-function createUpdateAttemptStore({ stateDirectory } = {}) {
+function createUpdateAttemptStore({ stateDirectory, trustedRoot = null, platform = process.platform, windowsPrivateAccess = null } = {}) {
   if (typeof stateDirectory !== "string" || !path.isAbsolute(stateDirectory)) {
     throw new TypeError("update attempt stateDirectory must be an absolute path");
   }
+  if (trustedRoot !== null && (typeof trustedRoot !== "string" || !path.isAbsolute(trustedRoot))) {
+    throw new TypeError("update attempt trustedRoot must be an absolute path");
+  }
+  const context = {
+    platform,
+    windows: normalizeWindowsPrivateAccess(windowsPrivateAccess, { platform, trustedRoot })
+  };
   const file = path.join(stateDirectory, UPDATE_ATTEMPT_FILE);
   async function read() {
-    const directory = await privateStateDirectory(stateDirectory);
+    const directory = await privateStateDirectory(stateDirectory, context);
     if (directory.status !== "valid") return directory;
     let linkInfo;
     try { linkInfo = await fs.lstat(file); }
@@ -260,15 +298,18 @@ function createUpdateAttemptStore({ stateDirectory } = {}) {
         ? attemptState("absent")
         : attemptState("damaged", null, "update_attempt_unreadable");
     }
-    if (!privateStateEntry(linkInfo, "file") || linkInfo.size > MAX_UPDATE_ATTEMPT_BYTES) {
+    if (!privateStateEntry(linkInfo, "file", platform) || linkInfo.size > MAX_UPDATE_ATTEMPT_BYTES) {
       return attemptState("damaged", null, linkInfo.size > MAX_UPDATE_ATTEMPT_BYTES ? "update_attempt_too_large" : "update_attempt_not_private");
+    }
+    if (context.windows && !context.windows.fileAccepted(file, linkInfo.mode)) {
+      return attemptState("damaged", null, "update_attempt_not_private");
     }
     let handle = null;
     try {
-      const flags = fsConstants.O_RDONLY | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW || 0);
+      const flags = fsConstants.O_RDONLY | (platform === "win32" ? 0 : fsConstants.O_NOFOLLOW || 0);
       handle = await fs.open(file, flags);
       const openedInfo = await handle.stat();
-      if (!privateStateEntry(openedInfo, "file")
+      if (!privateStateEntry(openedInfo, "file", platform)
         || openedInfo.dev !== linkInfo.dev || openedInfo.ino !== linkInfo.ino
         || openedInfo.size > MAX_UPDATE_ATTEMPT_BYTES) {
         return attemptState("damaged", null, "update_attempt_changed_or_invalid");
@@ -295,7 +336,7 @@ function createUpdateAttemptStore({ stateDirectory } = {}) {
       if (!record) throw new TypeError("update attempt record is invalid");
       const expected = options.expected === undefined ? null : updateAttemptRecord(options.expected);
       if (options.expected !== undefined && !expected) throw new TypeError("expected update attempt record is invalid");
-      await ensurePrivateStateDirectory(stateDirectory);
+      await ensurePrivateStateDirectory(stateDirectory, context);
       const temporary = `${file}.tmp-${crypto.randomUUID()}`;
       let handle = null;
       try {
@@ -312,8 +353,8 @@ function createUpdateAttemptStore({ stateDirectory } = {}) {
           await fs.link(temporary, file);
           await fs.rm(temporary);
         }
-        if (process.platform !== "win32") await fs.chmod(file, 0o600);
-        await syncDirectory(stateDirectory);
+        if (platform !== "win32") await fs.chmod(file, 0o600);
+        await syncDirectory(stateDirectory, platform);
         const written = await read();
         if (written.status !== "valid" || !sameUpdateAttempt(written.record, record)) throw new Error("update attempt write is unconfirmed");
         return written.record;
@@ -329,7 +370,15 @@ function createUpdateAttemptStore({ stateDirectory } = {}) {
       const current = await read();
       if (current.status !== "valid" || !sameUpdateAttempt(current.record, expected)) return false;
       await fs.rm(file, { force: true });
-      await syncDirectory(stateDirectory);
+      await syncDirectory(stateDirectory, platform);
+      return (await read()).status === "absent";
+    },
+    async clearDamaged() {
+      const current = await read();
+      if (current.status === "absent") return true;
+      if (current.status === "valid") return false;
+      await fs.rm(file, { force: true });
+      await syncDirectory(stateDirectory, platform);
       return (await read()).status === "absent";
     }
   });
@@ -341,6 +390,8 @@ function normalizeAttemptStore(value) {
     || typeof value.write !== "function" || typeof value.clear !== "function") {
     throw new TypeError("update attempt store is incomplete");
   }
+  // `clearDamaged` is optional: only the on-disk store removes an unreadable
+  // record after repair. A store without it keeps a damaged record blocked.
   return value;
 }
 
@@ -765,10 +816,11 @@ function createUpdateController({
     return plainSnapshot(state);
   }
 
-  function reconcileAttempt() {
+  function reconcileAttempt(before = null) {
     if (attemptReconciliationTerminal) return Promise.resolve(plainSnapshot(state));
     if (attemptReconciliationPromise) return attemptReconciliationPromise;
     const pending = Promise.resolve()
+      .then(() => before?.())
       .then(runAttemptReconciliation)
       .finally(() => { if (attemptReconciliationPromise === pending) attemptReconciliationPromise = null; });
     attemptReconciliationPromise = pending;
@@ -776,7 +828,15 @@ function createUpdateController({
   }
 
   function reconcileAfterRepair() {
-    return reconcileAttempt();
+    return reconcileAttempt(async () => {
+      // Repair re-hardens the state directory; the unreadable record it left
+      // behind is removed here so checks and downloads work again. A record
+      // that reads is never removed, and a removal that fails re-blocks below.
+      if (!attempts || typeof attempts.clearDamaged !== "function") return;
+      try {
+        if ((await readAttemptState()).status === "damaged") await attempts.clearDamaged();
+      } catch { /* Reconciliation below reports the block again. */ }
+    });
   }
 
   async function start() {
