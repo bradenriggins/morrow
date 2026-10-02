@@ -337,7 +337,7 @@ Client configuration contains only the local Node command, server entry path, wo
 
 ## The Morrow Desktop app
 
-Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout carries Morrow Desktop 1.0.9. Published downloads are Mac 1.0.9 and Windows 1.0.9.
+Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout carries the unpublished 1.0.10 candidate. Published downloads remain Mac 1.0.9 and Windows 1.0.9.
 
 | System | Artifact | What has been checked |
 | --- | --- | --- |
@@ -532,4 +532,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-This checkout contains Morrow Desktop 1.0.9 with Morrow Bridge 1.0.134. Published downloads are Mac 1.0.9 and Windows 1.0.9. The exact files passed native platform smoke before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+This checkout contains the unpublished Desktop 1.0.10 candidate with Morrow Bridge 1.0.134. Published downloads remain Mac 1.0.9 and Windows 1.0.9. The release procedure requires native platform smoke for the exact files before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.

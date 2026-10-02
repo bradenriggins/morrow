@@ -2,6 +2,25 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
+## 1.0.10 (2026-10-02)
+
+This release includes Morrow Bridge 1.0.134 and unsigned installers for Mac with Apple silicon and Windows x64.
+
+- Prove every Canvas file upload target before sending. A folder, group, or section upload is checked against the selected course first, so a target in another course is refused before anything is uploaded.
+- Approve AI conversation and experience deletions one at a time. They are no longer covered by standing permission, since a conversation can hold a learner's session.
+- Keep sign-in credentials out of results. Sign-in and session answers carry the record, never the secret.
+- Hold Moodle course operations to the reviewed course, and check both banks when an Item Bank question is copied or moved.
+- Fail an expiring batch as a whole. A grant that lapsed after the preview stops every change instead of approving a subset.
+
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+
+### Technical notes
+
+- Curated repair bundles pass the same review-only gates as catalog actions, so a future bundle naming a DELETE or an Item Bank destructive change is never offered for Edit.
+- Bridge bindings reject unexpected fields, and read results skip credential scrubbing for operations without a route path.
+
 ## 1.0.9 (2026-10-01)
 
 This release includes Morrow Bridge 1.0.134 and unsigned installers for Mac with Apple silicon and Windows x64.
