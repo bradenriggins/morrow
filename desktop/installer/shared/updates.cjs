@@ -33,6 +33,26 @@ const REQUIRED_FREE_SPACE_MULTIPLE = 3;
 const UPDATE_ATTEMPT_SCHEMA = "morrow.desktop-update-attempt.v1";
 const UPDATE_ATTEMPT_FILE = "update-attempt.json";
 const MAX_UPDATE_ATTEMPT_BYTES = 4 * 1024;
+// The lock serializes every read-check-mutate section of the attempt store
+// (conditional write, clear, clearDamaged) across processes as well as within
+// one process. A crashed holder's lock is stolen once it is stale; the wait
+// below bounds how long a mutation queues behind a live holder.
+const UPDATE_ATTEMPT_LOCK_FILE = "update-attempt.json.lock";
+const STORE_LOCK_TIMEOUT_MS = 5 * 1000;
+const STORE_LOCK_RETRY_MS = 10;
+const STORE_LOCK_STALE_MS = 30 * 1000;
+// Crashed writes leak their uniquely named temporary files; the next write
+// sweeps entries older than this. The window is far longer than any live
+// write, so a sweep never removes a concurrent writer's file.
+const STALE_TEMP_SWEEP_MS = 30 * 60 * 1000;
+// Each install phase owns its own deadline so a hung lease or updater wedges
+// only that phase, never the shared install promise. Expiry releases what the
+// phase holds: nothing for acquisition (a late grant is released on arrival),
+// the lease plus the attempt record for commit; the committed quit phase can
+// only settle, never release.
+const INSTALL_LEASE_ACQUIRE_TIMEOUT_MS = 30 * 1000;
+const INSTALL_LEASE_COMMIT_TIMEOUT_MS = 30 * 1000;
+const INSTALL_QUIT_TIMEOUT_MS = 60 * 1000;
 
 function plainSnapshot(state) {
   return {
@@ -246,15 +266,129 @@ async function syncDirectory(directory, platform) {
 }
 
 /**
+ * Windows durability limits, documented where they bite: Node cannot open a
+ * directory for FlushFileBuffers, so the directory entry recording a rename
+ * or unlink is only as durable as the OS page cache and a crash can lose it.
+ * The file itself is fsynced before the rename (see `write`) and again after
+ * the commit below, so at worst the next start re-reads the old record or
+ * absence and reconciles from there. Best effort: a missing file means
+ * another mutation already moved on, which the confirming read reports.
+ */
+async function syncCommittedFile(file) {
+  let handle = null;
+  try {
+    handle = await fs.open(file, "r");
+    await handle.sync();
+  } catch {
+    /* Durability hint only; the confirming read is the real check. */
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function syncCommit(stateDirectory, file, platform) {
+  if (platform === "win32") {
+    await syncCommittedFile(file);
+    return;
+  }
+  await syncDirectory(stateDirectory, platform);
+}
+
+/**
+ * Removes this record's temporary files left by crashed writes. Only entries
+ * with this record's prefix, that are plain files (never a symlink or
+ * directory), and that are older than any live write are removed, and every
+ * failure is swallowed: the sweep is hygiene, never part of the commit.
+ */
+async function sweepStaleTemporaryFiles(stateDirectory, file) {
+  let entries;
+  try { entries = await fs.readdir(stateDirectory); }
+  catch { return; }
+  const prefix = `${path.basename(file)}.tmp-`;
+  const now = Date.now();
+  for (const entry of entries) {
+    if (!entry.startsWith(prefix)) continue;
+    const candidate = path.join(stateDirectory, entry);
+    try {
+      const info = await fs.lstat(candidate);
+      if (!info.isFile() || info.isSymbolicLink()) continue;
+      if (now - info.mtimeMs < STALE_TEMP_SWEEP_MS) continue;
+      await fs.rm(candidate);
+    } catch {
+      /* A later write retries the sweep. */
+    }
+  }
+}
+
+function lockSleep(milliseconds) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, milliseconds);
+    if (timer && typeof timer.unref === "function") timer.unref();
+  });
+}
+
+async function acquireStoreLock(lockPath) {
+  const deadline = Date.now() + STORE_LOCK_TIMEOUT_MS;
+  for (;;) {
+    let handle = null;
+    try {
+      handle = await fs.open(lockPath, "wx", 0o600);
+      await handle.writeFile(`${process.pid}:${Date.now()}\n`).catch(() => undefined);
+      await handle.close();
+      return;
+    } catch (error) {
+      await handle?.close().catch(() => undefined);
+      if (error?.code !== "EEXIST") throw error;
+    }
+    try {
+      const info = await fs.lstat(lockPath);
+      if (!info.isSymbolicLink() && Date.now() - info.mtimeMs > STORE_LOCK_STALE_MS) {
+        await fs.rm(lockPath).catch(() => undefined);
+        continue;
+      }
+    } catch {
+      /* A vanished lock is retried below as a free lock. */
+    }
+    if (Date.now() >= deadline) throw new Error("update attempt store is busy");
+    await lockSleep(STORE_LOCK_RETRY_MS);
+  }
+}
+
+async function withStoreLock(lockPath, run) {
+  await acquireStoreLock(lockPath);
+  try { return await run(); }
+  finally { await fs.rm(lockPath, { force: true }).catch(() => undefined); }
+}
+
+async function pathIdentity(candidate) {
+  try {
+    const info = await fs.lstat(candidate);
+    return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+function samePathIdentity(left, right) {
+  return Boolean(left && right
+    && left.dev === right.dev && left.ino === right.ino
+    && left.size === right.size && left.mtimeMs === right.mtimeMs);
+}
+
+/**
  * The Windows access-control checks the store enforces itself, so it never
  * relies on a hardening step startup may have skipped. The three functions
  * are gateway-core's `privateDirectoryAccessAccepted`,
  * `privateFileAccessAccepted`, and `hardenPrivateDirectory`, injected by main.
- * `null` keeps the shape-only Windows checks for contexts without them, and
- * any other platform ignores the injection because POSIX mode checks decide.
+ * On win32 the injection is required: without it there is no ACL check and no
+ * hardening, so the store fails closed instead of keeping shape-only checks.
+ * Any other platform ignores the injection because POSIX mode checks decide.
  */
 function normalizeWindowsPrivateAccess(value, { platform, trustedRoot }) {
-  if (value === undefined || value === null) return null;
+  if (value === undefined || value === null) {
+    if (platform === "win32") throw new TypeError("update attempt windows access is required on win32");
+    return null;
+  }
   if (typeof value !== "object"
     || typeof value.privateDirectoryAccessAccepted !== "function"
     || typeof value.privateFileAccessAccepted !== "function"
@@ -288,6 +422,7 @@ function createUpdateAttemptStore({ stateDirectory, trustedRoot = null, platform
     windows: normalizeWindowsPrivateAccess(windowsPrivateAccess, { platform, trustedRoot })
   };
   const file = path.join(stateDirectory, UPDATE_ATTEMPT_FILE);
+  const lockFile = path.join(stateDirectory, UPDATE_ATTEMPT_LOCK_FILE);
   async function read() {
     const directory = await privateStateDirectory(stateDirectory, context);
     if (directory.status !== "valid") return directory;
@@ -298,8 +433,13 @@ function createUpdateAttemptStore({ stateDirectory, trustedRoot = null, platform
         ? attemptState("absent")
         : attemptState("damaged", null, "update_attempt_unreadable");
     }
-    if (!privateStateEntry(linkInfo, "file", platform) || linkInfo.size > MAX_UPDATE_ATTEMPT_BYTES) {
-      return attemptState("damaged", null, linkInfo.size > MAX_UPDATE_ATTEMPT_BYTES ? "update_attempt_too_large" : "update_attempt_not_private");
+    // Privacy is checked before size: an over-large group/world-readable file
+    // is a privacy failure first, and reporting only its size would hide that.
+    if (!privateStateEntry(linkInfo, "file", platform)) {
+      return attemptState("damaged", null, "update_attempt_not_private");
+    }
+    if (linkInfo.size > MAX_UPDATE_ATTEMPT_BYTES) {
+      return attemptState("damaged", null, "update_attempt_too_large");
     }
     if (context.windows && !context.windows.fileAccepted(file, linkInfo.mode)) {
       return attemptState("damaged", null, "update_attempt_not_private");
@@ -309,8 +449,15 @@ function createUpdateAttemptStore({ stateDirectory, trustedRoot = null, platform
       const flags = fsConstants.O_RDONLY | (platform === "win32" ? 0 : fsConstants.O_NOFOLLOW || 0);
       handle = await fs.open(file, flags);
       const openedInfo = await handle.stat();
+      // Windows has no O_NOFOLLOW, so a symlink swapped in between the lstat
+      // and the open would be followed silently. The size and mtime equality
+      // below is the swap detector that stays valid on win32: the same file
+      // always reports both identically, while a swapped-in link or a
+      // concurrent replacement almost surely differs in at least one (and any
+      // concurrent replacement is correctly refused either way).
       if (!privateStateEntry(openedInfo, "file", platform)
         || openedInfo.dev !== linkInfo.dev || openedInfo.ino !== linkInfo.ino
+        || openedInfo.size !== linkInfo.size || openedInfo.mtimeMs !== linkInfo.mtimeMs
         || openedInfo.size > MAX_UPDATE_ATTEMPT_BYTES) {
         return attemptState("damaged", null, "update_attempt_changed_or_invalid");
       }
@@ -337,24 +484,31 @@ function createUpdateAttemptStore({ stateDirectory, trustedRoot = null, platform
       const expected = options.expected === undefined ? null : updateAttemptRecord(options.expected);
       if (options.expected !== undefined && !expected) throw new TypeError("expected update attempt record is invalid");
       await ensurePrivateStateDirectory(stateDirectory, context);
+      await sweepStaleTemporaryFiles(stateDirectory, file);
       const temporary = `${file}.tmp-${crypto.randomUUID()}`;
       let handle = null;
       try {
         handle = await fs.open(temporary, "wx", 0o600);
         await handle.writeFile(`${JSON.stringify(record)}\n`);
+        // Durability before the rename, on every platform including win32.
         await handle.sync();
         await handle.close();
         handle = null;
-        if (expected) {
-          const current = await read();
-          if (current.status !== "valid" || !sameUpdateAttempt(current.record, expected)) throw new Error("update attempt ownership changed");
-          await fs.rename(temporary, file);
-        } else {
-          await fs.link(temporary, file);
-          await fs.rm(temporary);
-        }
-        if (platform !== "win32") await fs.chmod(file, 0o600);
-        await syncDirectory(stateDirectory, platform);
+        // The read-check-commit section holds the lock: without it two
+        // writers holding the same expectation both pass the check and the
+        // last rename wins silently.
+        await withStoreLock(lockFile, async () => {
+          if (expected) {
+            const current = await read();
+            if (current.status !== "valid" || !sameUpdateAttempt(current.record, expected)) throw new Error("update attempt ownership changed");
+            await fs.rename(temporary, file);
+          } else {
+            await fs.link(temporary, file);
+            await fs.rm(temporary);
+          }
+          if (platform !== "win32") await fs.chmod(file, 0o600);
+          await syncCommit(stateDirectory, file, platform);
+        });
         const written = await read();
         if (written.status !== "valid" || !sameUpdateAttempt(written.record, record)) throw new Error("update attempt write is unconfirmed");
         return written.record;
@@ -369,17 +523,34 @@ function createUpdateAttemptStore({ stateDirectory, trustedRoot = null, platform
       if (!expected) throw new TypeError("expected update attempt record is invalid");
       const current = await read();
       if (current.status !== "valid" || !sameUpdateAttempt(current.record, expected)) return false;
-      await fs.rm(file, { force: true });
-      await syncDirectory(stateDirectory, platform);
-      return (await read()).status === "absent";
+      // The identity is re-verified under the lock just before the unlink: a
+      // record written between the first read and the unlink must survive.
+      return withStoreLock(lockFile, async () => {
+        const reverified = await read();
+        if (reverified.status !== "valid" || !sameUpdateAttempt(reverified.record, expected)) return false;
+        await fs.rm(file, { force: true });
+        await syncDirectory(stateDirectory, platform);
+        return (await read()).status === "absent";
+      });
     },
     async clearDamaged() {
       const current = await read();
       if (current.status === "absent") return true;
       if (current.status === "valid") return false;
-      await fs.rm(file, { force: true });
-      await syncDirectory(stateDirectory, platform);
-      return (await read()).status === "absent";
+      const damagedIdentity = await pathIdentity(file);
+      // Under the lock the state is re-read and only the same damaged
+      // identity is unlinked: a valid record written concurrently is left
+      // alone, and a changed-but-still-damaged file is left for the next
+      // repair pass to re-verify from scratch.
+      return withStoreLock(lockFile, async () => {
+        const reverified = await read();
+        if (reverified.status === "absent") return true;
+        if (reverified.status === "valid") return false;
+        if (damagedIdentity && !samePathIdentity(await pathIdentity(file), damagedIdentity)) return false;
+        await fs.rm(file, { force: true });
+        await syncDirectory(stateDirectory, platform);
+        return (await read()).status === "absent";
+      });
     }
   });
 }
@@ -519,6 +690,37 @@ function createUpdateController({
         else globalThis.clearTimeout(timer);
       });
     return boundary;
+  }
+
+  /**
+   * Runs one install phase under its own deadline. Unlike the check/download
+   * boundary there is no adapter cancellation to issue: expiry rejects with
+   * `timeoutError` and the install chain releases what that phase holds. Work
+   * that settles after expiry reports through `onLateSettle` (a late grant is
+   * released instead of used) and a late rejection is swallowed, never an
+   * unhandled rejection.
+   */
+  function boundedInstallPhase(run, timeoutMs, timeoutError, onLateSettle = null) {
+    const work = Promise.resolve().then(run);
+    let timer = null;
+    const clearTimer = () => {
+      if (typeof timers.clearTimeout === "function") timers.clearTimeout(timer);
+      else globalThis.clearTimeout(timer);
+    };
+    const expiry = new Promise((_resolve, reject) => {
+      const fire = () => {
+        work.then(
+          (value) => { try { onLateSettle?.(value); } catch { /* A late grant needs no retry. */ } },
+          () => { /* Expiry already settled the phase. */ }
+        );
+        reject(timeoutError);
+      };
+      timer = typeof timers.setTimeout === "function"
+        ? timers.setTimeout(fire, timeoutMs)
+        : globalThis.setTimeout(fire, timeoutMs);
+      if (timer && typeof timer.unref === "function") timer.unref();
+    });
+    return Promise.race([work, expiry]).finally(clearTimer);
   }
 
   function admissionReason() {
@@ -788,7 +990,7 @@ function createUpdateController({
       try { confirmation = await confirmUpdatedRuntime(); }
       catch { confirmation = null; }
       if (confirmation?.status !== "verified") {
-        return blockAttemptReconciliation();
+        return blockAttemptReconciliation("update_runtime_unverified");
       }
       try {
         if (!await attempts.clear(record)) {
@@ -917,7 +1119,15 @@ function createUpdateController({
     // Assign the shared promise before any lease request. A second renderer
     // click must join this attempt instead of obtaining a second lease.
     const pending = Promise.resolve()
-      .then(() => acquireRestartLease())
+      .then(() => boundedInstallPhase(
+        () => acquireRestartLease(),
+        INSTALL_LEASE_ACQUIRE_TIMEOUT_MS,
+        operationError("ERR_UPDATE_INSTALL_ACQUIRE_TIMEOUT", "desktop update lease acquisition timed out"),
+        (late) => {
+          // A grant that arrives after expiry is released instead of used.
+          if (isGrantedRestartLease(late)) void Promise.resolve().then(() => releaseRestartLease(late.leaseId)).catch(() => {});
+        }
+      ))
       .then(async (lease) => {
         if (!isGrantedRestartLease(lease)) return deferredInstall(version);
         const attempt = await recordAttempt(version);
@@ -925,13 +1135,23 @@ function createUpdateController({
         // A failed claim releases the still-reversible lease.
         if (!attempt) return releaseUncommittedLease(lease.leaseId, version);
         let committed;
-        try { committed = await commitRestartLease(lease.leaseId); }
+        try {
+          committed = await boundedInstallPhase(
+            () => commitRestartLease(lease.leaseId),
+            INSTALL_LEASE_COMMIT_TIMEOUT_MS,
+            operationError("ERR_UPDATE_INSTALL_COMMIT_TIMEOUT", "desktop update lease commit timed out")
+          );
+        }
         catch { return releaseFailedCommit(lease.leaseId, version, attempt); }
         if (!isCommittedRestartLease(committed)) return releaseFailedCommit(lease.leaseId, version, attempt);
         restartCommitted = true;
         transition("installing", version, null);
         return Promise.resolve()
-          .then(() => adapter.quitAndInstall())
+          .then(() => boundedInstallPhase(
+            () => adapter.quitAndInstall(),
+            INSTALL_QUIT_TIMEOUT_MS,
+            operationError("ERR_UPDATE_INSTALL_QUIT_TIMEOUT", "desktop update handoff timed out")
+          ))
           // A closing owner can no longer resume ordinary work. Keep its lease
           // and attempt record through process exit, including updater failure.
           .then(() => plainSnapshot(state))
@@ -981,9 +1201,14 @@ function createUpdateController({
 
 module.exports = {
   DEFAULT_CHECK_INTERVAL_MS,
+  INSTALL_LEASE_ACQUIRE_TIMEOUT_MS,
+  INSTALL_LEASE_COMMIT_TIMEOUT_MS,
+  INSTALL_QUIT_TIMEOUT_MS,
+  STALE_TEMP_SWEEP_MS,
   UPDATE_CHECK_TIMEOUT_MS,
   UPDATE_DOWNLOAD_TIMEOUT_MS,
   UPDATE_ATTEMPT_FILE,
+  UPDATE_ATTEMPT_LOCK_FILE,
   UPDATE_EVENTS,
   compareVersions,
   createUpdateAttemptStore,
