@@ -337,14 +337,14 @@ Client configuration contains only the local Node command, server entry path, wo
 
 ## The Morrow Desktop app
 
-Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout carries the unpublished 1.0.10 candidate. Published downloads remain Mac 1.0.9 and Windows 1.0.9.
+Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout carries Morrow Desktop 1.0.10. Published downloads are Mac 1.0.10 and Windows 1.0.10.
 
 | System | Artifact | What has been checked |
 | --- | --- | --- |
-| macOS on Apple silicon | Published 1.0.9: `Morrow-1.0.9-mac-arm64.dmg`, with a matching `.zip` | The exact 1.0.9 package passed the native Mac smoke check, including gateway readiness and sealed-payload verification. |
-| Windows on x64 | Published 1.0.9: `Morrow-1.0.9-win-x64.exe`, a one-click per-user NSIS installer | The exact 1.0.9 installer passed install, start, damaged-payload refusal, exact repair, uninstall, upgrade retention, and retained-data checks on native Windows. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. No Windows 1.0.6 or 1.0.7 release asset was published. |
+| macOS on Apple silicon | Published 1.0.10: `Morrow-1.0.10-mac-arm64.dmg`, with a matching `.zip` | The exact 1.0.10 package passed the native Mac smoke check, including gateway readiness and sealed-payload verification. |
+| Windows on x64 | Published 1.0.10: `Morrow-1.0.10-win-x64.exe`, a one-click per-user NSIS installer | The exact 1.0.10 installer passed install, start, damaged-payload refusal, exact repair, uninstall, upgrade retention, and retained-data checks on native Windows. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. No Windows 1.0.6 or 1.0.7 release asset was published. |
 
-There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. Morrow Desktop 1.0.9 is for Mac with Apple silicon and Windows x64. The [Morrow downloads page](https://meetmorrow.app/download) names the currently published Mac and Windows versions. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
+There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. Morrow Desktop 1.0.10 is for Mac with Apple silicon and Windows x64. The [Morrow downloads page](https://meetmorrow.app/download) names the currently published Mac and Windows versions. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
 You need a Mac with Apple silicon and macOS 13 or later, or an x64 computer with Windows 10 or Windows 11. On that computer you also need Chrome 116 or later and one supported assistant already installed: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
 
@@ -532,4 +532,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-This checkout contains the unpublished Desktop 1.0.10 candidate with Morrow Bridge 1.0.134. Published downloads remain Mac 1.0.9 and Windows 1.0.9. The release procedure requires native platform smoke for the exact files before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+This checkout contains Morrow Desktop 1.0.10 with Morrow Bridge 1.0.134. Published downloads are Mac 1.0.10 and Windows 1.0.10. The exact files passed native platform smoke before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
