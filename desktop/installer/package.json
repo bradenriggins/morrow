@@ -1,6 +1,6 @@
 {
   "name": "morrow-installer",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "packageManager": "pnpm@12.6.0",
   "private": true,
   "author": {

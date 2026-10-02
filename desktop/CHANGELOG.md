@@ -2,6 +2,26 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
+## 1.0.11 (2026-10-02)
+
+This release includes Morrow Bridge 1.0.135 and unsigned installers for Mac with Apple silicon and Windows x64.
+
+- Name the assistant you already use as the workplace. Setup, the Bridge popup, and the site now say course work happens in ChatGPT, Claude, or Gemini, never in a separate Morrow window.
+- Keep Bridge review and course lists visible through a version mismatch, labeled as possibly out of date, until one reload reconnects.
+- Name both versions on a mismatch, so recovery says which side is older.
+- Tell an update that could not be verified apart from one that failed, with a Repair route instead of a retry that cannot work.
+- Contain a damaged update store at startup instead of blocking the app on it.
+
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+
+### Technical notes
+
+- The Bridge handshake carries pairing presence, and a deferred Store update reloads from the next operation completion point.
+- The update attempt store serializes conditional writers under a lock and bounds every install phase with a deadline.
+- Loopback allowlist, environment precedence, and MCP bridge-version health are pinned by tests.
+
 ## 1.0.10 (2026-10-02)
 
 This release includes Morrow Bridge 1.0.134 and unsigned installers for Mac with Apple silicon and Windows x64.
