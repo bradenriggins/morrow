@@ -336,6 +336,11 @@ function providerPostRecord(records) {
  * call sites.
  */
 async function connectHarnessConnector({ port, binding, page, expiresAt, commands, operations }) {
+  // Production Bridges never send principalId over the wire
+  // (service-worker strips it before sending); the harness keeps it
+  // for local roster calls only.
+  const { principalId: _harnessPrincipalId, ...wireBinding } = binding;
+  const wireBindings = [wireBinding];
   const { WebSocket } = require(require.resolve("ws", { paths: [join(root, "packages/mcp-server")] }));
   const socket = new WebSocket(`ws://127.0.0.1:${port}${BRIDGE_PATH}`, { origin: `chrome-extension://${EXTENSION_ID}` });
   const closed = { code: null, reason: null };
@@ -405,7 +410,7 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
       extensionId: EXTENSION_ID,
       runtimeRevision: RUNTIME_REVISION,
       catalogDigest: binding.catalogDigest,
-      bindings: [binding],
+      bindings: wireBindings,
       sentAt: Date.now(),
     });
   });
@@ -440,7 +445,7 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
     answered.set(command.requestId, record);
     commands.push(record);
     if (command.kind === "bindings_get") {
-      send({ schema: "morrow.bridge.bindings.v1", protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: ready.generation, bindings: [binding], sentAt: Date.now() });
+      send({ schema: "morrow.bridge.bindings.v1", protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: ready.generation, bindings: wireBindings, sentAt: Date.now() });
       return;
     }
     if (command.kind === "ui_state") {
