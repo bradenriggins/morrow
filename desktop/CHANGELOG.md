@@ -8,9 +8,13 @@ This release includes Morrow Bridge 1.0.134 and unsigned installers for Mac with
 
 - Prove every Canvas file upload target before sending. A folder, group, or section upload is checked against the selected course first, so a target in another course is refused before anything is uploaded.
 - Approve AI conversation and experience deletions one at a time. They are no longer covered by standing permission, since a conversation can hold a learner's session.
-- Keep sign-in credentials out of results. Token and session answers carry the record, never the secret.
+- Keep sign-in credentials out of results. Sign-in and session answers carry the record, never the secret.
 - Hold Moodle course operations to the reviewed course, and check both banks when an Item Bank question is copied or moved.
 - Fail an expiring batch as a whole. A grant that lapsed after the preview stops every change instead of approving a subset.
+
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
 
 ### Technical notes
 
