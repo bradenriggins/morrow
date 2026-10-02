@@ -204,6 +204,7 @@ function startCanvas(directory) {
   // for themselves outside any course, and 93 reads as this course's group while the course's own
   // listing of its groups does not name it.
   const groups = new Map([
+    ["9", { id: "9", course_id: "42", context_type: "Course", name: "Course 42 study group" }],
     ["88", { id: "88", course_id: "42", context_type: "Course", name: "Lab team 1" }],
     ["91", { id: "91", course_id: "43", context_type: "Course", name: "Anatomy team" }],
     ["92", { id: "92", course_id: null, context_type: "User", name: "Study buddies" }],
@@ -515,12 +516,6 @@ function startCanvas(directory) {
     if (folderMatch && request.method === "GET") {
       const folder = folders.get(folderMatch[1]);
       return folder ? json(200, folder) : json(404, { error: "not_found" });
-    }
-    const canvasGroupMatch = url.pathname.match(/^\/api\/v1\/groups\/([1-9][0-9]*)$/);
-    if (canvasGroupMatch && request.method === "GET") {
-      return canvasGroupMatch[1] === "9"
-        ? json(200, { id: "9", name: "Course 42 study group", context_type: "Course", course_id: "42" })
-        : json(404, { error: "not_found" });
     }
     const folderChildMatch = url.pathname.match(/^\/api\/v1\/folders\/([1-9][0-9]*)\/folders$/);
     if (folderChildMatch && request.method === "POST") {

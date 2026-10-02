@@ -5426,7 +5426,10 @@ function withoutTokenSecretFields(value) {
 }
 
 function withoutSessionCredentialSecrets(result, operation) {
-  if (operation?.provider !== "canvas" || result?.data === undefined) return result;
+  // The credential class is a route-path list, so a Canvas operation with no path (a browser
+  // private read) can never hold one. The admission classifier requires a path, so it is not
+  // consulted for one: asking would throw, and a read has no failure result to fall back to.
+  if (operation?.provider !== "canvas" || typeof operation?.path !== "string" || result?.data === undefined) return result;
   const admission = canvasOperationAdmission(operation);
   return admission?.authority === "site" && admission?.siteClass === "session_credential"
     ? { ...result, data: withoutTokenSecretFields(result.data) }
@@ -6040,7 +6043,7 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
     // A sign-in token, a session, or a one-time action keeps no field afterwards that names what
     // changed, so no readback plan is built for one even when a route shape resembles a readable
     // one: the write is reported unconfirmed rather than checked against a meaningless read.
-    const sessionCredentialWrite = operation.provider === "canvas" && canvasOperationAdmission(operation)?.siteClass === "session_credential";
+    const sessionCredentialWrite = operation.provider === "canvas" && typeof operation.path === "string" && canvasOperationAdmission(operation)?.siteClass === "session_credential";
     const plan = guardedCanvasContent || guardedPage || guardedNewQuizSettings || guardedNewQuizLifecycle || guardedNewQuizItemLifecycle || guardedNewQuizItemPosition || newQuizResponseBound || guardedItemBank || privateConversation || privateCanvasCourseFileOperation(operation) || privateHotSpot || operation.provider !== "canvas" || namedCanvasReadback || semanticReadback || sessionCredentialWrite ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
     readDescriptor = genericCanvasWriteReadback(command, operation, privateConversation)
       ? await canvasRecoveryDescriptor(operation, command.arguments || {}, result.data, result)
