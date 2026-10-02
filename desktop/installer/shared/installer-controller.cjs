@@ -2461,7 +2461,9 @@ class InstallerController {
 
   /**
    * Re-creates State and re-reads the installer record. A malformed record is
-   * copied into State/Backups before a fresh record replaces it. A valid record
+   * copied into State/Backups before a fresh record replaces it, and bindings
+   * whose files still carry a Morrow entry are re-adopted so repair rebinds
+   * them to this installation instead of dropping them. A valid record
    * from another version is left exactly as it is until that version can read
    * or migrate it.
    */
@@ -2476,9 +2478,10 @@ class InstallerController {
     } catch (error) {
       if (error?.message === "migration_required") throw errorDetails("installer_record_incompatible");
       if (pending || claudePending) throw error;
-      await this.quarantineInstallerRecord();
+      const salvaged = await this.quarantineInstallerRecord();
       current = freshRecord();
       await this.writeRecord(current);
+      current = await this.readoptAssistantBindings(current, salvaged);
     }
     if (claudePending) {
       await this.recoverClaudeGenerationTransition(claudePending);
@@ -2570,6 +2573,55 @@ class InstallerController {
    * Claude Desktop is configured by an approval inside that application, so
    * repair leaves it to the person and does not open another application.
    */
+  /**
+   * Re-adopts assistant bindings after a malformed installer record was
+   * quarantined. The quarantined bytes only name candidate files; a binding is
+   * re-adopted only when that file still carries a Morrow entry, which proves
+   * Morrow wrote there before. User-scoped assistants are also found by their
+   * fixed configuration path, so an unparseable record still heals those. The
+   * seeded entries carry only the target: repairAssistantConfiguration rebinds
+   * each one to this installation's paths and records the result it read back.
+   */
+  async readoptAssistantBindings(record, quarantinedPath) {
+    let salvaged = null;
+    if (typeof quarantinedPath === "string") {
+      try {
+        salvaged = JSON.parse(await fs.readFile(quarantinedPath, "utf8"));
+      } catch { salvaged = null; }
+    }
+    const configured = { ...(record.configured || {}) };
+    let module = null;
+    for (const assistant of ASSISTANTS) {
+      if (assistant.id === "claude-desktop" || configured[assistant.id]) continue;
+      const candidates = [];
+      const recorded = salvaged?.configured?.[assistant.id]?.target;
+      if (typeof recorded === "string" && path.isAbsolute(recorded)) candidates.push(recorded);
+      if (!assistant.needsProject) {
+        const fixed = clientConfigTarget(assistant, this.home, null);
+        if (typeof fixed === "string" && !candidates.includes(fixed)) candidates.push(fixed);
+      }
+      for (const target of candidates) {
+        module ??= await this.clientConfigModule().catch(() => null);
+        if (await this.assistantEntryPresent(assistant, target, module)) {
+          configured[assistant.id] = { target };
+          break;
+        }
+      }
+    }
+    return { ...record, configured };
+  }
+
+  async assistantEntryPresent(assistant, target, module) {
+    if (!module || typeof module.morrowServerEntryArguments !== "function") return false;
+    const content = await readConfigurationFile(target).catch(() => null);
+    if (content === null) return false;
+    try {
+      return Array.isArray(module.morrowServerEntryArguments(assistant.id, content.toString("utf8"), MORROW_SERVER_NAME));
+    } catch {
+      return false;
+    }
+  }
+
   async repairAssistantConfiguration(record) {
     await this.executeCli([
       "setup", "--repository", this.paths.appRoot, "--upstreams", this.paths.upstreams, "--node", this.paths.node,

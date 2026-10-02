@@ -2045,6 +2045,58 @@ test("repair keeps a malformed installer record in Backups and starts a fresh on
   assert.deepEqual(calls.map((entry) => entry[0]), ["setup"], "a fresh record names no assistant to configure");
 });
 
+test("repair re-adopts an assistant binding after quarantining a malformed installer record", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const { installer, calls } = await repairableController(root);
+  // A Morrow entry the previous installation wrote, still pointing at its paths.
+  await assistantFile(target, "[mcp_servers.morrow]\ncommand = \"/previous/Morrow/node\"\nargs = [\"/previous/Morrow/index.js\"]\n");
+  const stateDirectory = path.join(root, "UserData", "State");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  if (process.platform !== "win32") await fs.chmod(stateDirectory, 0o700);
+  await fs.writeFile(path.join(stateDirectory, "installer.json"), "{not-json\n", { mode: 0o600 });
+
+  const state = await installer.repair();
+
+  assert.deepEqual(calls.map((entry) => entry[0]), ["setup", "mcp"]);
+  assert.equal(calls[1][2], "codex");
+  assert.equal(calls[1].includes("--replace-morrow-entry"), true);
+  assert.equal(calls[1][calls[1].indexOf("--server-entry") + 1], installer.paths.server,
+    "the re-adopted binding is rewritten to this installation's paths");
+  const record = await installer.record();
+  assert.equal(record.configured.codex.target, target);
+  assert.equal(record.configured.codex.sha256, sha256(await fs.readFile(target)));
+  assert.equal(state.assistants.find((assistant) => assistant.id === "codex").configured, true);
+});
+
+test("binding re-adoption trusts the quarantined record only for file names", async () => {
+  const root = await temporaryRoot();
+  const { installer } = await repairableController(root);
+  const project = path.join(root, "Home", "course");
+  const target = path.join(project, ".mcp.json");
+  await fs.mkdir(project, { recursive: true });
+  await fs.writeFile(target, JSON.stringify({
+    mcpServers: { morrow: { command: "/previous/node", args: ["/previous/index.js"], env: { MORROW_UPSTREAMS_FILE: "/s.json" } } }
+  }));
+  const quarantined = path.join(root, "installer-quarantined.json");
+  await fs.writeFile(quarantined, JSON.stringify({
+    schema: "morrow.desktop-state.v1",
+    version: 1,
+    configured: {
+      "claude-code": { target, sha256: "0".repeat(64) },
+      "gemini-cli": { target: path.join(root, "Home", "missing", ".gemini", "settings.json"), sha256: "0".repeat(64) },
+      "claude-desktop": { target: path.join(root, "Home", "claude.json"), sha256: "0".repeat(64) }
+    }
+  }));
+
+  const record = await installer.readoptAssistantBindings(freshRecord(), quarantined);
+  assert.deepEqual(record.configured, { "claude-code": { target } });
+
+  const unparseable = await installer.readoptAssistantBindings(freshRecord(), path.join(root, "missing.json"));
+  assert.deepEqual(unparseable.configured, {});
+});
+
 test("repair leaves an installer record from another app version exactly as it is", async () => {
   const root = await temporaryRoot();
   const { installer, calls } = await repairableController(root);
