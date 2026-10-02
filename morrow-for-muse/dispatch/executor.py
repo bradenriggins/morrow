@@ -8768,6 +8768,18 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                                         "steps": steps},
                             "truncated": False, "bytes_received": 0}
         verification = {"status": "uncertain", "detail": _provider_detail(exc)}
+        # The journal is a learner-PII-free surface: project the
+        # uncertain verification AND receipt through the learner
+        # boundary, exactly like the success path and the mismatch
+        # path's verification. Provider exception text can carry
+        # learner names echoed from the request.
+        projection_entry = _projection_entry(
+            entry, url, getattr(exc, "evidence", None))
+        verification = _project_verification_detail(
+            projection_entry, verification,
+            getattr(exc, "evidence", None), tenant_base, entry_name)
+        uncertain_result = _journalable_result(
+            projection_entry, uncertain_result, tenant_base)
         record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                  op_id, None, verification,
                                  uncertain_result, exc.attempts or 0,
@@ -8803,10 +8815,18 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
                          "receipt": {"detail": _provider_detail(exc, 500)},
                          "truncated": False, "bytes_received": 0}
         verification = {"status": "fail", "detail": _provider_detail(exc)}
+        mismatch_projection_entry = _projection_entry(
+            entry, url, getattr(exc, "readback_payload", None))
         verification = _project_verification_detail(
-            _projection_entry(entry, url, getattr(exc, "readback_payload", None)),
+            mismatch_projection_entry,
             verification, getattr(exc, "readback_payload", None),
             tenant_base, entry_name)
+        # The mismatch receipt carries the same raw readback values as
+        # the verification did: project it through the learner boundary
+        # too, so the journaled receipt is PII-free like the success
+        # path's.
+        failed_result = _journalable_result(
+            mismatch_projection_entry, failed_result, tenant_base)
         record = _journal_record(entry_name, kind, effects, journal_params, plan,
                                  op_id, None, verification,
                                  failed_result, 0, uncertain=False,
@@ -8877,7 +8897,8 @@ def _dispatch_entry_inner(entry: dict, params: dict, session: SessionStore,
         # reserved for reconciliation), and re-raise.
         _journal_write_failure_audit(
             entry_name, kind, effects, journal_params, plan, op_id, exc,
-            attempt_state, approval_audit, catalog_status)
+            attempt_state, approval_audit, catalog_status,
+            entry, url, tenant_base)
         # W5-P2-1: the audit record is journaled (drained); a pending
         # shutdown now stops the run instead of continuing.
         _raise_if_shutdown_requested()
@@ -9268,7 +9289,8 @@ def _journal_record(entry_name, kind, effects, params, plan, op_id,
 
 def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
                                  op_id, exc, attempt_state,
-                                 approval_audit, catalog_status):
+                                 approval_audit, catalog_status,
+                                 entry, url, tenant_base):
     """Journal an ambiguous write failure (W2-P0-4) under a fresh event id.
 
     A write provider call was invoked and the failure is neither
@@ -9279,9 +9301,22 @@ def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
     reconciliation. The op_id's WAL claim stays in place, so a retry is
     refused as a duplicate until the operator reconciles the journaled
     evidence against the provider.
+
+    The journal is a learner-PII-free surface: the audit receipt is
+    projected through the learner boundary like every completion
+    receipt (_journalable_result keeps a withheld marker when the
+    boundary itself refuses, since the audit record MUST be
+    journaled).
     """
     audit_id = "evt-" + uuid.uuid4().hex[:12]
     steps = list(getattr(exc, "evidence", None) or [])
+    audit_result = {"payload": {"uncertain": True},
+                    "receipt": {"uncertain": True,
+                                "detail": _provider_detail(exc, 500),
+                                "steps": steps},
+                    "truncated": False, "bytes_received": 0}
+    audit_result = _journalable_result(
+        _projection_entry(entry, url, steps), audit_result, tenant_base)
     record = {
         "op_id": op_id,          # the reserved id, still claimed; NOT consumed
         "event_id": audit_id,    # this record's own unique journal id
@@ -9299,11 +9334,8 @@ def _journal_write_failure_audit(entry_name, kind, effects, params, plan,
             "invoked (%s); journaled for reconciliation; op_id %s remains "
             "claimed" % (type(exc).__name__, op_id),
             DEFAULT_REDACT_PATTERNS),
-        "receipt": redact_payload({
-            "uncertain": True,
-            "detail": _provider_detail(exc, 500),
-            "steps": steps,
-        }, DEFAULT_REDACT_PATTERNS),
+        "receipt": redact_payload(audit_result["receipt"],
+                                  DEFAULT_REDACT_PATTERNS),
         "truncated": False,
         "bytes_received": 0,
         "attempts": getattr(exc, "attempts", None) or 0,
@@ -9999,7 +10031,22 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
         result = apply_result_block(entry, raw, resp_headers)
     except UncertainWrite as exc:
         # The undo's effect is uncertain: journal it as such so the
-        # journal tells the truth about the write, then re-raise.
+        # journal tells the truth about the write, then re-raise. The
+        # journal is a learner-PII-free surface: project the
+        # verification and receipt through the learner boundary like
+        # the dispatch uncertain path.
+        undo_view = _projection_entry(entry, url, None)
+        undo_verification = _project_verification_detail(
+            undo_view, {"status": "uncertain",
+                        "detail": _provider_detail(exc)},
+            None, tenant_base, entry.get("name"))
+        undo_uncertain_result = _journalable_result(
+            undo_view,
+            {"payload": {"uncertain": True},
+             "receipt": {"uncertain": True,
+                         "detail": _provider_detail(exc, 500)},
+             "truncated": False, "bytes_received": 0},
+            tenant_base)
         record = {
             "op_id": undo_op_id,
             "entry_name": entry.get("name"),
@@ -10013,9 +10060,8 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
             "after_state_digest": None,
             "verification": "uncertain",
             "verification_detail": redact_payload(
-                _provider_detail(exc), DEFAULT_REDACT_PATTERNS),
-            "receipt": redact_payload({"uncertain": True,
-                                       "detail": _provider_detail(exc, 500)},
+                undo_verification.get("detail"), DEFAULT_REDACT_PATTERNS),
+            "receipt": redact_payload(undo_uncertain_result["receipt"],
                                       DEFAULT_REDACT_PATTERNS),
             "truncated": False,
             "bytes_received": 0,
@@ -10051,6 +10097,14 @@ def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
             except DuplicateOpId:
                 pass
         raise
+    # The journal is a learner-PII-free surface: project the undo
+    # receipt through the learner boundary like the dispatch success
+    # path. Learner-bearing undos are refused at admission, so this is
+    # normally a pass-through; it keeps the journal layer's contract
+    # even if that gate ever relaxes.
+    result = _journalable_result(
+        _projection_entry(entry, url, result.get("payload")),
+        result, tenant_base)
     record = {
         "op_id": undo_op_id,
         "entry_name": entry.get("name"),

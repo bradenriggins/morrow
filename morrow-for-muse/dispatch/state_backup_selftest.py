@@ -21,6 +21,7 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
 from dispatch import state_backup as sb  # noqa: E402
+from dispatch import admission as adm  # noqa: E402
 
 PASS = []
 FAIL = []
@@ -57,8 +58,8 @@ for bad in ("../evil", "sub/../../evil", "/abs/path", "", ".",
 fixture = os.path.join(REPO, "dispatch", ".selftest-state-backup")
 shutil.rmtree(fixture, ignore_errors=True)
 os.makedirs(os.path.join(fixture, "journal"))
-manifest = {
-    "format": 1,
+manifest = adm._seal_record({
+    "format": sb._FORMAT_VERSION,
     "created_at": "2026-09-22T00:00:00Z",
     "tree_id": "selftest",
     "contains_secrets": True,
@@ -66,7 +67,7 @@ manifest = {
         "journal": {"absent": False,
                     "files": {"../../pwned.txt": "0" * 64}},
     },
-}
+})
 try:
     with open(os.path.join(fixture, "manifest.json"), "w",
               encoding="utf-8") as fh:
@@ -83,6 +84,106 @@ try:
           not os.path.exists(os.path.join(REPO, "pwned.txt")))
 finally:
     shutil.rmtree(fixture, ignore_errors=True)
+
+# 4. The manifest seal is mandatory: unsealed and tampered manifests
+# are refused before any file check runs, so a manifest that silently
+# omits files (or retargets hashes) never reaches verify/restore.
+def _sealed_fixture(files):
+    base = {
+        "format": sb._FORMAT_VERSION,
+        "created_at": "2026-09-22T00:00:00Z",
+        "tree_id": "selftest",
+        "contains_secrets": True,
+        "sets": {"journal": {"absent": False, "files": dict(files)}},
+    }
+    return adm._seal_record(base)
+
+
+def _write_fixture(manifest):
+    root = os.path.join(REPO, "dispatch", ".selftest-state-backup-seal")
+    shutil.rmtree(root, ignore_errors=True)
+    os.makedirs(os.path.join(root, "journal"))
+    with open(os.path.join(root, "manifest.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump(manifest, fh)
+    return root
+
+
+# Unsealed: no "sig" at all.
+root = _write_fixture({k: v for k, v in
+                       _sealed_fixture({}).items() if k != "sig"})
+try:
+    sb.verify_backup(root)
+    check("verify_backup refuses an unsealed manifest", False,
+          "no exception")
+except RuntimeError as exc:
+    check("verify_backup refuses an unsealed manifest",
+          "seal" in str(exc), str(exc)[:80])
+finally:
+    shutil.rmtree(root, ignore_errors=True)
+# Tampered: sealed, then a file silently omitted from the manifest.
+sealed = _sealed_fixture({"ops.jsonl": "0" * 64, "skipped.jsonl": "1" * 64})
+del sealed["sets"]["journal"]["files"]["skipped.jsonl"]
+root = _write_fixture(sealed)
+try:
+    sb.verify_backup(root)
+    check("verify_backup refuses a manifest with omitted files", False,
+          "no exception")
+except RuntimeError as exc:
+    check("verify_backup refuses a manifest with omitted files",
+          "seal" in str(exc), str(exc)[:80])
+finally:
+    shutil.rmtree(root, ignore_errors=True)
+# Tampered: sealed, then a hash retargeted.
+sealed = _sealed_fixture({"ops.jsonl": "0" * 64})
+sealed["sets"]["journal"]["files"]["ops.jsonl"] = "f" * 64
+root = _write_fixture(sealed)
+try:
+    sb.verify_backup(root)
+    check("verify_backup refuses a manifest with a retargeted hash",
+          False, "no exception")
+except RuntimeError as exc:
+    check("verify_backup refuses a manifest with a retargeted hash",
+          "seal" in str(exc), str(exc)[:80])
+finally:
+    shutil.rmtree(root, ignore_errors=True)
+
+# 5. Disaster recovery: with the live signing key gone (the home this
+# backup restores was lost), the manifest verifies against the keyring
+# carried inside the backup; tampering is still refused.
+_saved_key_path = adm.SIGNING_KEY_PATH
+try:
+    sealed = _sealed_fixture({"ops.jsonl": "0" * 64})
+    root = _write_fixture(sealed)
+    try:
+        os.makedirs(os.path.join(root, "secrets"))
+        shutil.copyfile(_saved_key_path,
+                        os.path.join(root, "secrets",
+                                     "approval-signing.key"))
+        adm.SIGNING_KEY_PATH = os.path.join(
+            root, "no-live-key", "approval-signing.key")
+        try:
+            loaded = sb._load_manifest(root)
+            check("DR fallback verifies against the backup keyring",
+                  loaded.get("sig") == sealed["sig"])
+        except RuntimeError as exc:
+            check("DR fallback verifies against the backup keyring", False,
+                  str(exc)[:80])
+        sealed["sets"]["journal"]["files"]["ops.jsonl"] = "f" * 64
+        with open(os.path.join(root, "manifest.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(sealed, fh)
+        try:
+            sb._load_manifest(root)
+            check("DR fallback refuses a tampered manifest", False,
+                  "no exception")
+        except RuntimeError as exc:
+            check("DR fallback refuses a tampered manifest",
+                  "seal" in str(exc), str(exc)[:80])
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+finally:
+    adm.SIGNING_KEY_PATH = _saved_key_path
 
 for name in PASS:
     print("  ok %s" % name)
