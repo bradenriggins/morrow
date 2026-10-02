@@ -1238,8 +1238,17 @@ test("the attempt store ignores a Windows access injection off Windows", async (
     platform: "darwin",
     windowsPrivateAccess: denying.access
   });
-  const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
-  assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
+  if (process.platform === "win32") {
+    // A Windows host cannot verify POSIX privacy, so the store fails closed. The injection
+    // stays ignored either way: the refusal comes from the mode check, never the stub.
+    await assert.rejects(
+      () => store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT }),
+      /not private/
+    );
+  } else {
+    const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+    assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
+  }
   assert.deepEqual([denying.calls.directory, denying.calls.file, denying.calls.harden], [0, 0, 0]);
 });
 
