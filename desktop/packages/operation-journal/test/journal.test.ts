@@ -145,6 +145,55 @@ describe("GatewayOperationJournal", () => {
     journal.close();
   });
 
+  it("matches a generation wildcard exactly, never a sibling binding through LIKE metacharacters", () => {
+    let causalSequence = 40;
+    const journal = new GatewayOperationJournal({
+      path: ":memory:",
+      nextCausalSequence: () => ++causalSequence,
+    });
+    const targetIdentityDigest = "d".repeat(64);
+    const actorDigest = "e".repeat(64);
+    const upstreamResultDigest = "b".repeat(64);
+    const deliverRead = (sourceBindingId: string) => {
+      const prepared = journal.prepare({
+        ...input(),
+        publicToolName: "read_page",
+        sourceToolName: "read_page",
+        sourceOperationId: undefined,
+        idempotencyKey: undefined,
+        readOnly: true,
+        sourceBindingId,
+        targetIdentityDigest,
+        actorDigest,
+      });
+      journal.markDispatched(prepared.record.operationId);
+      journal.recordResponse(prepared.record.operationId, {
+        upstreamResultDigest,
+        normalizedResultDigest: "c".repeat(64),
+        responseSucceeded: true,
+      });
+      return journal.recordPublicReadDelivered(prepared.record.operationId);
+    };
+    const evidence = (sourceBindingPattern?: string) => journal.findSuccessfulReadEvidence({
+      sourceId: "morrow-legacy",
+      sourceBindingId: "canvas:course_1:g1:peer",
+      ...(sourceBindingPattern ? { sourceBindingPattern } : {}),
+      targetIdentityDigest,
+      actorDigest,
+      upstreamResultDigest,
+      afterCausalSequence: 40,
+      matchActorDigest: false,
+    });
+    // A sibling binding that differs exactly where the `_` sits must not
+    // match, even though `_` is a LIKE single-character wildcard.
+    deliverRead("canvas:courseX1:g9:peer");
+    expect(evidence("canvas:course_1:g%:peer")).toBeNull();
+    // The same person, site and course on a new connection generation matches.
+    const reconnected = deliverRead("canvas:course_1:g9:peer");
+    expect(evidence("canvas:course_1:g%:peer")?.operationId).toBe(reconnected.operationId);
+    journal.close();
+  });
+
   it("recovers prepared and dispatched operations without replay", () => {
     const root = mkdtempSync(join(tmpdir(), "morrow-journal-"));
     roots.push(root);

@@ -1643,8 +1643,22 @@ export class MorrowRuntime {
       isJsonObject(child.operation) && child.operation.state === "awaiting_approval"
     ));
     if (awaiting.length === 0) throw new Error("batch has no child ready for approval");
-    for (const child of awaiting) {
-      this.gateway.approveOperation(String((child.operation as JsonObject).operationId));
+    const operationIds = awaiting.map((child) => String((child.operation as JsonObject).operationId));
+    // The review promises approval includes every change shown. A child whose
+    // grant expired after the preview was read must fail the whole batch
+    // before anything is approved, never leave a silently approved subset.
+    for (const operationId of operationIds) {
+      const current = this.gateway.operationGet(operationId);
+      if (current.state !== "awaiting_approval") {
+        throw new Error("batch approval preview does not cover every target");
+      }
+      if (!current.approvalExpiresAt || Date.parse(String(current.approvalExpiresAt)) <= Date.now()) {
+        throw new Error("batch approval preview expired");
+      }
+    }
+    for (const operationId of operationIds) {
+      const approved = this.gateway.approveOperation(operationId);
+      if (approved.state !== "approved") throw new Error("batch approval preview expired");
     }
     return this.batchApprovalGet(batchId);
   }

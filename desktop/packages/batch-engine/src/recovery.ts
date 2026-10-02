@@ -96,6 +96,7 @@ interface ChildRow {
   source_tool_name: string;
   source_operation_id: string | null;
   gateway_operation_id: string | null;
+  gateway_operation_state: string | null;
   state: string;
   request_digest: string;
   request_ciphertext: string;
@@ -599,6 +600,17 @@ function childDecision(
     };
   }
 
+  // A staged child is bound to its outer effect at creation, and that binding
+  // is the only handle its settlement, approval and dispatch records share.
+  // Recovery evidence comes from the inner journal operation, but writing the
+  // inner id over the binding would orphan the outer effect, so a child that
+  // already has a binding keeps it (with the last outer state stored with it).
+  // Only a child with no binding at all records the inner operation as its lead.
+  const boundOperationId = child.gateway_operation_id || null;
+  const boundOperationState = child.gateway_operation_state || null;
+  const evidenceOperationId = (operationId: string): string => boundOperationId || operationId;
+  const evidenceOperationState = (state: string): string | null => boundOperationId ? boundOperationState : state;
+
   if (operation?.state === "response_received" && operation.source_task_id) {
     return {
       childId: child.child_id,
@@ -607,8 +619,8 @@ function childDecision(
       sourceToolName: child.source_tool_name,
       sourceOperationId: child.source_operation_id,
       action: "source_task_recovered",
-      gatewayOperationId: operation.operation_id,
-      gatewayOperationState: operation.state,
+      gatewayOperationId: evidenceOperationId(operation.operation_id),
+      gatewayOperationState: evidenceOperationState(operation.state),
       sourceTaskId: operation.source_task_id,
       sourceResultState: operation.source_result_state,
       detailDigest: sha256Text("source_task_recovered_from_gateway_operation"),
@@ -623,8 +635,8 @@ function childDecision(
       sourceToolName: child.source_tool_name,
       sourceOperationId: child.source_operation_id,
       action: "failed_before_send",
-      gatewayOperationId: operation.operation_id,
-      gatewayOperationState: operation.state,
+      gatewayOperationId: evidenceOperationId(operation.operation_id),
+      gatewayOperationState: evidenceOperationState(operation.state),
       sourceTaskId: null,
       sourceResultState: operation.source_result_state,
       detailDigest: operation.error_digest || sha256Text("gateway_failed_before_send"),
@@ -638,8 +650,8 @@ function childDecision(
     sourceToolName: child.source_tool_name,
     sourceOperationId: child.source_operation_id,
     action: "inspection_required",
-    gatewayOperationId: operation?.operation_id || null,
-    gatewayOperationState: operation?.state || null,
+    gatewayOperationId: operation ? evidenceOperationId(operation.operation_id) : boundOperationId,
+    gatewayOperationState: operation ? evidenceOperationState(operation.state) : boundOperationState,
     sourceTaskId: operation?.source_task_id || null,
     sourceResultState: operation?.source_result_state || null,
     detailDigest: operation?.error_digest || sha256Text(
