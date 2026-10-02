@@ -6,6 +6,11 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  INSTALL_LEASE_ACQUIRE_TIMEOUT_MS,
+  INSTALL_LEASE_COMMIT_TIMEOUT_MS,
+  INSTALL_QUIT_TIMEOUT_MS,
+  STALE_TEMP_SWEEP_MS,
+  UPDATE_ATTEMPT_LOCK_FILE,
   UPDATE_CHECK_TIMEOUT_MS,
   UPDATE_DOWNLOAD_TIMEOUT_MS,
   createUpdateAttemptStore,
@@ -107,6 +112,10 @@ function memoryAttempts(record = null, { onWrite = () => {}, unreadable = false,
 
 function settle() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function enabledPolicy(extra = {}) {
@@ -770,7 +779,7 @@ test("a download that fails for lack of space reports the volume instead of a ge
 test("the update attempt store owns one private record it can write, read back, and prove removed", async () => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-"));
   const stateDirectory = path.join(root, "State");
-  const store = createUpdateAttemptStore({ stateDirectory });
+  const store = createUpdateAttemptStore({ stateDirectory, ...hostStoreOptions(root) });
   const file = path.join(stateDirectory, "update-attempt.json");
   assert.deepEqual(await store.read(), { status: "absent", record: null, reason: null });
 
@@ -1083,7 +1092,7 @@ test("repair removes a damaged attempt record so checks work again", async (t) =
   const file = path.join(stateDirectory, "update-attempt.json");
   fs.writeFileSync(file, "{ not json");
   if (process.platform !== "win32") fs.chmodSync(file, 0o600);
-  const attempts = createUpdateAttemptStore({ stateDirectory });
+  const attempts = createUpdateAttemptStore({ stateDirectory, ...hostStoreOptions(root) });
   assert.equal((await attempts.read()).status, "damaged");
 
   const adapter = createAdapter();
@@ -1134,7 +1143,7 @@ test("the attempt store removes only a damaged record through clearDamaged", asy
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-clear-"));
   t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
   const stateDirectory = path.join(root, "State");
-  const store = createUpdateAttemptStore({ stateDirectory });
+  const store = createUpdateAttemptStore({ stateDirectory, ...hostStoreOptions(root) });
   const file = path.join(stateDirectory, "update-attempt.json");
   assert.equal(await store.clearDamaged(), true);
 
@@ -1149,6 +1158,11 @@ test("the attempt store removes only a damaged record through clearDamaged", asy
   assert.equal(fs.existsSync(file), false);
   assert.deepEqual(await store.read(), { status: "absent", record: null, reason: null });
 });
+
+function hostStoreOptions(root) {
+  if (process.platform !== "win32") return {};
+  return { platform: "win32", trustedRoot: root, windowsPrivateAccess: windowsAccessStub().access };
+}
 
 function windowsAccessStub({ directory = true, file = true, harden = true } = {}) {
   const calls = { directory: 0, file: 0, harden: 0, options: [] };
@@ -1217,14 +1231,27 @@ test("the attempt store enforces Windows access control instead of relying on st
   );
 });
 
-test("the attempt store keeps shape-only Windows checks without an access injection", async (t) => {
+test("the attempt store requires the access injection on win32 and fails closed without it", async (t) => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-win32-plain-"));
   t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
   const stateDirectory = path.join(root, "State");
-  const store = createUpdateAttemptStore({ stateDirectory, platform: "win32" });
-  const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
-  assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
-  assert.equal(await store.clear(written), true);
+  // Without the injection there is no ACL check and no hardening on win32, so
+  // the store refuses to exist instead of keeping shape-only checks.
+  assert.throws(
+    () => createUpdateAttemptStore({ stateDirectory, platform: "win32" }),
+    /windows access is required/
+  );
+  assert.throws(
+    () => createUpdateAttemptStore({ stateDirectory, platform: "win32", windowsPrivateAccess: null }),
+    /windows access is required/
+  );
+  // Off Windows the injection stays optional: POSIX mode checks decide.
+  const store = createUpdateAttemptStore({ stateDirectory, platform: "darwin" });
+  if (process.platform !== "win32") {
+    const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+    assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
+    assert.equal(await store.clear(written), true);
+  }
 });
 
 test("the attempt store ignores a Windows access injection off Windows", async (t) => {
@@ -1261,4 +1288,360 @@ test("the attempt store refuses an incomplete Windows access injection", () => {
     () => createUpdateAttemptStore({ stateDirectory: path.join(os.tmpdir(), "State"), trustedRoot: "relative" }),
     /trustedRoot/
   );
+});
+
+test("two conditional writers with the same expectation serialize so exactly one wins", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-race-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const store = createUpdateAttemptStore({ stateDirectory, ...hostStoreOptions(root) });
+  const first = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  const left = store.write(
+    { fromVersion: "1.0.0", toVersion: "1.0.2", at: "2026-01-02T00:00:00.000Z" },
+    { expected: first }
+  );
+  const right = store.write(
+    { fromVersion: "1.0.0", toVersion: "1.0.3", at: "2026-01-03T00:00:00.000Z" },
+    { expected: first }
+  );
+  const outcomes = await Promise.allSettled([left, right]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  assert.match(outcomes.find((outcome) => outcome.status === "rejected").reason.message, /ownership changed/);
+  const final = await store.read();
+  assert.equal(final.status, "valid");
+  assert.ok(["1.0.2", "1.0.3"].includes(final.record.toVersion));
+});
+
+test("a conditional write queued on the lock observes the record committed while it waited", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-queued-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const file = path.join(stateDirectory, "update-attempt.json");
+  const store = createUpdateAttemptStore({ stateDirectory, ...hostStoreOptions(root) });
+  const first = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  const lockPath = path.join(stateDirectory, UPDATE_ATTEMPT_LOCK_FILE);
+  fs.writeFileSync(lockPath, "test-holder\n");
+  const pending = store.write(
+    { fromVersion: "1.0.0", toVersion: "1.0.2", at: "2026-01-02T00:00:00.000Z" },
+    { expected: first }
+  );
+  await sleep(50);
+  const committed = { schema: ATTEMPT_SCHEMA, fromVersion: "1.0.0", toVersion: "1.0.9", at: "2026-01-09T00:00:00.000Z" };
+  fs.writeFileSync(file, `${JSON.stringify(committed)}\n`, { mode: 0o600 });
+  if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+  fs.rmSync(lockPath);
+  await assert.rejects(pending, /ownership changed/);
+  assert.deepEqual((await store.read()).record, committed);
+});
+
+test("clear re-verifies identity under the lock and keeps a record written while it waited", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-clear-race-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const file = path.join(stateDirectory, "update-attempt.json");
+  const store = createUpdateAttemptStore({ stateDirectory, ...hostStoreOptions(root) });
+  const first = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  const lockPath = path.join(stateDirectory, UPDATE_ATTEMPT_LOCK_FILE);
+  fs.writeFileSync(lockPath, "test-holder\n");
+  const pending = store.clear(first);
+  await sleep(50);
+  const replacement = { schema: ATTEMPT_SCHEMA, fromVersion: "1.0.0", toVersion: "1.0.2", at: "2026-01-02T00:00:00.000Z" };
+  fs.writeFileSync(file, `${JSON.stringify(replacement)}\n`, { mode: 0o600 });
+  if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+  fs.rmSync(lockPath);
+  assert.equal(await pending, false);
+  assert.deepEqual((await store.read()).record, replacement);
+});
+
+test("clearDamaged keeps a valid record written while it waited on the lock", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-cleardamaged-race-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const file = path.join(stateDirectory, "update-attempt.json");
+  const store = createUpdateAttemptStore({ stateDirectory, ...hostStoreOptions(root) });
+  await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  fs.writeFileSync(file, "{ not json");
+  assert.equal((await store.read()).status, "damaged");
+  const lockPath = path.join(stateDirectory, UPDATE_ATTEMPT_LOCK_FILE);
+  fs.writeFileSync(lockPath, "test-holder\n");
+  const pending = store.clearDamaged();
+  await sleep(50);
+  const replacement = { schema: ATTEMPT_SCHEMA, fromVersion: "1.0.0", toVersion: "1.0.2", at: "2026-01-02T00:00:00.000Z" };
+  fs.writeFileSync(file, `${JSON.stringify(replacement)}\n`, { mode: 0o600 });
+  if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+  fs.rmSync(lockPath);
+  assert.equal(await pending, false);
+  assert.deepEqual((await store.read()).record, replacement);
+});
+
+test("clearDamaged unlinks only the same damaged identity it verified", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-identity-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const file = path.join(stateDirectory, "update-attempt.json");
+  const store = createUpdateAttemptStore({ stateDirectory, ...hostStoreOptions(root) });
+  await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  fs.writeFileSync(file, "{ not json");
+  assert.equal((await store.read()).status, "damaged");
+  const lockPath = path.join(stateDirectory, UPDATE_ATTEMPT_LOCK_FILE);
+  fs.writeFileSync(lockPath, "test-holder\n");
+  const pending = store.clearDamaged();
+  // The head start lets the queued call finish its first read of the original
+  // damage before the swap lands; the sizes differ so the identity check
+  // cannot mistake one for the other even within one mtime tick.
+  await sleep(50);
+  const swapped = "{ not json, replaced while queued, longer";
+  fs.writeFileSync(file, swapped);
+  fs.rmSync(lockPath);
+  assert.equal(await pending, false);
+  assert.equal(fs.readFileSync(file, "utf8"), swapped);
+  // The next repair pass re-verifies the new identity from scratch and
+  // removes it.
+  assert.equal(await store.clearDamaged(), true);
+  assert.equal(fs.existsSync(file), false);
+});
+
+test("a hung lease acquisition times out to deferred and releases the shared install promise", async () => {
+  const clock = testClock();
+  let acquisitions = 0;
+  const releases = [];
+  const adapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy(),
+    clock,
+    acquireRestartLease: () => { acquisitions += 1; return new Promise(() => {}); },
+    releaseRestartLease: async (leaseId) => { releases.push(leaseId); },
+    commitRestartLease: async () => ({ status: "closing" })
+  });
+  await controller.check();
+  await settle();
+  assert.equal(controller.snapshot().status, "ready");
+  const pending = controller.installWhenIdle();
+  await settle();
+  assert.equal(acquisitions, 1);
+  clock.fireTimeout(INSTALL_LEASE_ACQUIRE_TIMEOUT_MS);
+  const result = await pending;
+  assert.equal(result.status, "ready");
+  assert.equal(result.reason, "active_or_uncertain_operations");
+  assert.equal(adapter.installs, 0);
+  assert.deepEqual(releases, []);
+  // The wedge is gone: a second attempt acquires again instead of joining a
+  // promise that can never settle.
+  const retry = controller.installWhenIdle();
+  await settle();
+  assert.equal(acquisitions, 2);
+  clock.fireTimeout(INSTALL_LEASE_ACQUIRE_TIMEOUT_MS);
+  await retry;
+  controller.stop();
+});
+
+test("a lease grant that arrives after acquisition expiry is released instead of used", async () => {
+  const clock = testClock();
+  const gate = deferred();
+  const releases = [];
+  const adapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy(),
+    clock,
+    acquireRestartLease: () => gate.promise,
+    releaseRestartLease: async (leaseId) => { releases.push(leaseId); },
+    commitRestartLease: async () => ({ status: "closing" })
+  });
+  await controller.check();
+  await settle();
+  const pending = controller.installWhenIdle();
+  await settle();
+  clock.fireTimeout(INSTALL_LEASE_ACQUIRE_TIMEOUT_MS);
+  const result = await pending;
+  assert.equal(result.reason, "active_or_uncertain_operations");
+  gate.resolve({ status: "granted", leaseId: "late-lease" });
+  await settle();
+  await settle();
+  assert.deepEqual(releases, ["late-lease"]);
+  assert.equal(adapter.installs, 0);
+  controller.stop();
+});
+
+test("a hung lease commit times out, releases the lease, and clears the attempt record", async () => {
+  const clock = testClock();
+  const attempts = memoryAttempts();
+  const releases = [];
+  let acquisitions = 0;
+  const adapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy(),
+    clock,
+    updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
+    acquireRestartLease: async () => { acquisitions += 1; return { status: "granted", leaseId: "hung-commit-lease" }; },
+    releaseRestartLease: async (leaseId) => { releases.push(leaseId); },
+    commitRestartLease: () => new Promise(() => {})
+  });
+  await controller.check();
+  await settle();
+  const pending = controller.installWhenIdle();
+  await settle();
+  await settle();
+  assert.notEqual(attempts.record, null);
+  clock.fireTimeout(INSTALL_LEASE_COMMIT_TIMEOUT_MS);
+  const result = await pending;
+  assert.equal(result.status, "ready");
+  assert.equal(result.reason, "update_install_failed");
+  assert.equal(result.availableVersion, "1.0.1");
+  assert.equal(adapter.installs, 0);
+  assert.deepEqual(releases, ["hung-commit-lease"]);
+  assert.equal(attempts.record, null);
+  const retry = controller.installWhenIdle();
+  await settle();
+  await settle();
+  assert.equal(acquisitions, 2);
+  clock.fireTimeout(INSTALL_LEASE_COMMIT_TIMEOUT_MS);
+  await retry;
+  controller.stop();
+});
+
+test("a hung updater handoff times out but keeps the committed lease and attempt record", async () => {
+  const clock = testClock();
+  const attempts = memoryAttempts();
+  const releases = [];
+  const adapter = createAdapter({
+    check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }),
+    install: () => new Promise(() => {})
+  });
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy(),
+    clock,
+    updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
+    acquireRestartLease: async () => ({ status: "granted", leaseId: "committed-lease" }),
+    releaseRestartLease: async (leaseId) => { releases.push(leaseId); },
+    commitRestartLease: async () => ({ status: "closing" })
+  });
+  await controller.check();
+  await settle();
+  const pending = controller.installWhenIdle();
+  await settle();
+  await settle();
+  assert.equal(controller.snapshot().status, "installing");
+  clock.fireTimeout(INSTALL_QUIT_TIMEOUT_MS);
+  const result = await pending;
+  assert.equal(result.status, "installing");
+  assert.equal(result.reason, "update_install_failed");
+  assert.equal(adapter.installs, 1);
+  assert.deepEqual(releases, []);
+  assert.notEqual(attempts.record, null);
+  controller.stop();
+});
+
+test("an unverified runtime after an update blocks with an explicit reason instead of stale status", async () => {
+  const record = { schema: ATTEMPT_SCHEMA, fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT };
+  const attempts = memoryAttempts({ ...record });
+  const adapter = createAdapter({ currentVersion: "1.0.1" });
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy(),
+    updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => ({ status: "unverified" }),
+    ...grantedRestartLease(),
+    clock: testClock()
+  });
+  const result = await controller.start();
+  assert.equal(result.status, "error");
+  assert.equal(result.reason, "update_runtime_unverified");
+  assert.equal(result.availableVersion, null);
+  assert.deepEqual(attempts.record, record);
+  assert.equal(adapter.checks, 0);
+  controller.stop();
+});
+
+test("the win32 commit path leaves no lock or temporary file behind", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-win32-commit-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const store = createUpdateAttemptStore({
+    stateDirectory,
+    trustedRoot: root,
+    platform: "win32",
+    windowsPrivateAccess: windowsAccessStub().access
+  });
+  const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
+  assert.equal(await store.clear(written), true);
+  assert.deepEqual(fs.readdirSync(stateDirectory), []);
+});
+
+test("the win32 read path refuses a swapped-in symlink without O_NOFOLLOW", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-win32-swap-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  fs.mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
+  const file = path.join(stateDirectory, "update-attempt.json");
+  const external = path.join(root, "external-attempt.json");
+  const record = { schema: ATTEMPT_SCHEMA, fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT };
+  fs.writeFileSync(external, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  try {
+    fs.symlinkSync(external, file);
+  } catch {
+    t.skip("this host forbids symlink creation");
+    return;
+  }
+  const store = createUpdateAttemptStore({
+    stateDirectory,
+    trustedRoot: root,
+    platform: "win32",
+    windowsPrivateAccess: windowsAccessStub().access
+  });
+  // The link is refused before the open, and the post-open size/mtime identity
+  // check behind it is what stays valid on Windows, where O_NOFOLLOW cannot.
+  assert.deepEqual(await store.read(), { status: "damaged", record: null, reason: "update_attempt_not_private" });
+});
+
+test("a write sweeps stale temporary files and keeps fresh, foreign, and non-file entries", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-sweep-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  fs.mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
+  const file = path.join(stateDirectory, "update-attempt.json");
+  const stale = `${file}.tmp-00000000-0000-0000-0000-000000000000`;
+  fs.writeFileSync(stale, "partial write from a crashed process");
+  const ancient = new Date(Date.now() - STALE_TEMP_SWEEP_MS - 60 * 1000);
+  fs.utimesSync(stale, ancient, ancient);
+  const fresh = `${file}.tmp-11111111-1111-1111-1111-111111111111`;
+  fs.writeFileSync(fresh, "a concurrent writer's file");
+  const foreign = path.join(stateDirectory, "notes.txt");
+  fs.writeFileSync(foreign, "not this record's temporary file");
+  const directory = `${file}.tmp-a-directory`;
+  fs.mkdirSync(directory);
+  let link = null;
+  try {
+    link = `${file}.tmp-a-link`;
+    fs.symlinkSync(foreign, link);
+  } catch {
+    link = null;
+  }
+  const store = createUpdateAttemptStore({ stateDirectory, ...hostStoreOptions(root) });
+  const written = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  assert.deepEqual(await store.read(), { status: "valid", record: written, reason: null });
+  assert.equal(fs.existsSync(stale), false);
+  assert.equal(fs.existsSync(fresh), true);
+  assert.equal(fs.existsSync(foreign), true);
+  assert.equal(fs.existsSync(directory), true);
+  if (link) assert.equal(fs.existsSync(link), true);
+});
+
+test("an over-large group-readable record reports the privacy failure before its size", { skip: process.platform === "win32" ? "POSIX modes" : false }, async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "morrow-update-attempt-oversize-"));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  fs.mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
+  const file = path.join(stateDirectory, "update-attempt.json");
+  fs.writeFileSync(file, Buffer.alloc(4 * 1024 + 1, 0x20), { mode: 0o644 });
+  const store = createUpdateAttemptStore({ stateDirectory });
+  assert.deepEqual(await store.read(), { status: "damaged", record: null, reason: "update_attempt_not_private" });
+  fs.chmodSync(file, 0o600);
+  assert.deepEqual(await store.read(), { status: "damaged", record: null, reason: "update_attempt_too_large" });
 });

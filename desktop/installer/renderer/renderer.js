@@ -248,7 +248,7 @@ function renderUpdates(current) {
   if (updates?.schema === "morrow.desktop-update.v1" && updates.status === "unavailable") {
     updatesPanel.hidden = false;
     updatesCopy.textContent = "This copy of Morrow does not update itself. Get newer versions from meetmorrow.app/download.";
-    renderUpdateActions("");
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="open-download-page">Open download page</button>');
     return;
   }
   if (!updates || updates.schema !== "morrow.desktop-update.v1") {
@@ -306,6 +306,41 @@ function renderUpdates(current) {
   }
   if (updates.reason === "disk_space_unavailable") {
     updatesCopy.textContent = "Morrow could not download the update: this computer does not have enough free space for it.";
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>');
+    return;
+  }
+  if (updates.reason === "update_attempt_repair_required" || (typeof updates.reason === "string" && updates.reason.startsWith("update_attempt_"))) {
+    updatesCopy.textContent = "Morrow could not check for an update because its update record needs repair. Repair Morrow to fix it.";
+    renderUpdateActions('<button class="primary-button" type="button" data-action="repair">Repair Morrow</button>');
+    return;
+  }
+  if (updates.reason === "update_runtime_unverified") {
+    updatesCopy.textContent = "Morrow updated but could not verify its course tools. Repair Morrow, then check again.";
+    renderUpdateActions('<button class="primary-button" type="button" data-action="repair">Repair Morrow</button>');
+    return;
+  }
+  if (updates.reason === "update_verification_failed") {
+    updatesCopy.textContent = "Morrow could not verify the update. Get a fresh copy from meetmorrow.app/download.";
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="open-download-page">Open download page</button>');
+    return;
+  }
+  if (updates.reason === "update_check_failed" || updates.reason === "update_check_timeout") {
+    updatesCopy.textContent = "Morrow could not reach the update server. Try again.";
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>');
+    return;
+  }
+  if (updates.reason === "update_download_failed" || updates.reason === "update_download_timeout") {
+    updatesCopy.textContent = "Morrow could not download the update. Try again.";
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>');
+    return;
+  }
+  if (updates.reason === "update_install_failed") {
+    updatesCopy.textContent = "Morrow could not install the update. Try again when course work is idle.";
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>');
+    return;
+  }
+  if (updates.reason === "update_generation_mismatch" || updates.reason === "update_platform_mismatch" || updates.reason === "update_arch_mismatch" || updates.reason === "update_prerelease_unavailable" || (typeof updates.reason === "string" && updates.reason.startsWith("update_version_"))) {
+    updatesCopy.textContent = "Morrow found an update it cannot use. Try again.";
     renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>');
     return;
   }
@@ -792,7 +827,13 @@ async function handleAction(event) {
     else render(state);
     return;
   }
-  if (action === "check-bridge") {
+  if (action === "open-download-page") {
+    const next = await invoke("installer:open-download-page");
+    if (next) render(next);
+    else render(state);
+    return;
+  }
+  if (action === "check-bridge" || action === "update-bridge") {
     const next = await invoke("installer:reconcile-bridge");
     if (next) render(next);
     else render(state);

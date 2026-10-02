@@ -24,7 +24,8 @@ const { canonicalDirectory, exists, isComplete, mkdirPrivate, payloadLayout, win
  */
 const EXTERNAL_ADDRESSES = Object.freeze({
   storeListing: null,
-  support: "https://meetmorrow.app/support"
+  support: "https://meetmorrow.app/support",
+  download: "https://meetmorrow.app/download"
 });
 
 const PRODUCT_VERSION = app.getVersion();
@@ -125,7 +126,8 @@ function updaterCacheDirectory() {
  * may have skipped the runtime directory hardening below, so the store proves
  * the state directory and record private on every read and hardens the
  * directory before every write instead of relying on it. Without the gateway
- * module the store keeps its shape-only Windows checks.
+ * module the store refuses to start, and the update controller runs without
+ * attempt records instead of keeping the app from starting.
  */
 async function updateAttemptWindowsAccess() {
   if (process.platform !== "win32" || !installer) return null;
@@ -141,7 +143,7 @@ async function updateAttemptWindowsAccess() {
         hardenPrivateDirectory: gatewayCore.hardenPrivateDirectory
       };
     }
-  } catch { /* The attempt store then keeps its shape-only Windows checks. */ }
+  } catch { /* Without the checks the attempt store refuses to start; updates then run without attempt records. */ }
   return null;
 }
 
@@ -155,14 +157,22 @@ function createAppUpdateController(windowsPrivateAccess = null) {
     feedId: UPDATE_FEED.id,
     cacheDirectory: updaterCacheDirectory()
   });
-  return createUpdateController({
-    adapter,
-    policy: updatePolicy(),
-    updateAttempts: createUpdateAttemptStore({
+  let updateAttempts = null;
+  try {
+    updateAttempts = createUpdateAttemptStore({
       stateDirectory: payloadLayout(fixedPayloadRoot(), app.getPath("userData")).state,
       trustedRoot: app.getPath("userData"),
       windowsPrivateAccess
-    }),
+    });
+  } catch {
+    // The store refuses a state directory it cannot prove private. Updates
+    // then run without attempt records instead of keeping the app from
+    // starting; the panel carries the update states either way.
+  }
+  return createUpdateController({
+    adapter,
+    policy: updatePolicy(),
+    updateAttempts,
     confirmUpdatedRuntime,
     acquireRestartLease: async () => installer?.acquireRestartLease() || { status: "uncertain" },
     releaseRestartLease: async (leaseId) => {
@@ -970,8 +980,7 @@ async function startMorrow(lifecycle) {
     }
   });
   // Opens the support page in the person's default browser. The address
-  // comes only from the fixed allow list above, never from the renderer, and
-  // this is the one entry of it Morrow can open today (D5).
+  // comes only from the fixed allow list above, never from the renderer (D5).
   ipcMain.handle("installer:open-support", async (event, ...input) => {
     trusted(event);
     try {
@@ -981,6 +990,22 @@ async function startMorrow(lifecycle) {
     }
     try {
       await shell.openExternal(EXTERNAL_ADDRESSES.support);
+      return respond();
+    } catch {
+      return failed(errorDetails("external_open_failed"));
+    }
+  });
+  // Opens the download page in the person's default browser. The address
+  // comes only from the fixed allow list above, never from the renderer (D5).
+  ipcMain.handle("installer:open-download-page", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+    } catch (error) {
+      return failed(error);
+    }
+    try {
+      await shell.openExternal(EXTERNAL_ADDRESSES.download);
       return respond();
     } catch {
       return failed(errorDetails("external_open_failed"));

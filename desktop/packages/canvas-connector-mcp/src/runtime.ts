@@ -387,6 +387,7 @@ export class CanvasConnectorRuntime {
   readonly moodleCatalog: MoodleBrowserCatalog;
   readonly catalogDigest: string;
   readonly bridge: LoopbackBridgeServer;
+  readonly expectedRuntimeRevision: string;
   readonly operations: ReadonlyMap<string, ConnectorOperation>;
 
   private constructor(
@@ -394,12 +395,14 @@ export class CanvasConnectorRuntime {
     canvasBrowserCatalog: CanvasBrowserCatalog,
     moodleCatalog: MoodleBrowserCatalog,
     bridge: LoopbackBridgeServer,
+    expectedRuntimeRevision: string,
   ) {
     this.catalog = catalog;
     this.canvasBrowserCatalog = canvasBrowserCatalog;
     this.moodleCatalog = moodleCatalog;
     this.catalogDigest = bridgeCatalogDigest(catalog, canvasBrowserCatalog, moodleCatalog);
     this.bridge = bridge;
+    this.expectedRuntimeRevision = expectedRuntimeRevision;
     this.operations = new Map<string, ConnectorOperation>([
       ...[...canvasOperationMap(catalog)].map(([toolName, operation]) => [toolName, operation] as const),
       ...canvasBrowserCatalog.operations.map((operation) => [operation.toolName, operation] as const),
@@ -419,6 +422,7 @@ export class CanvasConnectorRuntime {
     const bridge = new LoopbackBridgeServer({
       token: config.token,
       expectedRuntimeRevision: config.runtimeRevision,
+      expectedExtensionVersion: config.extensionVersion ?? undefined,
       expectedCatalogDigest: catalogDigest,
       allowedExtensionIds: config.allowedExtensionIds,
       port: config.port,
@@ -435,7 +439,7 @@ export class CanvasConnectorRuntime {
       // The Morrow that holds the port is not touched.
       if (!(error instanceof BridgePortInUseError)) throw error;
     }
-    runtime = new CanvasConnectorRuntime(catalog, canvasBrowserCatalog, moodleCatalog, bridge);
+    runtime = new CanvasConnectorRuntime(catalog, canvasBrowserCatalog, moodleCatalog, bridge, config.runtimeRevision);
     return runtime;
   }
 
@@ -1202,11 +1206,11 @@ export class CanvasConnectorRuntime {
     }
     if (split.options.canvasContentGuard) {
       if (!supportedCanvasContentGuardOperation(operation, split.options.canvasContentGuard)
-        || this.bridge.health().runtimeRevision !== "1.0.0-rc.2") {
+        || this.bridge.health().runtimeRevision !== this.expectedRuntimeRevision) {
         return failedBeforeSend({ schema: "morrow.bridge.problem.v1", code: "canvas_content_guard_unavailable", message: "This Canvas content repair needs the current Morrow extension and a connected course.", recoverable: true }, provider);
       }
     }
-    if (split.options.pageGuard && (toolName !== "canvas_update_create_page_courses" || this.bridge.health().runtimeRevision !== "1.0.0-rc.2")) {
+    if (split.options.pageGuard && (toolName !== "canvas_update_create_page_courses" || this.bridge.health().runtimeRevision !== this.expectedRuntimeRevision)) {
       return failedBeforeSend({ schema: "morrow.bridge.problem.v1", code: "canvas_content_guard_unavailable", message: "This legacy Page correction needs the current Morrow extension and a connected course.", recoverable: true }, provider);
     }
     const canvasHold = isCanvasOperation(operation) && !operation.readOnly

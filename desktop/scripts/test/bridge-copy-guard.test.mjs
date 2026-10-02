@@ -250,7 +250,7 @@ test("pairing is a Morrow Bridge popup step with no page of its own", async () =
   assert.match(answer.contentType, /^application\/json/);
   assert.doesNotMatch(answer.body, /<html|Allow connection/i);
   const popup = readFileSync(new URL("../../connector/extension/popup/popup-view.js", import.meta.url), "utf8");
-  assert.match(popup, /Select Pair Morrow to connect this extension to Morrow\. Connecting does not approve changes to your courses\./);
+  assert.match(popup, /Select Pair Morrow to connect this extension to the Morrow app on this computer\. Connecting does not approve changes to your courses\./);
 });
 
 test("the approval result page states the result without a label above it", async () => {

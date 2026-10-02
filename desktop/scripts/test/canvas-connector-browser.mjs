@@ -2073,7 +2073,7 @@ try {
   const reopenedSetupGuide = await reopenedSetupPromise;
   await reopenedSetupGuide.waitForURL(`chrome-extension://${EXTENSION_ID}/onboarding/onboarding.html`);
   await reopenedSetupGuide.getByRole("heading", { name: "One step left", exact: true }).waitFor();
-  await reopenedSetupGuide.getByText("Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself.", { exact: true }).waitFor();
+  await reopenedSetupGuide.getByText("Morrow Bridge is paired with the Morrow app on this computer.", { exact: true }).waitFor();
   await reopenedSetupGuide.getByText("Morrow Bridge is connected to Morrow", { exact: true }).waitFor();
   await reopenedSetupGuide.getByText("Morrow matches this Morrow Bridge version and its list of course actions", { exact: true }).waitFor();
   await reopenedSetupGuide.getByText("3 selected courses are ready", { exact: true }).waitFor();

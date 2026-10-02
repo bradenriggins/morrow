@@ -3,14 +3,15 @@ import { mkdir, mkdtemp, rm, symlink, truncate, unlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { LoopbackBridgeServer, bridgePortInUseMessage } from "@morrow/bridge-loopback";
+import gatewayPackage from "../package.json" with { type: "json" };
 import { parseGatewayConfig } from "../src/config.js";
 import { createFullMorrowServer } from "../src/full-server.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
-import { GatewayRuntime, MAX_MCP_RUNTIME_MANIFEST_BYTES, mcpRuntimeHealthFromPayload } from "../src/runtime.js";
+import { GatewayRuntime, MAX_MCP_RUNTIME_MANIFEST_BYTES, mcpRuntimeHealthFromPayload, mcpRuntimeHealthOrErrorFromPayload, normalizeMcpRuntimeManifestError } from "../src/runtime.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
@@ -238,6 +239,98 @@ describe("packaged MCP runtime identity", () => {
       if (suppliedDigest === undefined) delete process.env.MORROW_MCP_RUNTIME_MANIFEST_SHA256;
       else process.env.MORROW_MCP_RUNTIME_MANIFEST_SHA256 = suppliedDigest;
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a corrupt manifest as an error, loudly, instead of looking like a checkout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "morrow-mcp-runtime-error-"));
+    const entrypointDirectory = join(root, "app", "packages", "mcp-server", "dist");
+    const manifestPath = join(root, "app", "mcp-runtime-manifest.json");
+    await mkdir(entrypointDirectory, { recursive: true });
+    const errors: unknown[][] = [];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => { errors.push(args); });
+    try {
+      // Absent: a source checkout, silent and error-free.
+      expect(mcpRuntimeHealthOrErrorFromPayload(entrypointDirectory)).toEqual({});
+      await writeFile(manifestPath, "{ not json");
+      const corrupt = mcpRuntimeHealthOrErrorFromPayload(entrypointDirectory);
+      expect(corrupt.health).toBeUndefined();
+      expect(corrupt.error).toEqual({ schema: "morrow.mcp-runtime.error.v1", code: "mcp_runtime_manifest_invalid" });
+      expect(errors).toHaveLength(1);
+      expect(String(errors[0]?.[0])).toContain("mcp_runtime_manifest_invalid");
+      expect(normalizeMcpRuntimeManifestError(corrupt.error)).toEqual(corrupt.error);
+      expect(normalizeMcpRuntimeManifestError({ schema: "morrow.mcp-runtime.error.v1", code: "nope" })).toBeUndefined();
+    } finally {
+      errorSpy.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes a corrupt manifest error in gateway health", async () => {
+    const config = parseGatewayConfig({
+      schema: "morrow.upstreams.v1",
+      profile: "private-full",
+      upstreams: [{
+        id: "meridian",
+        label: "ExamplePlatform fixture",
+        kind: "mcp-stdio",
+        command: process.execPath,
+        args: [fixturePath],
+        env: { FAKE_SOURCE: "meridian" },
+        priority: 100,
+        required: false,
+        enabled: true,
+        outputPrivacy: {
+          canvas_page_get: { allowedFields: ["source", "course_id"], dataClass: "course", maxRecords: 10, maxBytes: 2_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+        },
+      }],
+      filters: { excludePrefixes: [], excludeNames: [] },
+      operationJournal: { path: ":memory:" },
+      maxCatalogTools: 20,
+    });
+    const runtime = await GatewayRuntime.connect(config, {
+      mcpRuntimeError: { schema: "morrow.mcp-runtime.error.v1", code: "mcp_runtime_manifest_invalid" },
+    });
+    try {
+      expect(runtime.health()).toMatchObject({
+        mcpRuntimeError: { schema: "morrow.mcp-runtime.error.v1", code: "mcp_runtime_manifest_invalid" },
+      });
+      expect(runtime.health().mcpRuntime).toBeUndefined();
+    } finally {
+      await runtime.close();
+    }
+    await expect(GatewayRuntime.connect(config, {
+      mcpRuntimeError: { schema: "morrow.mcp-runtime.error.v1", code: "nope" } as never,
+    })).rejects.toThrow("MCP runtime error binding is invalid");
+  });
+
+  it("binds gateway health version to the gateway package version", async () => {
+    const config = parseGatewayConfig({
+      schema: "morrow.upstreams.v1",
+      profile: "private-full",
+      upstreams: [{
+        id: "meridian",
+        label: "ExamplePlatform fixture",
+        kind: "mcp-stdio",
+        command: process.execPath,
+        args: [fixturePath],
+        env: { FAKE_SOURCE: "meridian" },
+        priority: 100,
+        required: false,
+        enabled: true,
+        outputPrivacy: {
+          canvas_page_get: { allowedFields: ["source", "course_id"], dataClass: "course", maxRecords: 10, maxBytes: 2_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+        },
+      }],
+      filters: { excludePrefixes: [], excludeNames: [] },
+      operationJournal: { path: ":memory:" },
+      maxCatalogTools: 20,
+    });
+    const runtime = await GatewayRuntime.connect(config);
+    try {
+      expect(runtime.health().version).toBe(gatewayPackage.version);
+    } finally {
+      await runtime.close();
     }
   });
 });

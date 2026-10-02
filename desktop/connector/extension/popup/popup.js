@@ -33,8 +33,10 @@ const editAccessBanner = document.querySelector("#edit-access-banner");
 const editAccessBannerText = document.querySelector("#edit-access-banner-text");
 const askFirstAllCoursesButton = document.querySelector("#ask-first-all-courses");
 const reviewsWaiting = document.querySelector("#reviews-waiting");
+const reviewsWaitingTitle = document.querySelector("#reviews-waiting-title");
 const reviewsList = document.querySelector("#reviews-list");
 const coursesSection = document.querySelector("#courses");
+const coursesTitle = document.querySelector("#courses-title");
 const coursesList = document.querySelector("#courses-list");
 const allCoursesButton = document.querySelector("#all-courses");
 let current = null;
@@ -44,6 +46,8 @@ let readGeneration = 0;
 let detectedProvider = null;
 let editActive = [];
 let editBindings = [];
+let lastKnownReviews = [];
+let lastKnownEditBindings = [];
 let openPlatformProgressVisible = false;
 
 // Every failure the service worker answers carries its own code, and the popup keeps that code as
@@ -66,8 +70,14 @@ function escapeHtml(value) {
 
 // WI-2.4 (D1b): the reviews that wait. The Bridge never opens one by itself; a click opens the
 // named address, and reuses an already open tab at that address rather than collecting a second one.
+// On a version mismatch the queue would otherwise vanish: the last-known reviews stay visible,
+// labeled as possibly out of date, until the reload reconnects.
 function renderReviews(status) {
-  const reviews = pendingReviews(status);
+  const fresh = pendingReviews(status);
+  if (status?.connected === true && fresh.length > 0) lastKnownReviews = fresh;
+  const stale = runtimeNeedsReload(status) && fresh.length === 0 && lastKnownReviews.length > 0;
+  const reviews = stale ? lastKnownReviews : fresh;
+  reviewsWaitingTitle.textContent = stale ? "Waiting for your review (may be out of date)" : "Waiting for your review";
   reviewsWaiting.hidden = reviews.length === 0;
   reviewsList.innerHTML = reviews
     .map((review) => `<button type="button" class="secondary" data-review-url="${escapeHtml(review.url)}">${escapeHtml(reviewButtonLabel(review))}</button>`)
@@ -95,12 +105,24 @@ function renderEditBanner() {
 // below. The list needs no per-row action: opening or switching a course belongs to the primary
 // action and to Plan and Edit settings, not to this glance.
 function renderCourses() {
-  const { shown } = connectedCourseRows(editBindings);
+  const stale = runtimeNeedsReload(current) && editBindings.length === 0 && lastKnownEditBindings.length > 0;
+  const { shown } = connectedCourseRows(stale ? lastKnownEditBindings : editBindings);
+  coursesTitle.textContent = stale ? "Your courses (may be out of date)" : "Your courses";
   coursesSection.hidden = shown.length === 0 || current?.courseAccessMode === "account";
   coursesList.innerHTML = shown
     .map((row) => `<li class="course-row"><span class="course-row-name">${escapeHtml(row.name)}</span><span class="course-row-state">${escapeHtml(row.state)}</span></li>`)
     .join("");
   allCoursesButton.hidden = shown.length === 0;
+}
+
+// The mismatch step names this Bridge's own build without another round trip: the manifest
+// version is already here, while the version Morrow expects arrives only in the status the
+// worker returned, when it carries one (popup-view.js reads both from that status).
+function statusWithBridgeVersion(status) {
+  if (!status || typeof status !== "object" || typeof status.bridgeVersion === "string") return status;
+  const manifest = typeof chrome?.runtime?.getManifest === "function" ? chrome.runtime.getManifest() : null;
+  const version = typeof manifest?.version === "string" ? manifest.version.trim() : "";
+  return version ? { ...status, bridgeVersion: version } : status;
 }
 
 function render(status) {
@@ -169,12 +191,13 @@ function render(status) {
   // the setup guide above stays the way forward.
   reloadBridge.hidden = !runtimeNeedsReload(status);
   // WI-5.8: one primary action for the present tab. Reopening the saved course (closed) already has
-  // its own control above, and an already-connected course needs none, so primary is hidden in both,
-  // leaving "Pair Canvas account" as the only text it ever shows.
+  // its own control above, and an already-connected course needs none, so primary is hidden in both.
+  // Otherwise its text is whatever primaryAction names for this state (Pair Morrow, Pair Canvas or
+  // Moodle account, Choose courses, and the rest).
   const primaryText = primaryLabel(status, detectedProvider);
   primary.hidden = alreadyConnected || closed || primaryText === "";
   primary.textContent = primaryText;
-  detail.textContent = detailText(status, detectedProvider);
+  detail.textContent = detailText(statusWithBridgeVersion(status), detectedProvider);
   updateControls(status);
 }
 
@@ -237,6 +260,7 @@ async function refresh() {
       if (generation !== readGeneration) return;
       editActive = activeEditBindings(editStatus?.bindings);
       editBindings = Array.isArray(editStatus?.bindings) ? editStatus.bindings : [];
+      if (editBindings.length > 0) lastKnownEditBindings = editBindings;
     }
     if (status?.consentRequired !== true && status?.paired === true && status?.connected === true && !canChooseCourses(status)
       && currentBinding(status)?.runtimeVerified !== true) {
@@ -447,11 +471,28 @@ askFirstAllCoursesButton.addEventListener("click", async () => {
   const bindings = editActive;
   if (!bindings.length) return;
   await runAction(async () => {
+    // Every course is attempted even after a failure: earlier revokes already persist, and
+    // stopping at the first failure would leave the rest unknown instead of reported.
+    const revoked = [];
+    const kept = [];
     for (const binding of bindings) {
-      const result = await message("morrow_edit_policy_revoke", { sourceBindingId: binding.sourceBindingId });
-      if (result?.revoked !== true) throw new Error("edit_policy_revoke_unconfirmed");
+      const name = binding.courseName || binding.sourceBindingId;
+      try {
+        const result = await message("morrow_edit_policy_revoke", { sourceBindingId: binding.sourceBindingId });
+        (result?.revoked === true ? revoked : kept).push(name);
+      } catch {
+        kept.push(name);
+      }
     }
-  }, () => showNotice("Done. Morrow asks first in all courses."));
+    return { revoked, kept };
+  }, ({ revoked, kept }) => {
+    if (kept.length === 0) {
+      showNotice("Done. Morrow asks first in all courses.");
+      return;
+    }
+    showNotice(`Morrow asks first in ${revoked.length ? revoked.join(", ") : "none of these courses"}. Still Edit-active: ${kept.join(", ")}.`);
+    reportError("action", new Error("edit_policy_revoke_unconfirmed"));
+  });
 });
 
 editingSettings.addEventListener("click", () => {

@@ -108,6 +108,7 @@ import {
   type GatewayOperationState,
 } from "@morrow/operation-journal";
 import { StdioMcpUpstream, UpstreamNotDispatchedError } from "@morrow/upstream-mcp";
+import gatewayPackage from "../package.json" with { type: "json" };
 import { FileStageStore, MAX_STAGED_FILE_BYTES, type FileStageBinding, type FileStageScope } from "./file-staging.js";
 import { DESTRUCTIVE_EDIT_REFUSAL, EditAccessReviews, FIELD_SELECTION_EDIT_REFUSAL } from "./edit-access-review.js";
 import { validItemBankFanOutReceipt } from "./item-bank-fan-out.js";
@@ -661,6 +662,63 @@ function normalizeMcpRuntimeHealth(value: unknown): McpRuntimeHealth | undefined
   };
 }
 
+const MCP_RUNTIME_ERROR_SCHEMA = "morrow.mcp-runtime.error.v1";
+
+/**
+ * A packaged payload whose sealed MCP runtime manifest is present but unusable. Unlike a source
+ * checkout, which has no manifest and claims no identity, this is a corrupt install that must
+ * say so in gateway health instead of silently looking like a checkout.
+ */
+export interface McpRuntimeManifestError {
+  readonly schema: typeof MCP_RUNTIME_ERROR_SCHEMA;
+  readonly code: "mcp_runtime_manifest_invalid";
+}
+
+export function normalizeMcpRuntimeManifestError(value: unknown): McpRuntimeManifestError | undefined {
+  if (!isJsonObject(value)
+    || Object.keys(value).length !== 2
+    || value.schema !== MCP_RUNTIME_ERROR_SCHEMA
+    || value.code !== "mcp_runtime_manifest_invalid") return undefined;
+  return { schema: MCP_RUNTIME_ERROR_SCHEMA, code: "mcp_runtime_manifest_invalid" };
+}
+
+function mcpRuntimeManifestPath(entrypointDirectory: string): string {
+  return resolve(entrypointDirectory, "../../../mcp-runtime-manifest.json");
+}
+
+function readMcpRuntimeManifest(entrypointDirectory: string): {
+  readonly health?: McpRuntimeHealth;
+  readonly error?: McpRuntimeManifestError;
+} {
+  const path = mcpRuntimeManifestPath(entrypointDirectory);
+  if (!existsSync(path)) return {};
+  let bytes: Buffer;
+  let manifest: unknown;
+  try {
+    bytes = readExactTrustFile(path, {
+      label: "MCP runtime manifest",
+      maxBytes: MAX_MCP_RUNTIME_MANIFEST_BYTES,
+    });
+    manifest = JSON.parse(decodeExactUtf8(bytes, "MCP runtime manifest"));
+  } catch {
+    return { error: { schema: MCP_RUNTIME_ERROR_SCHEMA, code: "mcp_runtime_manifest_invalid" } };
+  }
+  if (!isJsonObject(manifest) || manifest.schema !== MCP_RUNTIME_MANIFEST_SCHEMA) {
+    return { error: { schema: MCP_RUNTIME_ERROR_SCHEMA, code: "mcp_runtime_manifest_invalid" } };
+  }
+  const packaged = manifest.package;
+  if (!isJsonObject(packaged) || packaged.name !== MCP_RUNTIME_PACKAGE_NAME) {
+    return { error: { schema: MCP_RUNTIME_ERROR_SCHEMA, code: "mcp_runtime_manifest_invalid" } };
+  }
+  const health = normalizeMcpRuntimeHealth({
+    schema: MCP_RUNTIME_HEALTH_SCHEMA,
+    packageVersion: packaged.version,
+    manifestSha256: createHash("sha256").update(bytes).digest("hex"),
+  });
+  if (!health) return { error: { schema: MCP_RUNTIME_ERROR_SCHEMA, code: "mcp_runtime_manifest_invalid" } };
+  return { health };
+}
+
 /**
  * Reads the sealed MCP runtime manifest of the payload this process is running
  * from. A packaged install keeps it at `app/mcp-runtime-manifest.json`, three
@@ -673,25 +731,24 @@ function normalizeMcpRuntimeHealth(value: unknown): McpRuntimeHealth | undefined
 export function mcpRuntimeHealthFromPayload(
   entrypointDirectory: string = dirname(fileURLToPath(import.meta.url)),
 ): McpRuntimeHealth | undefined {
-  let bytes: Buffer;
-  let manifest: unknown;
-  try {
-    bytes = readExactTrustFile(resolve(entrypointDirectory, "../../../mcp-runtime-manifest.json"), {
-      label: "MCP runtime manifest",
-      maxBytes: MAX_MCP_RUNTIME_MANIFEST_BYTES,
-    });
-    manifest = JSON.parse(decodeExactUtf8(bytes, "MCP runtime manifest"));
-  } catch {
-    return undefined;
+  return readMcpRuntimeManifest(entrypointDirectory).health;
+}
+
+/**
+ * The manifest read the gateway itself uses at startup. A corrupt manifest is logged loudly and
+ * reported as an error for gateway health, so a damaged install never looks like a dev checkout.
+ */
+export function mcpRuntimeHealthOrErrorFromPayload(
+  entrypointDirectory: string = dirname(fileURLToPath(import.meta.url)),
+): { readonly health?: McpRuntimeHealth; readonly error?: McpRuntimeManifestError } {
+  const result = readMcpRuntimeManifest(entrypointDirectory);
+  if (result.error) {
+    console.error(
+      `MCP runtime manifest at ${mcpRuntimeManifestPath(entrypointDirectory)} is present but invalid; `
+      + "the installed payload is corrupt. Gateway health reports mcp_runtime_manifest_invalid.",
+    );
   }
-  if (!isJsonObject(manifest) || manifest.schema !== MCP_RUNTIME_MANIFEST_SCHEMA) return undefined;
-  const packaged = manifest.package;
-  if (!isJsonObject(packaged) || packaged.name !== MCP_RUNTIME_PACKAGE_NAME) return undefined;
-  return normalizeMcpRuntimeHealth({
-    schema: MCP_RUNTIME_HEALTH_SCHEMA,
-    packageVersion: packaged.version,
-    manifestSha256: createHash("sha256").update(bytes).digest("hex"),
-  });
+  return result;
 }
 
 async function mapBounded<T, R>(
@@ -2120,6 +2177,7 @@ export class GatewayRuntime {
   private readonly publicationPolicy: PublicationPolicyHealth | undefined;
   private readonly learnerVault: LearnerVault;
   private readonly mcpRuntime: McpRuntimeHealth | undefined;
+  private readonly mcpRuntimeError: McpRuntimeManifestError | undefined;
   private readonly artifacts: ArtifactGenerationRegistry;
   private approvalBaseUrl: string | null = null;
   private approvalPresence: BridgeUiApprovalPresence | null = null;
@@ -2157,6 +2215,7 @@ export class GatewayRuntime {
     mcpRuntime?: McpRuntimeHealth,
     blackboardEffectDispatchSecret = randomBytes(32).toString("base64url"),
     resultBindingEncryptionKey?: Uint8Array,
+    mcpRuntimeError?: McpRuntimeManifestError,
   ) {
     this.config = config;
     this.upstreams = upstreams;
@@ -2167,6 +2226,7 @@ export class GatewayRuntime {
     this.learnerVault = learnerVault;
     this.artifacts = artifacts;
     this.mcpRuntime = mcpRuntime;
+    this.mcpRuntimeError = mcpRuntimeError;
     this.blackboardEffectDispatchSecret = blackboardEffectDispatchSecret;
     if (resultBindingEncryptionKey && resultBindingEncryptionKey.byteLength !== 32) {
       throw new TypeError("result binding encryption key must contain exactly 32 bytes");
@@ -2181,6 +2241,7 @@ export class GatewayRuntime {
     options: {
       readonly journalPath?: string;
       readonly mcpRuntime?: McpRuntimeHealth;
+      readonly mcpRuntimeError?: McpRuntimeManifestError;
       readonly resultBindingEncryptionKey?: Uint8Array;
       readonly signal?: AbortSignal;
     } = {},
@@ -2395,10 +2456,17 @@ export class GatewayRuntime {
         );
       }
 
+      const fromPayload = options.mcpRuntime === undefined && options.mcpRuntimeError === undefined
+        ? mcpRuntimeHealthOrErrorFromPayload()
+        : {};
       const mcpRuntime = options.mcpRuntime === undefined
-        ? mcpRuntimeHealthFromPayload()
+        ? fromPayload.health
         : normalizeMcpRuntimeHealth(options.mcpRuntime);
       if (options.mcpRuntime !== undefined && !mcpRuntime) throw new TypeError("MCP runtime health binding is invalid");
+      const mcpRuntimeError = options.mcpRuntimeError === undefined
+        ? fromPayload.error
+        : normalizeMcpRuntimeManifestError(options.mcpRuntimeError);
+      if (options.mcpRuntimeError !== undefined && !mcpRuntimeError) throw new TypeError("MCP runtime error binding is invalid");
       options.signal?.throwIfAborted();
       return new GatewayRuntime(
         config,
@@ -2412,6 +2480,7 @@ export class GatewayRuntime {
         mcpRuntime,
         blackboardEffectDispatchSecret,
         options.resultBindingEncryptionKey,
+        mcpRuntimeError,
       );
     } catch (error) {
       await closeStartupResources(upstreams, journal, effects);
@@ -2423,7 +2492,7 @@ export class GatewayRuntime {
     const sources = [...this.upstreams.values()].map((upstream) => upstream.health());
     return {
       schema: "morrow.health.v1",
-      version: "1.0.0",
+      version: gatewayPackage.version,
       ready: sources.every((source) => (
         !source.required
         || (
@@ -2439,6 +2508,7 @@ export class GatewayRuntime {
       sources,
       operationJournal: this.journal.health(),
       ...(this.mcpRuntime ? { mcpRuntime: this.mcpRuntime } : {}),
+      ...(this.mcpRuntimeError ? { mcpRuntimeError: this.mcpRuntimeError } : {}),
       ...(this.publicationPolicy ? { publicationPolicy: this.publicationPolicy } : {}),
       ...(this.config.runtimeLimitations?.length ? { limitations: [...this.config.runtimeLimitations] } : {}),
     };
@@ -6776,13 +6846,32 @@ export class GatewayRuntime {
       && integer(problem.port, 1) && Number(problem.port) <= 65_535
       && problem.message === `Another Morrow is already connected to Morrow Bridge on port ${problem.port}. Close the other Morrow, or use one Morrow for all your assistants.`
     );
+    const boundedText = (value: unknown, maximum: number): value is string => (
+      typeof value === "string" && value.length >= 1 && value.length <= maximum
+    );
+    const mismatch = bridge && bridge.lastMismatch !== undefined
+      ? (isJsonObject(bridge.lastMismatch) ? bridge.lastMismatch : null)
+      : null;
+    const mismatchAbsent = !bridge || bridge.lastMismatch === undefined;
+    const validMismatch = mismatchAbsent || (!!mismatch
+      && exactKeys(mismatch, ["schema", "reason", "receivedRuntimeRevision", "receivedCatalogDigest", "receivedExtensionVersion", "receivedProtocolVersion", "expectedRuntimeRevision", "expectedCatalogDigest", "expectedExtensionVersion", "expectedProtocolVersion", "at"])
+      && mismatch.schema === "morrow.bridge.version-mismatch.v1"
+      && ["bridge_version_mismatch", "bridge_protocol_mismatch", "bridge_bindings_digest_mismatch", "version_mismatch"].includes(mismatch.reason as string)
+      && (mismatch.receivedRuntimeRevision === null || boundedText(mismatch.receivedRuntimeRevision, 160))
+      && (mismatch.receivedCatalogDigest === null || boundedText(mismatch.receivedCatalogDigest, 160))
+      && (mismatch.receivedExtensionVersion === null || boundedText(mismatch.receivedExtensionVersion, 32))
+      && (mismatch.receivedProtocolVersion === null || integer(mismatch.receivedProtocolVersion))
+      && boundedText(mismatch.expectedRuntimeRevision, 160)
+      && typeof mismatch.expectedCatalogDigest === "string" && /^[a-f0-9]{64}$/u.test(mismatch.expectedCatalogDigest)
+      && (mismatch.expectedExtensionVersion === null || (typeof mismatch.expectedExtensionVersion === "string" && /^\d{1,5}(\.\d{1,5}){0,3}$/u.test(mismatch.expectedExtensionVersion)))
+      && integer(mismatch.expectedProtocolVersion) && integer(mismatch.at, 1));
     if (raw.isError === true || !health || health.schema !== "morrow.canvas-connector.health.v1"
       || !exactKeys(health, ["schema", "ready", "catalogDigest", "operationCount", "newQuizzesOperationCount", "itemBankOperationCount", "courseFileContentOperationCount", "bridge"])
       || typeof health.ready !== "boolean" || typeof health.catalogDigest !== "string" || !/^[a-f0-9]{64}$/u.test(health.catalogDigest)
       || !integer(health.operationCount) || !integer(health.newQuizzesOperationCount)
       || !integer(health.itemBankOperationCount) || !integer(health.courseFileContentOperationCount)
       || !bridge || bridge.schema !== "morrow.bridge.health.v1"
-      || !exactKeys(bridge, ["schema", "listening", "problem", "host", "port", "path", "connected", "generation", "extensionId", "runtimeRevision", "catalogDigest", "bindingCount", "pendingCount", "connectedAt", "lastSeenAt"])
+      || !exactKeys(bridge, ["schema", "listening", "problem", "host", "port", "path", "connected", "generation", "extensionId", "runtimeRevision", "catalogDigest", "expectedRuntimeRevision", "expectedExtensionVersion", "lastMismatch", "bindingCount", "pendingCount", "connectedAt", "lastSeenAt"])
       || typeof bridge.listening !== "boolean" || bridge.host !== "127.0.0.1" || bridge.path !== "/morrow-bridge/v1"
       || (bridge.port !== null && (!integer(bridge.port, 1) || Number(bridge.port) > 65_535))
       || typeof bridge.connected !== "boolean" || !integer(bridge.generation)
@@ -6790,7 +6879,9 @@ export class GatewayRuntime {
       || (bridge.runtimeRevision !== null && (typeof bridge.runtimeRevision !== "string" || !/^[A-Za-z0-9._-]{1,100}$/u.test(bridge.runtimeRevision)))
       || bridge.catalogDigest !== health.catalogDigest || !integer(bridge.bindingCount) || !integer(bridge.pendingCount)
       || !nullableTimestamp(bridge.connectedAt) || !nullableTimestamp(bridge.lastSeenAt)
-      || health.ready !== bridge.connected || !validProblem) {
+      || !boundedText(bridge.expectedRuntimeRevision, 160)
+      || (bridge.expectedExtensionVersion !== null && (typeof bridge.expectedExtensionVersion !== "string" || !/^\d{1,5}(\.\d{1,5}){0,3}$/u.test(bridge.expectedExtensionVersion)))
+      || health.ready !== bridge.connected || !validProblem || !validMismatch) {
       throw new Error("privacy_browser_connector_health_invalid");
     }
     const publicBridge: JsonObject = {
@@ -6805,6 +6896,9 @@ export class GatewayRuntime {
       extensionId: bridge.extensionId,
       runtimeRevision: bridge.runtimeRevision,
       catalogDigest: bridge.catalogDigest,
+      expectedRuntimeRevision: bridge.expectedRuntimeRevision,
+      expectedExtensionVersion: bridge.expectedExtensionVersion,
+      ...(mismatch ? { lastMismatch: structuredClone(mismatch) } : {}),
       bindingCount: bridge.bindingCount,
       pendingCount: bridge.pendingCount,
       connectedAt: bridge.connectedAt,

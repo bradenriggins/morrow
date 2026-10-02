@@ -164,7 +164,7 @@ test("a ready installation exposes its sealed Bridge update", () => {
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Update Morrow Bridge.");
   assert.match(view.copy, /does not change your course/);
-  assert.deepEqual(actions(view.body), ["check-bridge"]);
+  assert.deepEqual(actions(view.body), ["update-bridge"]);
   assert.match(view.body, />Update Bridge<\/button>/);
   assert.equal(statusSummary(current), "Update Morrow Bridge");
   assert.equal(step(current, "Morrow Bridge").status, "current");
@@ -677,15 +677,15 @@ test("the completed course connection shows the three status lines, then three e
   assert.ok(view.body.indexOf("home-status") < view.body.indexOf('<div class="prompt">'), "the status lines come before the example requests");
 
   const prompts = [
-    "Find images with no alternative text in this course.",
-    "Move the due date of the first assignment one week later.",
-    "Summarize the modules in this course and flag anything that needs review."
+    "Find images with no alternative text in [course name].",
+    "Move the due date of the first assignment in [course name] one week later.",
+    "Summarize the modules in [course name] and flag anything that needs review."
   ];
   for (const prompt of prompts) {
     assert.ok(view.body.includes(`<div class="prompt"><span class="prompt-text">${prompt}</span>`), `the body names the request in its own text column: ${prompt}`);
     assert.match(
       view.body,
-      new RegExp(`data-action="copy-example-prompt" data-prompt="${prompt.replace(/[.]/g, "\\.")}">Copy</button>`),
+      new RegExp(`data-action="copy-example-prompt" data-prompt="${prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">Copy</button>`),
       `each request gets its own Copy button: ${prompt}`
     );
   }
@@ -898,12 +898,12 @@ test("the reopen step for a project assistant names its project folder, and Clau
   const claudeCode = project("claude-code", "Claude Code", "/Home/Courses/Fall biology");
   assert.equal(claudeCode.title, "Quit and reopen your assistant.");
   assert.equal(claudeCode.copy, "Claude Code reads Morrow's entry only from the project folder you chose, and only when it starts there.");
-  assert.match(claudeCode.body, /<li>Quit <strong>Claude Code<\/strong> completely\.<\/li><li>Open <strong>Claude Code<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Fall biology<\/span>\. When Claude Code asks whether to use the morrow server from this project, approve it\.<\/li><li>Return here and select <strong>Check Claude Code<\/strong>\.<\/li>/);
-  assert.doesNotMatch(claudeCode.body, /start a new chat/);
+  assert.match(claudeCode.body, /<li>Quit <strong>Claude Code<\/strong> completely\.<\/li><li>Open <strong>Claude Code<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Fall biology<\/span>\. When Claude Code asks whether to use the morrow server from this project, approve it, then start a new chat\.<\/li><li>Return here and select <strong>Check Claude Code<\/strong>\.<\/li>/);
+  assert.match(claudeCode.body, /start a new chat/);
 
   const gemini = project("gemini-cli", "Gemini CLI", "/Home/Courses/Spring chemistry");
   assert.equal(gemini.copy, "Gemini CLI reads Morrow's entry only from the project folder you chose, and only when it starts there.");
-  assert.match(gemini.body, /<li>Quit <strong>Gemini CLI<\/strong> completely\.<\/li><li>Start <strong>Gemini CLI<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Spring chemistry<\/span>\.<\/li><li>Return here and select <strong>Check Gemini CLI<\/strong>\.<\/li>/);
+  assert.match(gemini.body, /<li>Quit <strong>Gemini CLI<\/strong> completely\.<\/li><li>Start <strong>Gemini CLI<\/strong> in the project folder <span class="path-text">\/Home\/Courses\/Spring chemistry<\/span>, then start a new chat\.<\/li><li>Return here and select <strong>Check Gemini CLI<\/strong>\.<\/li>/);
 
   // A desktop app keeps the desktop wording.
   assert.match(actionView(connectedCourse()).body, /<li>Open <strong>ChatGPT<\/strong> again and start a new chat\.<\/li>/);
@@ -1043,7 +1043,7 @@ test("the start, repair, Bridge update, and move panels use plain words that mat
     [state({ ...READY_ASSISTANT, runtimeStatus: "uncertain" }), "Morrow will show the next Bridge step when it has finished starting. It will not open Chrome setup before then."],
     [state({ lifecycle: "repair_required", runtimeStatus: "repair_required" }), "Morrow could not confirm that it is ready to work. No course connection or course action will start from this state."],
     [state({ ...READY_ASSISTANT, bridgeManualChromeReloadRequired: true }), "Morrow put newer Bridge files in place. Chrome must reload Morrow Bridge before Morrow can check them."],
-    [state({ ...PAIRED, bridgeUpdateAvailable: true }), "This Morrow app includes a newer Morrow Bridge. Select Update Bridge. Morrow updates the Bridge folder and asks Chrome to reload Morrow Bridge. This does not change your course."],
+    [state({ ...PAIRED, bridgeUpdateAvailable: true }), "This Morrow app includes a newer Morrow Bridge. Select Update Bridge. Morrow stages the new Bridge folder, asks Chrome to reload Morrow Bridge, and confirms the reload. This does not change your course."],
     [state({ lifecycle: "move_required", appLocation: "move_required", assistants: [{ ...CHATGPT, detected: true }] }), "Morrow is not in your Applications folder. An assistant set up from here would stop finding Morrow if this copy is moved or deleted."]
   ];
   for (const [current, copy] of cases) {

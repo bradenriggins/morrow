@@ -69,7 +69,7 @@ test("setup guide has no approval step: Pair Morrow pairs in the popup", () => {
 test("setup guide directs an unpaired Bridge to the graphical Morrow app", () => {
   const state = setupGuideState({ paired: false, connecting: false, connected: false, bindings: [], siteAnchors: [] });
   assert.equal(state.title, "Open Morrow");
-  assert.equal(state.detail, "Open Morrow and choose your assistant. Then return to Morrow Bridge and select Pair Morrow.");
+  assert.equal(state.detail, "Open Morrow and choose your assistant. Then open the Morrow Bridge popup and select Pair Morrow.");
   assert.match(state.detail, /choose your assistant/i);
   assert.match(state.detail, /select Pair Morrow/i);
 });
@@ -153,7 +153,7 @@ test("the guide reports five checks, and each one is the step it asks for while 
   }
   const ready = setupGuideState(READY_STATUS);
   assert.deepEqual(ready.checks.map((check) => check.text), [
-    "Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself.",
+    "Morrow Bridge is paired with the Morrow app on this computer.",
     "Morrow Bridge is connected to Morrow",
     "Morrow matches this Morrow Bridge version and its list of course actions",
     "1 selected course is ready",
@@ -161,12 +161,12 @@ test("the guide reports five checks, and each one is the step it asks for while 
   ]);
 });
 
-// Morrow Bridge cannot see the assistant window. It sees the connection the person made with Connect
-// Morrow, and the line says exactly that rather than reporting a running assistant it never checked.
-test("the assistant check states that it reports this connection, not the assistant itself", () => {
+// The paired line states the user-visible state (paired with the Morrow app), not Bridge
+// internals: Morrow Bridge cannot see the assistant window itself, and the line claims nothing
+// about it.
+test("the assistant check states the pairing with the Morrow app", () => {
   const paired = textOf(setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }), "assistant");
-  assert.match(paired, /set up to work with Morrow on this computer/);
-  assert.match(paired, /sees the connection, not your assistant itself/);
+  assert.equal(paired, "Morrow Bridge is paired with the Morrow app on this computer.");
   assert.equal(textOf(setupGuideState({ paired: false, connected: false, bindings: [], siteAnchors: [] }), "assistant"),
     "Morrow Bridge is not set up to work with Morrow yet");
 });
@@ -180,7 +180,8 @@ test("the version check separates a matching Morrow from one this connection can
   assert.equal(mismatch.heading, "Morrow Bridge needs a reload");
   assert.equal(mismatch.title, "Reload Morrow Bridge");
   assert.equal(textOf(mismatch, "runtime"), "Morrow reports a different version from this Morrow Bridge");
-  assert.match(mismatch.detail, /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
+  assert.match(mismatch.detail, /Select Reload Morrow Bridge in the Morrow Bridge popup/);
+  assert.equal(mismatch.canReload, true);
   // Before the connection there is no version result to report, and none is invented.
   assert.equal(textOf(setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }), "runtime"),
     "Morrow version is checked when Morrow Bridge connects");
@@ -195,7 +196,7 @@ test("the version check separates a matching Morrow from one this connection can
 // After a Morrow update Chrome still runs the old Morrow Bridge. Every surface gives the one real
 // step, a reload of Morrow Bridge, and the Morrow app's own Bridge step when a reload is not enough.
 test("the setup guide, the popup and the Pair Morrow error give the same version recovery", () => {
-  const recovery = "Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.";
+  const recovery = "Select Reload Morrow Bridge in the Morrow Bridge popup. If the versions still do not match, open the Morrow app and select Update Bridge.";
   const guide = setupGuideState({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] });
   assert.equal(guide.heading, "Morrow Bridge needs a reload");
   assert.equal(guide.detail, `Morrow and Morrow Bridge report different versions. ${recovery}`);
@@ -214,7 +215,9 @@ test("a Morrow that refused this Bridge version asks for a reload, not for Morro
   assert.equal(state.title, "Reload Morrow Bridge");
   assert.equal(textOf(state, "connection"), "Morrow Bridge reached Morrow, and Morrow expects a different version");
   assert.equal(textOf(state, "runtime"), "Morrow reports a different version from this Morrow Bridge");
-  assert.match(state.detail, /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
+  assert.match(state.detail, /Select Reload Morrow Bridge in the Morrow Bridge popup/);
+  assert.equal(state.canReload, true);
+  assert.equal(setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }).canReload, false);
   assert.doesNotMatch(state.detail, /Pair Morrow/);
 });
 
@@ -415,6 +418,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     "#open-settings": stubElement("Open Plan and Edit settings", true),
     "#reconnect-morrow": stubElement("Reconnect Morrow", true),
     "#take-over-morrow": stubElement("Use this Chrome profile", true),
+    "#reload-bridge": stubElement("Reload Morrow Bridge", true),
     "#data-disclosure": stubElement(),
     "#quick-open-settings": stubElement("Open Plan and Edit settings"),
     "#error": stubElement("", true),
@@ -479,7 +483,7 @@ test("the setup guide answers a failed status read with an unknown checklist, th
     assert.deepEqual(requests, ["morrow_status", "morrow_status", "morrow_status"]);
     assert.equal(nodes["#readiness-title"].textContent, "Ready to use");
     assert.equal(nodes["#readiness-detail"].textContent, "1 selected course is ready in this Chrome session. Morrow completed a first read in Biology 101.");
-    assert.equal(nodes["#assistant-check"].textContent, "Morrow Bridge is set up to work with Morrow on this computer. Morrow Bridge sees the connection, not your assistant itself.");
+    assert.equal(nodes["#assistant-check"].textContent, "Morrow Bridge is paired with the Morrow app on this computer.");
     assert.equal(nodes["#connection-check"].textContent, "Morrow Bridge is connected to Morrow");
     assert.equal(nodes["#runtime-check"].textContent, "Morrow matches this Morrow Bridge version and its list of course actions");
     assert.equal(nodes["#course-check"].textContent, "1 selected course is ready");
@@ -556,6 +560,33 @@ test("the guide's Reconnect Morrow connects again, and shows only while Morrow r
     status = { consentRequired: false, paired: true, connected: false, bindings: [], siteAnchors: [] };
     const closed = await loadExtensionPage("onboarding/onboarding.html", { handlers: { morrow_status: () => status } });
     assert.equal(closed.hidden("#reconnect-morrow"), true);
+  } finally {
+    clearExtensionGlobals();
+  }
+});
+
+// The guide's mismatch step reloads the extension in one press, the same one-press recovery the
+// popup offers, and the button shows only while the versions differ.
+test("the guide's Reload Morrow Bridge reloads the extension, and shows only on a version mismatch", async () => {
+  try {
+    const page = await loadExtensionPage("onboarding/onboarding.html", {
+      handlers: {
+        morrow_status: () => ({ consentRequired: false, paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [], siteAnchors: [] }),
+      },
+    });
+    assert.equal(page.text("#next-title"), "Reload Morrow Bridge");
+    assert.equal(page.hidden("#reload-bridge"), false);
+    assert.equal(page.text("#reload-bridge"), "Reload Morrow Bridge");
+    assert.equal(page.runtimeReloads, 0);
+    const sent = page.messages().length;
+    await page.click("#reload-bridge");
+    assert.equal(page.runtimeReloads, 1);
+    assert.equal(page.messages().length, sent);
+
+    const healthy = await loadExtensionPage("onboarding/onboarding.html", {
+      handlers: { morrow_status: () => ({ consentRequired: false, ...READY_STATUS }) },
+    });
+    assert.equal(healthy.hidden("#reload-bridge"), true);
   } finally {
     clearExtensionGlobals();
   }

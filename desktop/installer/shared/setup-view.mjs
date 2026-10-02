@@ -55,6 +55,11 @@ function verifiedCourse(current) {
   return count > 0;
 }
 
+function blackboardCourseBound(current) {
+  const tenants = current?.blackboard?.tenants;
+  return Array.isArray(tenants) && tenants.some((tenant) => Array.isArray(tenant?.courseBindings) && tenant.courseBindings.length > 0);
+}
+
 function previewReady(current) {
   return current?.firstPreview?.available === true;
 }
@@ -133,7 +138,7 @@ export function progress(current) {
   const course = bridge.selectedCourseName
     || (bridge.runtimeVerifiedCourseCount > 1 ? `${bridge.runtimeVerifiedCourseCount} courses` : "Selected course");
   const courseDetail = firstPreviewCompleted
-    ? `${course}; first read complete`
+    ? `${course}; first read complete; continue in ${assistant ? assistant.title : "your assistant"}`
     : firstPreviewReady
       ? `${course}; first read ready`
       : courseReady
@@ -292,9 +297,9 @@ const HOME_STATUS_ROWS = Object.freeze([
 ]);
 
 const EXAMPLE_REQUESTS = Object.freeze([
-  "Find images with no alternative text in this course.",
-  "Move the due date of the first assignment one week later.",
-  "Summarize the modules in this course and flag anything that needs review.",
+  "Find images with no alternative text in [course name].",
+  "Move the due date of the first assignment in [course name] one week later.",
+  "Summarize the modules in [course name] and flag anything that needs review.",
 ]);
 
 function examplePrompt(text) {
@@ -431,8 +436,8 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     return {
       summary: "Update Morrow Bridge",
       title: "Update Morrow Bridge.",
-      copy: "This Morrow app includes a newer Morrow Bridge. Select Update Bridge. Morrow updates the Bridge folder and asks Chrome to reload Morrow Bridge. This does not change your course.",
-      body: '<div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Update Bridge</button></div>',
+      copy: "This Morrow app includes a newer Morrow Bridge. Select Update Bridge. Morrow stages the new Bridge folder, asks Chrome to reload Morrow Bridge, and confirms the reload. This does not change your course.",
+      body: '<div class="inline-actions"><button class="primary-button" type="button" data-action="update-bridge">Update Bridge</button></div>',
     };
   }
   if (needsBridge(current) && bridge.folderReady !== true) {
@@ -447,7 +452,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     return {
       summary: "Set up Morrow Bridge in Chrome",
       title: "Add Morrow Bridge.",
-      copy: "Add Morrow Bridge to Chrome from the folder below. It connects Morrow to the courses you choose in Chrome.",
+      copy: "Add Morrow Bridge to Chrome from the folder below. It lets your assistant reach the courses you choose in Chrome.",
       body: bridgeFolderBlock(current, { platform, bridgeWaitExpired }) + '<ol class="instructions"><li>Select <strong>Show Bridge folder</strong>. Morrow opens the folder named <strong>Bridge</strong> and selects its manifest.json file.</li><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>On that page, turn on <strong>Developer mode</strong>.</li><li>Select <strong>Load unpacked</strong>, then select that <strong>Bridge</strong> folder.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Pair Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="reveal-bridge-folder">Show Bridge folder</button><button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="repair">Repair Morrow</button></div>',
     };
   }
@@ -469,21 +474,36 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
     };
   }
   if (!verifiedCourse(current)) {
+    if (blackboardCourseBound(current)) {
+      const target = assistant.title;
+      const open = assistant.id === "claude-desktop"
+        ? '<button class="primary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button>'
+        : "";
+      return {
+        summary: "Morrow Bridge is connected",
+        title: "Continue in your assistant.",
+        copy: `Your Blackboard courses are ready in ${target}. No browser pairing is needed for them.`,
+        body: `<div class="info-box"><strong>Blackboard courses are ready</strong><p>Open ${escapeHtml(target)}, start a new chat, and ask about your Blackboard courses. If ${escapeHtml(target)} cannot see them, return here and select Check Bridge.</p></div><div class="inline-actions">${open}<button class="secondary-button" type="button" data-action="check-bridge">Check Bridge</button></div>`,
+      };
+    }
     return {
       summary: "Morrow Bridge is connected",
       title: "Pair your learning account.",
-      copy: "Pair your signed-in Canvas or Moodle account once. Then choose Selected courses or Account access in Morrow Bridge.",
+      copy: `Pair your signed-in Canvas or Moodle account once. Then choose Selected courses or Account access in Morrow Bridge. Your assistant uses this connection; after Check Bridge, continue in ${assistant.title}.`,
       body: '<ol class="instructions"><li>Sign in to Canvas or Moodle in <strong>Chrome</strong> and open any course to identify your account.</li><li>Open <strong>Morrow Bridge</strong>. Select <strong>Pair Canvas account</strong> or <strong>Pair Moodle account</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>Choose <strong>Selected courses</strong> to allow specific courses under <strong>Your courses</strong> in <strong>Open Plan and Edit settings</strong>. Choose <strong>Account access</strong> to work across the account without selecting each course. Plan keeps changes in review.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
   const course = bridge.firstPreviewCourseName || bridge.selectedCourseName || "your selected course";
   if (previewCompleted(current) && restartAssistant(current)) return restartPanel(restartAssistant(current));
   if (previewCompleted(current)) {
+    const openAction = assistant.id === "claude-desktop"
+      ? '<div class="inline-actions"><button class="primary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button></div>'
+      : `<div class="info-box"><strong>Open ${escapeHtml(assistant.title)}</strong><p>Open ${escapeHtml(assistant.title)} and start a new chat to work with your courses.</p></div>`;
     return {
       summary: "First read complete",
       title: "Morrow is ready.",
       copy: `Morrow read ${course} successfully. Continue in ${assistant.title}. Give it course names, course IDs, or course links and ask what you want to do.`,
-      body: `${homeStatusLines(current)}<h3>Try asking</h3>${EXAMPLE_REQUESTS.map(examplePrompt).join("")}`,
+      body: `${openAction}${homeStatusLines(current)}<h3>Try asking in ${escapeHtml(assistant.title)}</h3><p>Copy one, paste it into a new chat in ${escapeHtml(assistant.title)}, replacing [course name] with your course, and send.</p>${EXAMPLE_REQUESTS.map(examplePrompt).join("")}`,
     };
   }
   if (previewReady(current)) {
@@ -541,9 +561,9 @@ function restartPanel(assistant) {
   // Claude Code uses a project's server only after the person approves it there.
   const folder = projectFolderText(assistant);
   const reopen = folder && assistant.id === "claude-code"
-    ? `<li>Quit <strong>${title}</strong> completely.</li><li>Open <strong>${title}</strong> in the project folder ${folder}. When ${title} asks whether to use the morrow server from this project, approve it.</li>`
+    ? `<li>Quit <strong>${title}</strong> completely.</li><li>Open <strong>${title}</strong> in the project folder ${folder}. When ${title} asks whether to use the morrow server from this project, approve it, then start a new chat.</li>`
     : folder
-      ? `<li>Quit <strong>${title}</strong> completely.</li><li>Start <strong>${title}</strong> in the project folder ${folder}.</li>`
+      ? `<li>Quit <strong>${title}</strong> completely.</li><li>Start <strong>${title}</strong> in the project folder ${folder}, then start a new chat.</li>`
       : `<li>Quit <strong>${title}</strong> completely. Closing its window is not enough.</li><li>Open <strong>${title}</strong> again and start a new chat.</li>`;
   return {
     summary: `Quit and reopen ${assistant.title}`,

@@ -107,6 +107,7 @@ const INSTALLER_STATES = new Map([
   ["store-available", installer({ ...ASSISTANT_READY, bridgeDelivery: "available" })],
   ["not-paired", installer({ ...ASSISTANT_READY, bridgeLoadedInChrome: true })],
   ["no-course", installer({ ...PAIRED })],
+  ["blackboard-ready", installer({ ...PAIRED, blackboard: { status: "api_configured_live_untested", tenants: [{ id: "main", baseUrl: "https://school.blackboard.com", principalId: "_1_1", courseBindings: [{ sourceBindingId: "bb:1", courseId: "_2_1" }] }] } })],
   ["preview-ready", installer({ ...COURSE_READY, firstPreview: { available: true } })],
   ["preview-preparing", installer({ ...COURSE_READY })],
   ["preview-completed", installer({ ...COURSE_READY, firstPreview: { available: true, completed: true } })],

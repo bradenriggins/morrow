@@ -382,3 +382,44 @@ describe("Canvas connector config", () => {
     expect(await config.pairingSecret()).toBeNull();
   });
 });
+
+describe("canvas connector version configuration", () => {
+  it("fails fast with a named error on a malformed expected revision", async () => {
+    const path = await statePath();
+    await expect(loadCanvasConnectorConfig({
+      MORROW_CANVAS_CONNECTOR_STATE: path,
+      MORROW_CANVAS_CONNECTOR_REVISION: "1.0.0 rc.2",
+    }, process.cwd())).rejects.toThrow("MORROW_CANVAS_CONNECTOR_REVISION is invalid");
+    await expect(loadCanvasConnectorConfig({
+      MORROW_CANVAS_CONNECTOR_STATE: path,
+      MORROW_CANVAS_CONNECTOR_REVISION: "   ",
+    }, process.cwd())).rejects.toThrow("MORROW_CANVAS_CONNECTOR_REVISION is invalid");
+    const config = await loadCanvasConnectorConfig({
+      MORROW_CANVAS_CONNECTOR_STATE: path,
+      MORROW_CANVAS_CONNECTOR_REVISION: "1.0.0-rc.2",
+    }, process.cwd());
+    expect(config.runtimeRevision).toBe("1.0.0-rc.2");
+    const defaulted = await loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: path }, process.cwd());
+    expect(defaulted.runtimeRevision).toBe("1.0.0-rc.2");
+  });
+
+  it("validates the expected Bridge build version, or leaves enforcement off", async () => {
+    const path = await statePath();
+    await expect(loadCanvasConnectorConfig({
+      MORROW_CANVAS_CONNECTOR_STATE: path,
+      MORROW_CANVAS_CONNECTOR_EXTENSION_VERSION: "1.0.134-beta",
+    }, process.cwd())).rejects.toThrow("MORROW_CANVAS_CONNECTOR_EXTENSION_VERSION is invalid");
+    const config = await loadCanvasConnectorConfig({
+      MORROW_CANVAS_CONNECTOR_STATE: path,
+      MORROW_CANVAS_CONNECTOR_EXTENSION_VERSION: "1.0.134",
+    }, process.cwd());
+    expect(config.extensionVersion).toBe("1.0.134");
+    const unset = await loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: path }, process.cwd());
+    expect(unset.extensionVersion).toBeNull();
+    const empty = await loadCanvasConnectorConfig({
+      MORROW_CANVAS_CONNECTOR_STATE: path,
+      MORROW_CANVAS_CONNECTOR_EXTENSION_VERSION: "",
+    }, process.cwd());
+    expect(empty.extensionVersion).toBeNull();
+  });
+});

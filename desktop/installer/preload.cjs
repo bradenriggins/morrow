@@ -17,6 +17,7 @@ const METHODS = new Set([
   "installer:restore-materials-folder",
   "installer:copy-to-clipboard",
   "installer:open-support",
+  "installer:open-download-page",
   "installer:reconcile-bridge",
   "installer:check-for-updates",
   "installer:install-update",

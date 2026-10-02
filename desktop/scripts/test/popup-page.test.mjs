@@ -99,7 +99,7 @@ test("before a course site is connected the popup names the state it is in", asy
       connection: "Not connected", courseLabel: "Course", course: "Not connected",
       primary: "Pair Morrow", primaryDisabled: false, primaryBusy: "false",
       secondary: null, openPlatform: null, disconnect: null, planAndEdit: false, online: false, account: null,
-      detail: "Add Morrow to your assistant, then open it. Select Pair Morrow to connect this extension to Morrow. Connecting does not approve changes to your courses.",
+      detail: "Add Morrow to your assistant, then open it. Select Pair Morrow to connect this extension to the Morrow app on this computer. Connecting does not approve changes to your courses.",
     }],
     ["Morrow Bridge is connecting", () => connection({ paired: true, connecting: true }), {
       connection: "Connecting…", courseLabel: "Course", course: "Not connected",
@@ -175,7 +175,7 @@ test("once Morrow is connected the popup names the course state and the one step
       primary: null, primaryDisabled: false, primaryBusy: "false",
       secondary: "Pair another account", openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: true, online: true,
       account: "Course: Anatomy · 2 courses selected",
-      detail: "This selected course is connected. Keep one signed-in Canvas course tab open while you work in Morrow.",
+      detail: "This selected course is connected. Keep one signed-in Canvas course tab open while you work in your assistant.",
     }],
   ];
   for (const [name, status, expected] of states) {
@@ -268,7 +268,7 @@ test("a version-mismatched Bridge exposes only setup recovery", async () => {
     primary: "Open setup guide", primaryDisabled: false, primaryBusy: "false",
     secondary: null, openPlatform: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false,
     account: "Course: Anatomy",
-    detail: "The Morrow app and Morrow Bridge versions do not match. Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.",
+    detail: "The Morrow app and Morrow Bridge versions do not match. Select Reload Morrow Bridge in the Morrow Bridge popup. If the versions still do not match, open the Morrow app and select Update Bridge.",
   });
   assert.equal(page.hidden("#setup-guide"), true);
   await page.click("#primary");
@@ -341,7 +341,7 @@ test("a Bridge whose version Morrow refused offers the setup guide, not a new co
   assert.equal(view(page).connection, "Reload needed");
   assert.equal(view(page).primary, "Open setup guide");
   assert.equal(view(page).primaryDisabled, false);
-  assert.equal(view(page).detail, "The Morrow app and Morrow Bridge versions do not match. Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup. If the versions still do not match, open the Morrow app and follow its Morrow Bridge step.");
+  assert.equal(view(page).detail, "The Morrow app and Morrow Bridge versions do not match. Select Reload Morrow Bridge in the Morrow Bridge popup. If the versions still do not match, open the Morrow app and select Update Bridge.");
   await page.click("#primary");
   assert.deepEqual(page.messages("morrow_open_setup"), [{ type: "morrow_open_setup" }]);
   assert.deepEqual(page.messages("morrow_pair"), []);
@@ -712,6 +712,57 @@ test("no reviews waiting keeps the section out of the page entirely", async () =
   });
   assert.equal(page.hidden("#reviews-waiting"), true);
   assert.equal(page.query("#reviews-list").children.length, 0);
+});
+
+test("a version-mismatched popup keeps its last-known reviews and courses visible, labeled as out of date", async () => {
+  let mismatched = false;
+  const reviews = [{ url: "http://127.0.0.1:44210/operations/op-1", label: "Update due date in Anatomy" }];
+  const page = await openPopup({
+    status: () => mismatched
+      ? connection({ paired: true, connected: false, versionMismatch: true, runtimeHealthy: false, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] })
+      : connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()], reviews }),
+    handlers: {
+      morrow_edit_policy_status: () => mismatched
+        ? { bindings: [] }
+        : { bindings: [{ sourceBindingId: "canvas:course-1", courseName: "Anatomy", provider: "canvas" }] },
+    },
+  });
+  assert.equal(page.hidden("#reviews-waiting"), false);
+  assert.equal(page.text("#reviews-waiting-title"), "Waiting for your review");
+  assert.equal(page.hidden("#courses"), false);
+  assert.equal(page.text("#courses-title"), "Your courses");
+
+  mismatched = true;
+  page.listeners.message[0]({ type: "morrow_bridge_status_changed" });
+  await page.waitFor(() => page.text("#status-value") === "Reload needed", "the popup never showed the mismatch");
+  assert.equal(page.hidden("#reviews-waiting"), false);
+  assert.deepEqual(page.queryAll("#reviews-list button").map((button) => button.textContent), ["Review: Update due date in Anatomy"]);
+  assert.equal(page.text("#reviews-waiting-title"), "Waiting for your review (may be out of date)");
+  assert.equal(page.hidden("#courses"), false);
+  assert.deepEqual(page.queryAll("#courses-list .course-row-name").map((node) => node.textContent), ["Anatomy"]);
+  assert.equal(page.text("#courses-title"), "Your courses (may be out of date)");
+});
+
+test("Ask first in all courses names which courses returned to Plan and which stayed Edit-active", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 2, siteAnchors: [anchor()] }),
+    handlers: {
+      morrow_edit_policy_status: () => ({ bindings: [
+        { sourceBindingId: "canvas:course-1", courseName: "Anatomy", editPermission: editPermission("canvas:course-1") },
+        { sourceBindingId: "canvas:course-2", courseName: "Physiology", editPermission: editPermission("canvas:course-2") },
+      ] }),
+      morrow_edit_policy_revoke: ({ sourceBindingId }) => (sourceBindingId === "canvas:course-1" ? { revoked: true } : { revoked: false }),
+    },
+  });
+  assert.equal(page.hidden("#edit-access-banner"), false);
+
+  await page.click("#ask-first-all-courses");
+  await page.waitFor(() => page.text("#notice") !== "", "the popup never reported the result");
+  // Every course is attempted even after a failure, so the report covers all of them.
+  assert.deepEqual(page.messages("morrow_edit_policy_revoke").map((message) => message.sourceBindingId), ["canvas:course-1", "canvas:course-2"]);
+  assert.equal(page.text("#notice"), "Morrow asks first in Anatomy. Still Edit-active: Physiology.");
+  assert.equal(page.hidden("#error"), false);
+  assert.equal(page.text("#error"), problemText("edit_policy_revoke_unconfirmed"));
 });
 
 test("the popup's banner stays hidden with no active Edit access, and asks nothing while choosing courses", async () => {

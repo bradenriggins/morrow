@@ -157,7 +157,7 @@ test("a rogue Bridge learns no secret, and withdrawing consent terminates Privat
   const socket = await eventually(() => FakeWebSocket.instances[0]);
   socket.open();
   const authentication = await eventually(() => socket.sent.find((message) => message.schema === "morrow.bridge.authenticate.v1"));
-  assert.deepEqual(Object.keys(authentication).sort(), ["catalogDigest", "clientNonce", "extensionId", "protocolVersion", "runtimeRevision", "schema", "sentAt"]);
+  assert.deepEqual(Object.keys(authentication).sort(), ["catalogDigest", "clientNonce", "extensionId", "extensionVersion", "protocolVersion", "runtimeRevision", "schema", "sentAt"]);
   assert.equal(JSON.stringify(authentication).includes(token), false);
   socket.receive({
     schema: "morrow.bridge.challenge.v1",

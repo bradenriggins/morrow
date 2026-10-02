@@ -170,9 +170,9 @@ test("no code describes Edit access as having a length or an end time", () => {
 
 // Morrow Bridge reconnects by itself with a saved connection once it is reloaded, and the popup
 // shows no Pair Morrow button while one is saved.
-test("a version mismatch sends the educator to the popup after the reload, not to Pair Morrow", () => {
+test("a version mismatch leads with the popup's own Reload button, then the app's Update step", () => {
   assert.doesNotMatch(problemText("bridge_version_mismatch"), /Pair Morrow/);
-  assert.match(problemText("bridge_version_mismatch"), /Reload Morrow Bridge on the Chrome extensions page, then open the Morrow Bridge popup/);
+  assert.match(problemText("bridge_version_mismatch"), /Select Reload Morrow Bridge in the Morrow Bridge popup\. If the versions still do not match, open the Morrow app and select Update Bridge\./);
 });
 
 test("each code reads as its own state rather than one repeated sentence", () => {
