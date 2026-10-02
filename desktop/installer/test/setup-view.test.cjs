@@ -190,7 +190,7 @@ test("the course stage carries course selection through the first read", async (
   // course in Chrome; it never claims the read has simply not started.
   assert.equal(firstRead({}).detail, "Open your course in Chrome");
   assert.equal(firstRead({ firstPreview: { available: true } }).detail, "BIOL 101; first read ready");
-  assert.equal(firstRead({ firstPreview: { available: true, completed: true } }).detail, "BIOL 101; first read complete");
+  assert.equal(firstRead({ firstPreview: { available: true, completed: true } }).detail, "BIOL 101; first read complete — continue in ChatGPT");
   assert.equal(firstRead({ firstPreview: { available: true, completed: true } }).status, "done");
 });
 

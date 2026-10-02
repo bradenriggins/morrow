@@ -1036,13 +1036,13 @@ test("copying an example request sends its exact text through the clipboard chan
   assert.equal(copyButtons.length, 3);
 
   const second = copyButtons[1];
-  assert.equal(second.dataset.prompt, "Move the due date of the first assignment one week later.");
+  assert.equal(second.dataset.prompt, "Move the due date of the first assignment in [course name] one week later.");
   await dom.element("#action-body").dispatch("click", { target: second });
   await settle();
 
   assert.deepEqual(calls.at(-1), {
     method: "installer:copy-to-clipboard",
-    payload: { text: "Move the due date of the first assignment one week later." }
+    payload: { text: "Move the due date of the first assignment in [course name] one week later." }
   });
   const labels = dom.element("#action-body").querySelectorAll("[data-action]")
     .filter((element) => element.dataset.action === "copy-example-prompt").map((element) => element.textContent);
@@ -1425,8 +1425,17 @@ test("Check the assistant and Move to Applications each reach their own channel 
 
 test("a copy of Morrow that does not update itself says where newer versions come from", async () => {
   const current = state({ updates: { schema: "morrow.desktop-update.v1", status: "unavailable", reason: "updates_disabled", currentVersion: "1.0.4" } });
-  const dom = await load("updates-unavailable", async () => ok(current));
+  const calls = [];
+  const dom = await load("updates-unavailable", async (method, payload) => {
+    calls.push({ method, payload });
+    return ok(current);
+  });
   assert.equal(dom.element("#updates-panel").hidden, false);
   assert.equal(dom.element("#updates-copy").textContent, "This copy of Morrow does not update itself. Get newer versions from meetmorrow.app/download.");
-  assert.equal(dom.element("#updates-actions").querySelectorAll("[data-action]").length, 0);
+  const actions = dom.element("#updates-actions").querySelectorAll("[data-action]");
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].dataset.action, "open-download-page");
+  await dom.element("#updates-actions").dispatch("click", { target: actions[0] });
+  await settle();
+  assert.deepEqual(calls.at(-1), { method: "installer:open-download-page", payload: undefined });
 });
