@@ -1,9 +1,8 @@
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:https";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
@@ -14,6 +13,7 @@ import { createFullMorrowServer } from "../src/full-server.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { createMorrowServer } from "../src/server.js";
 import type { GatewayRuntime } from "../src/runtime.js";
+import { generateLoopbackTls } from "./fixtures/loopback-tls.js";
 
 const TENANT_ID = "fixture";
 const COURSE_ID = "_22_1";
@@ -21,8 +21,6 @@ const CONTENT_ID = "_33_1";
 const PRINCIPAL_ID = "_11_1";
 const CREDENTIAL_REVISION = "8c751fc3-ecf9-4558-b86b-d97a34e93295";
 const SOURCE_BINDING_ID = `blackboard:${"a".repeat(64)}`;
-const TEST_CERTIFICATE = fileURLToPath(new URL("./fixtures/blackboard-test-cert.pem", import.meta.url));
-const TEST_KEY = fileURLToPath(new URL("./fixtures/blackboard-test-key.pem", import.meta.url));
 
 /** One positive case for each of the four signals this audit is required to report. */
 const signalHtml = [
@@ -176,8 +174,7 @@ async function createTenant(): Promise<{
   // process's config-privacy check walks every real ancestor to filesystem
   // root, which fails under Linux's world-writable /tmp.
   const directory = await mkdtemp(join(homedir(), ".morrow-blackboard-audit-test-"));
-  const certificate = await readFile(TEST_CERTIFICATE);
-  const key = await readFile(TEST_KEY);
+  const { key, cert: certificate } = await generateLoopbackTls(directory);
   const content: JsonObject = {
     id: CONTENT_ID,
     courseId: COURSE_ID,

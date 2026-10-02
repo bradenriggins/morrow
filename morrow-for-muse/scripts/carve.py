@@ -19,7 +19,9 @@ morrow-for-muse/, then:
   4. writes pack/carve-manifest.json (sha256 of every shipped file,
      which install.sh step 2 verifies, and the commit the carve read)
      and checks pack/version.txt matches VERSION;
-  5. runs scripts/verify-no-secrets.sh on the carved tree with no
+  5. refuses unless pack/deny-list.txt matches the PINNED copy kept
+     next to this script (scripts/carve-deny-list.txt, never shipped),
+     then runs scripts/verify-no-secrets.sh on the carved tree with no
      exclusions;
   6. with --zip, writes morrow-muse-connector-<version>.zip next to the
      tree (the archive INSTALL.md names).
@@ -55,12 +57,20 @@ import zipfile
 SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(SRC)
 DIST_NAME = "morrow-muse-connector"
+# The PINNED packaging policy (pack/deny-list.txt header contract): this
+# copy lives next to the carve script and never ships (DEV_ONLY), so it
+# is outside the carved tree. carve() refuses loudly when the tree's
+# copy differs from it: weakening pack/deny-list.txt in the tree can
+# never weaken the carve gate.
+PINNED_DENY_LIST = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "carve-deny-list.txt")
 
 # Prefixes (directories end with "/") and exact paths never shipped.
 DEV_ONLY = (
     "lanes/", "qr-proof/", "platform-asks/", "learners/evidence/",
     "requirements-dev.txt", "requirements-test.txt",
     "scripts/install-robustness-selftest.sh", "scripts/carve.py",
+    "scripts/carve-deny-list.txt",
     "scripts/install-e2e.sh", "scripts/helper-input-e2e.py",
     "scripts/helper-web-input-e2e.py",
     "scripts/moodle-browser-e2e.py", "moodle/BROWSER-CONTRACT.md",
@@ -138,6 +148,39 @@ def install_suites(tree=SRC):
               encoding="utf-8") as fh:
         text = fh.read()
     return text.split('SUITES="', 1)[1].split('"', 1)[0].split()
+
+
+def check_pinned_policy():
+    """Refuse loudly unless the tree's deny-list matches the pinned copy.
+
+    pack/deny-list.txt's header promises the carve gate enforces a
+    PINNED copy kept next to this script (outside the carved tree): the
+    staged tree's own verify-no-secrets.sh reads the tree's copy, so
+    without this comparison weakening that copy would weaken the gate.
+    A missing pinned copy fails closed: there is nothing to compare
+    against.
+    """
+    tree_copy = os.path.join(SRC, "pack", "deny-list.txt")
+    try:
+        with open(PINNED_DENY_LIST, "rb") as fh:
+            pinned = fh.read()
+    except OSError:
+        raise SystemExit(
+            "CARVE FAIL: the pinned packaging policy %s is missing; "
+            "refusing to carve without it" % PINNED_DENY_LIST)
+    try:
+        with open(tree_copy, "rb") as fh:
+            tree = fh.read()
+    except OSError:
+        raise SystemExit(
+            "CARVE FAIL: %s is missing" % tree_copy)
+    if tree != pinned:
+        raise SystemExit(
+            "CARVE FAIL: pack/deny-list.txt differs from the pinned "
+            "packaging policy %s; weakening the tree's copy cannot "
+            "weaken the carve gate. Update the pinned copy alongside "
+            "it, with review, or revert the tree's copy."
+            % PINNED_DENY_LIST)
 
 
 def _allowed_hosts():
@@ -330,6 +373,7 @@ def sha256(path):
 
 
 def carve(out_dir, make_zip=False, run_gate=True):
+    check_pinned_policy()
     version = open(os.path.join(SRC, "VERSION")).read().strip()
     pack_version = open(os.path.join(SRC, "pack", "version.txt")).read().strip()
     if version != pack_version:

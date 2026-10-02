@@ -1,10 +1,9 @@
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:https";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { DurableBatchStore, loadOrCreateBatchEncryptionKey } from "@morrow/batch-engine";
@@ -15,6 +14,7 @@ import { parseGatewayConfig } from "../src/config.js";
 import { createFullMorrowServer } from "../src/full-server.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { stableEffectTargetIdentity, type EffectBindingScope } from "../src/runtime.js";
+import { generateLoopbackTls } from "./fixtures/loopback-tls.js";
 
 /**
  * The deadline for one case, and for the fixture the cases share. Every case
@@ -27,8 +27,6 @@ const CASE_TIMEOUT_MS = 60_000;
 const TENANT_ID = "fixture";
 const PRINCIPAL_ID = "_11_1";
 const CREDENTIAL_REVISION = "8c751fc3-ecf9-4558-b86b-d97a34e93295";
-const TEST_CERTIFICATE = fileURLToPath(new URL("./fixtures/blackboard-test-cert.pem", import.meta.url));
-const TEST_KEY = fileURLToPath(new URL("./fixtures/blackboard-test-key.pem", import.meta.url));
 /** Whole milliseconds one content read is held open, so overlapping reads are observable. */
 const CONTENT_READ_DELAY_MS = 10;
 
@@ -94,8 +92,7 @@ async function createFixture(): Promise<BlackboardFixture> {
   // filesystem root, which fails under Linux's world-writable /tmp but not
   // under a real home directory's private ancestor chain.
   const directory = await mkdtemp(join(homedir(), ".morrow-blackboard-batch-scale-test-"));
-  const certificate = await readFile(TEST_CERTIFICATE);
-  const key = await readFile(TEST_KEY);
+  const { key, cert: certificate } = await generateLoopbackTls(directory);
   const contents = new Map<string, JsonObject>();
   for (const course of courses) {
     for (const contentId of [course.contentId, course.siblingContentId]) {

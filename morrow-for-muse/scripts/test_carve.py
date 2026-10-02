@@ -162,6 +162,7 @@ def mini(tmp_path, monkeypatch):
         "morrow-for-muse/VERSION": "9.9.9\n",
         "morrow-for-muse/pack/version.txt": "9.9.9\n",
         "morrow-for-muse/pack/deny-list.txt": "[tenant_allow]\n",
+        "morrow-for-muse/scripts/carve-deny-list.txt": "[tenant_allow]\n",
         "morrow-for-muse/scripts/install-suites.sh": 'SUITES=""\n',
         "morrow-for-muse/SKILL.md": "# Skill\n",
         "morrow-for-muse/tool.py": "X = 1\n",
@@ -297,7 +298,8 @@ def test_dev_only_surface_does_not_ship(carved):
                 "session/capture.py", "requirements-dev.txt",
                 # CI's hash-locked pytest; the install suites need none
                 "requirements-test.txt",
-                "scripts/carve.py", "scripts/moodle-adapter-loader-e2e.py", "bin/keepalive-moodle.sh",
+                "scripts/carve.py", "scripts/carve-deny-list.txt",
+                "scripts/moodle-adapter-loader-e2e.py", "bin/keepalive-moodle.sh",
                 "bin/keepalive-canvas.sh", "bin/scheduler.py", "DEPLOY.md",
                 # pytest-only: the suite's HOME isolation and its check
                 "conftest.py", "test_suite_isolation.py",
@@ -364,6 +366,45 @@ def test_carve_refuses_output_inside_source():
     with pytest.raises(SystemExit):
         carve.carve(os.path.join(TREE, "dist-inside"))
     assert not os.path.exists(os.path.join(TREE, "dist-inside"))
+
+
+def test_pinned_policy_matches_the_tree_copy():
+    # The pinned copy next to the carve script is the policy the gate
+    # enforces; it must equal the tree's pack/deny-list.txt, or every
+    # carve refuses loudly.
+    with open(os.path.join(TREE, "pack", "deny-list.txt"), "rb") as fh:
+        tree_copy = fh.read()
+    with open(os.path.join(HERE, "carve-deny-list.txt"), "rb") as fh:
+        pinned = fh.read()
+    assert tree_copy == pinned
+    carve.check_pinned_policy()
+
+
+def test_weakened_deny_list_refuses_the_carve(mini):
+    # Weakening pack/deny-list.txt in the tree must not weaken the
+    # gate: the tree's copy no longer matches the pinned copy, so the
+    # carve refuses before staging anything.
+    repo, mini_carve = mini
+    with open(str(repo / "morrow-for-muse" / "pack" / "deny-list.txt"),
+              "a", encoding="utf-8") as fh:
+        fh.write("evil.instructure.com\n")
+    out = repo / "dist" / mini_carve.DIST_NAME
+    with pytest.raises(SystemExit) as refused:
+        mini_carve.carve(str(out), run_gate=False)
+    assert "pinned" in str(refused.value).lower()
+    assert not (repo / "dist").exists()
+
+
+def test_missing_pinned_policy_refuses_the_carve(mini):
+    # No pinned copy, nothing to compare against: fail closed.
+    repo, mini_carve = mini
+    os.remove(str(repo / "morrow-for-muse" / "scripts"
+                  / "carve-deny-list.txt"))
+    out = repo / "dist" / mini_carve.DIST_NAME
+    with pytest.raises(SystemExit) as refused:
+        mini_carve.carve(str(out), run_gate=False)
+    assert "pinned" in str(refused.value).lower()
+    assert not (repo / "dist").exists()
 
 
 def test_shipped_docs_name_no_missing_file_as_shipped(carved):

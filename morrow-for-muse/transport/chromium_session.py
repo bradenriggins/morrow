@@ -355,7 +355,7 @@ class ChromiumSession:
     browser_owned_auth = True
 
     def __init__(self, base_url, launcher=None, transport=None):
-        self._base = base_url.rstrip("/")
+        self._base = lc.normalize_canvas_base(base_url)
         self._launcher = launcher
         self._transport = transport
         # Item Banks SDK lane: course scope for the LTI launch, bound by
@@ -470,6 +470,11 @@ class ChromiumSession:
 
         After bin/morrow disconnect it refuses (CanvasDisconnected)
         before the browser, the helper, or Canvas is touched.
+
+        The resolved base is validated at construction (https required
+        unless CANVAS_BASE_ALLOW_HTTP=1, no userinfo), so a bad base
+        fails fast here instead of late at CDP navigate, misreported
+        as session death.
         """
         from config import disconnect, tree_config
         disconnect.refuse_if_disconnected()
