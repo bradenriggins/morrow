@@ -372,3 +372,176 @@ def test_proven_verify_mismatch_is_failed_and_not_uncertain():
     rec = ex.find_journal_op("11111111-1111-4111-8111-111111111111")
     assert rec.get("verification") == "fail"
     assert rec.get("uncertain") is False
+
+
+# ----------------------------------------------------------------------
+# Sweep-4: the journal is a learner-PII-free surface on every path, not
+# just the success path. The uncertain-write handler and the ambiguous
+# write-failure audit journaled raw provider detail; both now project
+# through the learner boundary first, and the audit withholds detail
+# instead of raising when the boundary itself fails (the record MUST
+# be journaled).
+# ----------------------------------------------------------------------
+
+_S4_JANE = {"id": 98765, "name": "Jane Doe", "sortable_name": "Doe, Jane",
+            "short_name": "Janie", "login_id": "jdoe"}
+_S4_PII = ("Jane", "Doe", "Janie", "jdoe", "98765")
+
+
+def _s4_leaks(value):
+    text = json.dumps(value)
+    return [p for p in _S4_PII if p in text]
+
+
+def _s4_vault(monkeypatch, tmp_path):
+    pytest.importorskip("cryptography")
+    from privacy import executor_wire as _wire
+    vault = str(tmp_path / "s4-vault.json")
+    monkeypatch.setenv(_wire.SOURCE_VAULT_ENV_VAR, vault)
+    return vault
+
+
+def _s4_enroll_entry():
+    return ex.catalog_descriptor_to_entry(
+        "canvas_enroll_user_courses", "POST",
+        "/api/v1/courses/{course_id}/enrollments",
+        extra={"body": {"enrollment": {"user_id": 98765}}})
+
+
+def _s4_write_dispatch_vault(entry, params, handler, monkeypatch, tmp_path,
+                             op_id):
+    _s4_vault(monkeypatch, tmp_path)
+    plan = ex.FrozenPlan({
+        "op_id": op_id,
+        "entry_name": entry["name"], "params": params,
+        "before_state_digest": None,
+        "frozen_readback": "course %s" % params["course_id"],
+        "target_identity": {"course_id": params["course_id"],
+                            "course_name": "Course"}}, "plan")
+    from dispatch.admission import mint_approval, sign_approval
+    rec = mint_approval(entry, params, tenant_base=BASE,
+                        target_identity={"course_id": params["course_id"],
+                                         "course_name": "Course"})
+    sign_approval(rec, "test authorization basis for a hermetic write test",
+                  channel="driver")
+    sess = FakeSession(handler)
+    sess.browser_owned_auth = True
+    return ex.dispatch_entry(entry, params, sess, _pack(), plan=plan,
+                             approval=rec, require_educator_channel=False)
+
+
+def test_uncertain_write_journal_projects_learner_data(monkeypatch):
+    # No learner-data write is dispatchable in the raw lane (all held
+    # or pending), so pin the fix structurally: the uncertain handler
+    # must route BOTH the verification and the receipt through the
+    # learner boundary before journaling. Pre-fix it called neither.
+    import uuid
+    from privacy import executor_wire as _wire
+    calls = []
+    real = _wire.project_learner_result
+
+    def _spy(entry, result, tenant_base, **kwargs):
+        calls.append(dict(result.get("receipt", {})))
+        return real(entry, result, tenant_base, **kwargs)
+
+    monkeypatch.setattr(_wire, "project_learner_result", _spy)
+    entry = ex.catalog_descriptor_to_entry(
+        "canvas_create_assignment", "POST",
+        "/api/v1/courses/{course_id}/assignments",
+        extra={"body": {"assignment": {"name": "A"}}})
+
+    # The POST itself goes ambiguous mid-send (request phase), which
+    # lands in the OUTER uncertain handler: the readback-phase inner
+    # handler already projected before this fix.
+    boom = ex.UncertainWrite(
+        "POST sent but the answer was lost; provider echoed Jane Doe")
+    boom.evidence = [{"method": "POST",
+                      "user": {"id": 1, "name": "Jane Doe"}}]
+    boom.attempts = 1
+
+    def handler(m, u, b):
+        if m == "POST":
+            raise boom
+        return 200, {}, b'{"id": 7}'
+
+    op_id = str(uuid.uuid4())
+    plan = ex.FrozenPlan({
+        "op_id": op_id,
+        "entry_name": entry["name"], "params": {"course_id": "7"},
+        "before_state_digest": None,
+        "frozen_readback": "course 7",
+        "target_identity": {"course_id": "7",
+                            "course_name": "Course"}}, "plan")
+    from dispatch.admission import mint_approval, sign_approval
+    rec = mint_approval(entry, {"course_id": "7"}, tenant_base=BASE,
+                        target_identity={"course_id": "7",
+                                         "course_name": "Course"})
+    sign_approval(rec, "test authorization basis for a hermetic write test",
+                  channel="driver")
+    with pytest.raises(ex.UncertainWrite):
+        ex.dispatch_entry(entry, {"course_id": "7"},
+                          FakeSession(_course_then(handler)), _pack(),
+                          plan=plan, approval=rec,
+                          require_educator_channel=False)
+    assert any(call.get("uncertain") is True for call in calls), calls
+    journaled = ex.find_journal_op(op_id)
+    assert journaled is not None
+    assert journaled.get("verification") == "uncertain"
+    assert "Jane Doe" not in json.dumps(journaled)
+
+
+def test_write_failure_audit_projects_learner_data(monkeypatch, tmp_path):
+    import uuid
+    _s4_vault(monkeypatch, tmp_path)
+    op_id = str(uuid.uuid4())
+
+    class _Boom(Exception):
+        pass
+
+    exc = _Boom("provider echoed Jane Doe then timed out")
+    exc.evidence = [{"method": "POST", "user": dict(_S4_JANE)}]
+    exc.attempts = 1
+    entry = _s4_enroll_entry()
+    url = BASE + "/api/v1/courses/7/enrollments"
+    ex._journal_write_failure_audit(
+        "canvas_enroll_user_courses", "dispatch", "write", {"course_id": "7"},
+        None, op_id, exc, {"write_attempted": True}, None, None,
+        entry, url, BASE)
+    found = [json.loads(line) for line in
+             open(ex.JOURNAL_PATH, encoding="utf-8")
+             if json.loads(line).get("op_id") == op_id]
+    assert len(found) == 1
+    assert found[0].get("wal") == "audit"
+    assert _s4_leaks(found[0].get("receipt")) == []
+
+
+def test_write_failure_audit_withholds_when_boundary_fails(monkeypatch,
+                                                           tmp_path):
+    import uuid
+    from privacy import executor_wire as _wire
+    op_id = str(uuid.uuid4())
+
+    class _Boom(Exception):
+        pass
+
+    exc = _Boom("Jane Doe")
+    exc.evidence = [{"user": dict(_S4_JANE)}]
+    exc.attempts = 1
+
+    def _broken(*args, **kwargs):
+        raise RuntimeError("boundary down")
+
+    monkeypatch.setattr(_wire, "project_learner_result", _broken)
+    entry = _s4_enroll_entry()
+    ex._journal_write_failure_audit(
+        "canvas_enroll_user_courses", "dispatch", "write", {"course_id": "7"},
+        None, op_id, exc, {"write_attempted": True}, None, None,
+        entry, BASE + "/api/v1/courses/7/enrollments", BASE)
+    found = [json.loads(line) for line in
+             open(ex.JOURNAL_PATH, encoding="utf-8")
+             if json.loads(line).get("op_id") == op_id]
+    assert len(found) == 1
+    receipt = found[0].get("receipt")
+    assert receipt == {"withheld": "the receipt could not be "
+                                   "de-identified, so it is not journaled"}
+    assert _s4_leaks(found[0]) == []

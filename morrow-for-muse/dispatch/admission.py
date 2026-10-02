@@ -425,6 +425,38 @@ def _url_segment_hit(url: str, segments: list, suffixes: list) -> str | None:
     return None
 
 
+def _url_exception_hit(url: str, exceptions) -> bool:
+    """True when a learner-data URL exception matches url's path segments.
+
+    Exceptions (e.g. "/users/self") exempt the educator's own scope from
+    the URL signal checks. The match is on the path only, never the query
+    or fragment (which ride with the template via _url_with_query), and
+    at segment boundaries, so "/users/selfish" and "?next=/users/self"
+    do not exempt a learner-bearing URL.
+    """
+    path = (url or "").split("?", 1)[0].split("#", 1)[0].lower()
+    for exc in exceptions or []:
+        needle = str(exc or "").lower()
+        if not needle:
+            continue
+        start = 0
+        while True:
+            idx = path.find(needle, start)
+            if idx < 0:
+                break
+            # A leading "/" is itself the segment separator, so the
+            # match always starts at a segment boundary; otherwise the
+            # preceding character must be one.
+            before_ok = needle.startswith("/") or idx == 0 \
+                or path[idx - 1] == "/"
+            end = idx + len(needle)
+            after_ok = end >= len(path) or path[end] == "/"
+            if before_ok and after_ok:
+                return True
+            start = idx + 1
+    return False
+
+
 def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
     """First learner-data signal hit for the entry, or None.
 
@@ -448,9 +480,9 @@ def _learner_signal_hit(entry: dict, policy: dict) -> str | None:
     suffixes = ld.get("url_segment_suffixes", [])
 
     for url in extract_urls(entry):
-        lowered = (url or "").lower()
-        if any(exc.lower() in lowered for exc in exceptions):
+        if _url_exception_hit(url, exceptions):
             continue
+        lowered = (url or "").lower()
         hit = _url_segment_hit(url, segments, suffixes)
         if hit:
             return hit
@@ -2084,10 +2116,10 @@ def _write_time_highwater(now: datetime.datetime) -> None:
             os.fsync(f.fileno())
         os.replace(tmp, _time_highwater_path())
     except OSError as exc:
-        sys.stderr.write(
-            "morrow: WARNING: could not persist the approval time "
-            "high-water mark: %s; clock-rollback detection is degraded.\n"
-            % exc)
+        raise ApprovalMismatch(
+            "could not persist the approval time high-water mark (%s); "
+            "refusing to admit approvals while clock-rollback detection "
+            "cannot record the current time" % exc)
 
 
 def _check_clock_rollback(now: datetime.datetime) -> None:

@@ -933,7 +933,11 @@ class _Boom(Exception):
 
 ex._journal_write_failure_audit(
     "test.n5", "dispatch", "write", {"a": 1}, None, _n5_op, _Boom("x"),
-    {"write_attempted": True}, None, None)
+    {"write_attempted": True}, None, None,
+    {"name": "test.n5",
+     "request": {"url": "https://example.instructure.com/api/v1/courses/1"}},
+    "https://example.instructure.com/api/v1/courses/1",
+    "https://example.instructure.com")
 check("audit record is not reported as the outcome",
       ex.find_journal_op(_n5_op) is None)
 check("claim stays live after audit record",
