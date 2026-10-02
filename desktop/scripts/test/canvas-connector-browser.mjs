@@ -2053,12 +2053,13 @@ try {
   assert.equal(fullEditOptions.options.some((option) => option.availability === "edit" && option.verification !== "checked"), false);
   assert.equal(fullEditOptions.options.some((option) => option.verification === "unchecked"), false);
   assert.equal(fullEditOptions.options.some((option) => option.availability === "review" && option.verification !== undefined), false);
-  // Deleting a discussion entry now reads back through the entry list, so it is a checked Edit action.
+  // Deleting a discussion entry removes course content, so it is approved change by
+  // change even though its readback through the entry list is exact.
   const deleteEntryAction = fullEditOptions.options.find((option) => option.id === "action:canvas:canvas_delete_entry_courses");
-  assert.equal(deleteEntryAction?.availability, "edit");
-  assert.equal(deleteEntryAction?.verification, "checked");
+  assert.equal(deleteEntryAction?.availability, "review");
+  assert.equal(deleteEntryAction?.verification, undefined);
   assert.equal(fullEditOptions.options.find((option) => option.id === "canvas_page_content").verification, "checked");
-  process.stderr.write("[browser-test] published Edit actions equal the exact course-scoped Canvas writes, retain four destructive review cases, omit every nonexact action, and refuse a blanket field grant\n");
+  process.stderr.write("[browser-test] published Edit actions equal the exact course-scoped Canvas writes, keep every DELETE review-only, omit every nonexact action, and refuse a blanket field grant\n");
   process.stderr.write("[browser-test] one Canvas site anchor selected three exact courses, including course 501 after paged discovery\n");
 
   await popup.bringToFront();
