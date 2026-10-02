@@ -37,6 +37,12 @@ test("agreement is recorded only by the named product action", () => {
   assert.match(worker, /message\?\.type === "morrow_course_data_consent_accept" \? acceptCourseDataConsent/);
 });
 
+test("consent is withdrawn only by the settings page, disconnecting first", () => {
+  assert.match(worker, /async function withdrawCourseDataConsent\(\) \{\s*await disconnectConnector\(\);\s*await chrome\.storage\.local\.remove\(COURSE_DATA_CONSENT_KEY\);\s*return \{ withdrawn: true \};\s*\}/);
+  assert.match(worker, /message\?\.type === "morrow_course_data_consent_withdraw" \? \(settingsSender\(sender\) \? withdrawCourseDataConsent : \(\) => \{ throw new Error\("bridge_consent_sender_refused"\); \}\)/);
+  assert.match(worker, /message\?\.type === "morrow_course_data_consent_withdraw"\s*\|\| message\?\.type === "morrow_status"/);
+});
+
 test("consent withdrawal closes and erases Private Chat before detaching the Bridge socket", () => {
   const start = worker.indexOf("chrome.storage.onChanged.addListener((changes, areaName) => {");
   const end = worker.indexOf("\nchrome.runtime.onStartup.addListener", start);

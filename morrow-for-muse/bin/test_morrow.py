@@ -313,6 +313,93 @@ def test_doctor_rejects_bad_args(cli, capsys):
     assert "usage" in capsys.readouterr().err
 
 
+def _tree_version():
+    with open(os.path.join(TREE, "VERSION"), encoding="utf-8") as fh:
+        return fh.read().strip()
+
+
+def test_doctor_flags_helper_version_drift(cli, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.urllib.request, "urlopen",
+        lambda url, timeout=10: _FakeResp(
+            {"logged_in": True, "chromium_alive": True,
+             "helper_version": "0.0.0-drifted"}))
+    assert cli.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "VERSION DRIFT" in out
+    assert _tree_version() in out
+
+
+def test_doctor_accepts_matching_helper_version(cli, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.urllib.request, "urlopen",
+        lambda url, timeout=10: _FakeResp(
+            {"logged_in": True, "chromium_alive": True,
+             "helper_version": _tree_version()}))
+    assert cli.main(["doctor"]) == 0
+    assert "VERSION DRIFT" not in capsys.readouterr().out
+
+
+def test_doctor_reports_tree_id_and_supervision(cli, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.urllib.request, "urlopen",
+        lambda url, timeout=10: _FakeResp(
+            {"logged_in": True, "chromium_alive": True}))
+    assert cli.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "tree-id: legacy slug" in out
+    assert "supervision: WARNING" in out
+
+
+def test_doctor_fails_a_deleted_tree_id(cli, monkeypatch, capsys,
+                                        tmp_path):
+    from config import paths as _paths
+    monkeypatch.setattr(_paths, "read_tree_uuid", lambda root: None)
+    home = tmp_path / "home"
+    trees = home / "trees"
+    trees.mkdir(parents=True)
+    (trees / ".tree-id-registry.json").write_text(json.dumps(
+        {os.path.realpath(TREE): "d" * 32}))
+    monkeypatch.setenv("MORROW_HOME", str(home))
+    monkeypatch.setattr(
+        cli.urllib.request, "urlopen",
+        lambda url, timeout=10: _FakeResp(
+            {"logged_in": True, "chromium_alive": True}))
+    assert cli.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "tree-id: DELETED" in out
+    assert "restore .morrow-tree-id from backup" in out
+
+
+def test_doctor_local_identity_failure_is_not_unreachable(
+        cli, monkeypatch, capsys):
+    from config import tree_config as _tc
+    monkeypatch.setattr(_tc, "lms_provider", lambda: "moodle")
+    def _boom(*args, **kwargs):
+        raise ValueError("bad base")
+    monkeypatch.setattr(_tc, "normalize_lms_base", _boom)
+    monkeypatch.setattr(
+        cli.urllib.request, "urlopen",
+        lambda url, timeout=10: _FakeResp(
+            {"logged_in": True, "chromium_alive": True}))
+    assert cli.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "local identity check failed" in out
+    assert "UNREACHABLE" not in out
+
+
+def test_doctor_starts_no_supervision(cli, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.urllib.request, "urlopen",
+        lambda url, timeout=10: _FakeResp(
+            {"logged_in": True, "chromium_alive": True}))
+    calls = []
+    monkeypatch.setattr(cli, "_resume_supervision",
+                        lambda: calls.append(True))
+    assert cli.main(["doctor"]) == 0
+    assert calls == []
+
+
 # A command the output tells the reader to run: a usage line, a
 # backquoted command, or an alternative after "|".
 _BARE_COMMAND_RE = re.compile(r"(?:usage:\s+|`|\|\s+)morrow\b")

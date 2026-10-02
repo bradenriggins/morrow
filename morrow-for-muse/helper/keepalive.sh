@@ -226,8 +226,27 @@ tree_id() {
   if [ -f "${TREE_ROOT}/.morrow-tree-id" ]; then
     printf 'keepalive: WARNING: %s/.morrow-tree-id is not a UUID; falling back to legacy path-slug tree id\n' \
       "${TREE_ROOT}" >&2
+  elif _tree_id_deleted; then
+    printf 'keepalive: ERROR: %s/.morrow-tree-id was deleted, but this tree previously minted an id: the runtime refuses to run rather than reset its idempotency domain. Restore .morrow-tree-id from backup. Supervision is stopping so its logs do not split from runtime state.\n' \
+      "${TREE_ROOT}" >&2
+    return 1
   fi
   tree_id_bounded
+}
+_tree_id_deleted() {
+  # True when the tree-id registry remembers an id for this root but the
+  # file is gone. A missing file on a root the registry never saw is a
+  # legacy tree, not a deletion: that keeps the silent slug fallback.
+  TREE_ROOT="${TREE_ROOT}" MORROW_HOME="${MORROW_HOME:-${HOME}/.morrow}" python3 -c '
+import json, os
+try:
+    with open(os.path.join(os.environ["MORROW_HOME"], "trees", ".tree-id-registry.json"), encoding="utf-8") as fh:
+        doc = json.load(fh)
+    known = isinstance(doc, dict) and os.path.realpath(os.environ["TREE_ROOT"]) in doc
+except (OSError, ValueError):
+    known = False
+raise SystemExit(0 if known else 1)
+' 2>/dev/null
 }
 tree_version() {
   # This tree's VERSION marker, or "unknown" when the file is absent.
@@ -237,7 +256,7 @@ tree_version() {
     printf 'unknown'
   fi
 }
-TREE_ID="$(tree_id)"
+TREE_ID="$(tree_id)" || exit 1
 [ -n "${TREE_ID}" ] || TREE_ID="tree"
 TREE_VERSION="$(tree_version)"
 # MORROW_HOME / MORROW_TREE_STATE_DIR are honored when set (tests, ops).

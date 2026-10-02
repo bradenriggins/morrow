@@ -6653,6 +6653,19 @@ async function acceptCourseDataConsent() {
   return { accepted: true };
 }
 
+/**
+ * One-tap consent withdrawal from Plan and Edit settings. Disconnects
+ * first (tokens, bindings, policies, permissions), then removes the
+ * agreement: the storage listener tears down the live connection and
+ * every surface returns to the consent gate. Idempotent: withdrawing
+ * twice, or with nothing to withdraw, still answers withdrawn.
+ */
+async function withdrawCourseDataConsent() {
+  await disconnectConnector();
+  await chrome.storage.local.remove(COURSE_DATA_CONSENT_KEY);
+  return { withdrawn: true };
+}
+
 async function openSetupGuide() {
   await chrome.tabs.create({ url: chrome.runtime.getURL(SETUP_GUIDE_PATH) });
   return { opened: true };
@@ -6861,6 +6874,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   const run = message?.type === "morrow_course_data_consent_accept" ? acceptCourseDataConsent
+    : message?.type === "morrow_course_data_consent_withdraw" ? (settingsSender(sender) ? withdrawCourseDataConsent : () => { throw new Error("bridge_consent_sender_refused"); })
     : message?.type === "morrow_pair" ? (pairingSender(sender) ? requestPairing : () => { throw new Error("bridge_pairing_sender_refused"); })
     : message?.type === "morrow_reconnect" ? (popupSender(sender) ? retrySavedBridgeConnection : () => { throw new Error("bridge_reconnect_sender_refused"); })
     : message?.type === "morrow_bridge_takeover" ? (pairingSender(sender) ? takeOverBridgeConnection : () => { throw new Error("bridge_takeover_sender_refused"); })
@@ -6882,6 +6896,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   const consentExempt = message?.type === "morrow_course_data_consent_accept"
+    || message?.type === "morrow_course_data_consent_withdraw"
     || message?.type === "morrow_status"
     || message?.type === "morrow_open_setup"
     || message?.type === "morrow_disconnect";

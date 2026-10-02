@@ -1,7 +1,10 @@
 export function absoluteItemBankTabUrls(tabs, canvasOrigin) {
   if (!Array.isArray(tabs)) return [];
   let expectedOrigin;
-  try { expectedOrigin = new URL(canvasOrigin).origin; } catch { return tabs; }
+  // No usable origin means no URL here can be trusted against it: return
+  // nothing rather than the un-resolved tabs (the launch check downstream
+  // refuses them anyway, but a fail-open shape must not travel).
+  try { expectedOrigin = new URL(canvasOrigin).origin; } catch { return []; }
   return tabs.map((tab) => {
     if (!tab || typeof tab !== "object" || Array.isArray(tab) || typeof tab.html_url !== "string") return tab;
     try {

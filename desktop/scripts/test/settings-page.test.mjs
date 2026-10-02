@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import test, { after } from "node:test";
 import { clearExtensionGlobals, loadExtensionPage } from "./lib/extension-dom.mjs";
 import { problemText } from "../../connector/extension/src/bridge-problem-copy.js";
+import { COURSE_DATA_CONSENT_KEY, COURSE_DATA_CONSENT_VALUE } from "../../connector/extension/src/course-data-consent.js";
 import { CURATED_CATEGORY_SPECS } from "../../connector/extension/src/edit-policy.js";
 
 const root = new URL("../../", import.meta.url);
@@ -2036,14 +2037,13 @@ function workerStorageArea(values) {
 }
 
 /**
- * Disconnect Morrow as the extension runs it: connector/extension/src/service-worker.js is loaded
- * against the Chrome APIs it uses, then sent the popup's own morrow_disconnect message. Chrome keeps
- * the optional HTTPS permission here, so what the settings page reads next depends only on the state
- * the disconnect left. The worker loads with nothing saved and opens no bridge socket; `connected`
- * is then written to the same storage area a real connection uses. Returns the worker's answer and
- * what it left in chrome.storage.local.
+ * Drive the shipped worker: connector/extension/src/service-worker.js is loaded against the Chrome
+ * APIs it uses, then sent one extension-page message. Chrome keeps the optional HTTPS permission
+ * here, so what the settings page reads next depends only on the state the message left. The worker
+ * loads with nothing saved and opens no bridge socket; `saved` is then written to the same storage
+ * area a real connection uses. Returns the worker's answer and what it left in chrome.storage.local.
  */
-async function disconnectMorrow(connected) {
+async function driveWorker(message, senderPath, saved) {
   const extensionId = "a".repeat(32);
   const event = () => ({ addListener() {} });
   const local = {};
@@ -2072,15 +2072,25 @@ async function disconnectMorrow(connected) {
     await import(new URL("connector/extension/src/service-worker.js", root));
     for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => { setTimeout(resolve, 0); });
     assert.ok(serviceWorkerMessage, "the service worker registered no message listener");
-    Object.assign(local, connected);
+    Object.assign(local, saved);
     const answer = await new Promise((resolve, reject) => {
-      if (serviceWorkerMessage({ type: "morrow_disconnect" }, { id: extensionId, url: `chrome-extension://${extensionId}/popup/popup.html` }, resolve) !== true) reject(new Error("the worker never answered morrow_disconnect"));
+      if (serviceWorkerMessage(message, { id: extensionId, url: `chrome-extension://${extensionId}/${senderPath}` }, resolve) !== true) reject(new Error(`the worker never answered ${message.type}`));
     });
     return { answer, local };
   } finally {
     if (pageChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = pageChrome;
   }
+}
+
+/** Disconnect Morrow as the extension runs it: the popup's own morrow_disconnect message. */
+async function disconnectMorrow(connected) {
+  return await driveWorker({ type: "morrow_disconnect" }, "popup/popup.html", connected);
+}
+
+/** Withdraw consent as the extension runs it: the settings page's own withdraw message. */
+async function withdrawConsent(connected) {
+  return await driveWorker({ type: "morrow_course_data_consent_withdraw" }, "settings/settings.html", connected);
 }
 
 test("after Disconnect Morrow course file access reads off, even when Chrome keeps the HTTPS permission", async () => {
@@ -2104,4 +2114,47 @@ test("after Disconnect Morrow course file access reads off, even when Chrome kee
     assert.equal(saved.pairingAuthority.status, "disconnected");
     assert.equal(Number.isSafeInteger(saved.pairingAuthority.changedAt), true);
   }
+});
+
+test("withdrawing consent disconnects and removes the agreement, from the settings page only", async () => {
+  const connected = {
+    [COURSE_DATA_CONSENT_KEY]: COURSE_DATA_CONSENT_VALUE,
+    [COURSE_FILE_ACCESS_KEY]: true, token: "bridge-token", bindings: [ANATOMY],
+    siteAnchors: [], editPolicies: {}, editPolicyRevisions: {}, firstCourseRead: Date.now(),
+  };
+  const { answer, local } = await withdrawConsent(connected);
+  assert.deepEqual(answer, { ok: true, result: { withdrawn: true } });
+  assert.equal(local[COURSE_DATA_CONSENT_KEY], undefined);
+  assert.equal(local.token, undefined);
+  assert.equal(local.bindings, undefined);
+  assert.equal(local.pairingAuthority.status, "disconnected");
+
+  const refused = await driveWorker({ type: "morrow_course_data_consent_withdraw" }, "popup/popup.html", connected);
+  assert.equal(refused.answer.ok, false);
+  assert.equal(refused.answer.code, "bridge_consent_sender_refused");
+});
+
+test("the consent section states the agreement and withdraws in two deliberate presses", async () => {
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY]),
+    storage: { [COURSE_DATA_CONSENT_KEY]: COURSE_DATA_CONSENT_VALUE },
+    handlers: { morrow_course_data_consent_withdraw: () => ({ withdrawn: true }) },
+  });
+  await page.waitFor(() => page.text("#consent-status").includes("Given"), "the consent status never read given");
+  assert.equal(page.hidden("#withdraw-consent"), false);
+  await page.click("#withdraw-consent");
+  assert.equal(page.text("#withdraw-consent"), "Withdraw again");
+  // The other half of a double-click must not confirm.
+  await page.click("#withdraw-consent");
+  assert.deepEqual(page.messages("morrow_course_data_consent_withdraw"), []);
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  await page.click("#withdraw-consent");
+  await page.waitFor(() => page.messages("morrow_course_data_consent_withdraw").length === 1, "the withdraw message was never sent");
+  await page.waitFor(() => page.text("#notice").includes("Consent withdrawn"), "the withdrawn notice never showed");
+});
+
+test("with no agreement the consent section offers nothing to withdraw", async () => {
+  const page = await openSettings({ status: () => statusFixture([ANATOMY]), storage: {} });
+  await page.waitFor(() => page.text("#consent-status").includes("Not given"), "the consent status never read not-given");
+  assert.equal(page.hidden("#withdraw-consent"), true);
 });

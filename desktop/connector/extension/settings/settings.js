@@ -1,4 +1,5 @@
 import { problemCode, problemText } from "../src/bridge-problem-copy.js";
+import { COURSE_DATA_CONSENT_KEY, hasCourseDataConsent } from "../src/course-data-consent.js";
 import { CURATED_CATEGORY_SPECS } from "../src/edit-policy.js";
 
 const modePanel = document.querySelector("#mode-panel");
@@ -54,6 +55,8 @@ const openPlatformWhenNeededCheckbox = document.querySelector("#open-platform-wh
 const fileStorageStatus = document.querySelector("#file-storage-status");
 const enableFileStorageButton = document.querySelector("#enable-file-storage");
 const revokeFileStorageButton = document.querySelector("#revoke-file-storage");
+const consentStatus = document.querySelector("#consent-status");
+const withdrawConsentButton = document.querySelector("#withdraw-consent");
 const privateChatOpenButton = document.querySelector("#private-chat-open");
 const privateChatCloseButton = document.querySelector("#private-chat-close");
 const privateChatDrawer = document.querySelector("#private-chat-drawer");
@@ -181,6 +184,10 @@ const state = {
   discoveryFailed: new Set(),
   fileStorageAccess: { browserPermission: false, enabled: false, optedIn: false, checking: true },
   fileStorageBusy: false,
+  consent: { checking: true, given: false },
+  consentBusy: false,
+  consentConfirming: false,
+  consentArmedAt: 0,
   // WI-5.3: the course-list toolbar. `q` matches name and code; `platform` and `term` are exact
   // values or "all"; `scope` is one of the SCOPES ids.
   filters: { q: "", platform: "all", term: "all", scope: "all" },
@@ -1698,7 +1705,63 @@ function render(courseFocus = courseFocusToRestore()) {
   renderEditBanner();
   renderFileStorageAccess();
   renderOpenPlatformSetting();
+  renderConsent();
   renderPrivateChat();
+}
+
+/** One-tap consent withdrawal. The first click arms, the second (a separate press, never the other half of a double-click) withdraws. */
+function renderConsent() {
+  const consent = state.consent;
+  consentStatus.textContent = consent.checking
+    ? "Checking consent…"
+    : consent.given
+      ? "Given. Morrow Bridge reads course data only for your requests."
+      : "Not given. Morrow Bridge reads nothing until you agree in the popup or setup guide.";
+  withdrawConsentButton.hidden = consent.checking || !consent.given;
+  withdrawConsentButton.textContent = state.consentConfirming ? "Withdraw again" : "Withdraw consent";
+  withdrawConsentButton.disabled = state.consentBusy || consent.checking === true;
+}
+
+async function refreshConsent() {
+  try {
+    const stored = await chrome.storage.local.get(COURSE_DATA_CONSENT_KEY);
+    state.consent = { checking: false, given: hasCourseDataConsent(stored?.[COURSE_DATA_CONSENT_KEY]) };
+  } catch {
+    state.consent = { checking: false, given: false };
+  }
+  if (!state.consent.given) {
+    state.consentConfirming = false;
+    state.consentArmedAt = 0;
+  }
+}
+
+async function withdrawCourseDataConsent() {
+  if (state.consentBusy || !state.consent.given) return;
+  if (!state.consentConfirming) {
+    state.consentConfirming = true;
+    state.consentArmedAt = Date.now();
+    announce("Select Withdraw again to disconnect Morrow and remove its saved courses and permissions.");
+    renderConsent();
+    return;
+  }
+  // A double-click's second press must not confirm: only a later, deliberate press withdraws.
+  if (Date.now() - state.consentArmedAt < 800) return;
+  clearError();
+  clearNotice();
+  state.consentBusy = true;
+  renderConsent();
+  try {
+    const result = await request("morrow_course_data_consent_withdraw");
+    if (result?.withdrawn !== true) throw new Error("consent_withdraw_unconfirmed");
+    state.consentConfirming = false;
+    state.consentArmedAt = 0;
+    showNotice("Consent withdrawn. Morrow is disconnected and its saved courses and permissions are removed. Nothing is read until you agree again.");
+  } catch (cause) {
+    showError(cause);
+  } finally {
+    state.consentBusy = false;
+    await refresh();
+  }
 }
 
 function normalizeStatus(result) {
@@ -1779,6 +1842,8 @@ async function refresh() {
     if (generation !== state.readGeneration) return;
     refreshButton.disabled = state.busy;
     await refreshCourseFileStorageAccess();
+    if (generation !== state.readGeneration) return;
+    await refreshConsent();
     if (generation !== state.readGeneration) return;
     await refreshCourseMeta();
     if (generation !== state.readGeneration) return;
@@ -2560,6 +2625,7 @@ cancelSaveButton.addEventListener("click", () => {
 });
 enableFileStorageButton.addEventListener("click", () => void enableCourseFileStorageAccess());
 revokeFileStorageButton.addEventListener("click", () => void revokeCourseFileStorageAccess());
+withdrawConsentButton.addEventListener("click", () => void withdrawCourseDataConsent());
 openPlatformWhenNeededCheckbox.addEventListener("change", () => void setOpenPlatformWhenNeeded(openPlatformWhenNeededCheckbox.checked));
 privateChatOpenButton.addEventListener("click", openPrivateChat);
 privateChatCloseButton.addEventListener("click", () => void closePrivateChat());

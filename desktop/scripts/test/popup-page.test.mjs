@@ -312,6 +312,27 @@ test("a Bridge Morrow cannot confirm names the Bridge folder to load", async () 
   assert.match(page.text("#error"), /Pair Morrow again/);
 });
 
+test("a version-mismatched Bridge reloads itself in one press", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, runtimeHealthy: false, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: { morrow_open_setup: () => ({ opened: true }) },
+  });
+  assert.equal(page.hidden("#reload-bridge"), false);
+  assert.equal(page.text("#reload-bridge"), "Reload Morrow Bridge");
+  assert.equal(page.runtimeReloads, 0);
+  const sent = page.messages().length;
+  await page.click("#reload-bridge");
+  assert.equal(page.runtimeReloads, 1);
+  assert.equal(page.messages().length, sent);
+});
+
+test("a healthy Bridge shows no reload control", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+  });
+  assert.equal(page.hidden("#reload-bridge"), true);
+});
+
 test("a Bridge whose version Morrow refused offers the setup guide, not a new connection", async () => {
   const page = await openPopup({
     status: () => connection({ paired: true, connected: false, authenticationFailed: false, versionMismatch: true, runtimeHealthy: false, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),

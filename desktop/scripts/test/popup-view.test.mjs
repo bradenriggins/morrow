@@ -330,6 +330,7 @@ test("the popup answers a failed first status read with a retry, then clears it 
     ".edit-access": stubElement(),
     "#editing-settings": stubElement("Open Plan and Edit settings"),
     "#setup-guide": stubElement("Open setup guide"),
+    "#reload-bridge": stubElement("Reload Morrow Bridge", true),
     "#edit-access-banner": stubElement("", true),
     "#edit-access-banner-text": stubElement(),
     "#ask-first-all-courses": stubElement("Ask first in all courses"),

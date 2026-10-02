@@ -575,7 +575,7 @@ stale name here.
 | `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:179` |
 | `Choose courses` | Popup | `connector/extension/popup/popup-view.js:181` |
 | `Check connection` | Popup | `connector/extension/popup/popup-view.js:180` |
-| `Pair Canvas account` | Popup | `connector/extension/popup/popup.html:59` |
+| `Pair Canvas account` | Popup | `connector/extension/popup/popup.html:60` |
 | `Open Canvas` | Popup | `connector/extension/popup/popup-view.js:139` |
 | `Open Moodle` | Popup | `connector/extension/popup/popup-view.js:140` |
 | `All courses` | Popup | `connector/extension/popup/popup.html:43` |
@@ -586,7 +586,8 @@ stale name here.
 | `Disconnect Morrow` | Popup | `connector/extension/popup/popup.html:49` |
 | `Open Plan and Edit settings` | Popup | `connector/extension/popup/popup.html:51` |
 | `Open setup guide` | Popup | `connector/extension/popup/popup.html:53` |
-| `How to connect` | Popup | `connector/extension/popup/popup.html:55` |
+| `Reload Morrow Bridge` | Popup | `connector/extension/popup/popup.html:54` |
+| `How to connect` | Popup | `connector/extension/popup/popup.html:56` |
 | `Guide me` | Setup guide | `connector/extension/onboarding/onboarding.html:34` |
 | `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:35` |
 | `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:55`, `connector/extension/onboarding/onboarding.html:55` |
@@ -594,21 +595,22 @@ stale name here.
 | `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:35` |
 | `Open Canvas or Moodle when Morrow needs it.` | Plan and Edit settings | `connector/extension/settings/settings.html:148` |
 | `Select` | Plan and Edit settings | `connector/extension/settings/settings.html:50` |
-| `Connect` | Plan and Edit settings | `connector/extension/settings/settings.js:1245` |
+| `Connect` | Plan and Edit settings | `connector/extension/settings/settings.js:1252` |
 | `Show more` | Plan and Edit settings | `connector/extension/settings/settings.html:57` |
 | `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:60` |
 | `Plan. Ask first.` | Plan and Edit settings | `connector/extension/settings/settings.html:65` |
 | `Edit. Routine edits.` | Plan and Edit settings | `connector/extension/settings/settings.html:66` |
-| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:161`, `connector/extension/settings/settings.js:1570` |
-| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:1570` |
+| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:161`, `connector/extension/settings/settings.js:1577` |
+| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:1577` |
 | `Remove HTTPS file access` | Plan and Edit settings | `connector/extension/settings/settings.html:162` |
 | `Return selected courses to Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:121` |
-| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:873` |
-| `Review and save` | Plan and Edit settings (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1544` |
+| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:122`, `connector/extension/settings/settings.js:880` |
+| `Review and save` | Plan and Edit settings (WI-5.5 Customize view summary bar) | `connector/extension/settings/settings.js:1551` |
 | `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:131` |
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:132` |
-| `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:439` |
-| `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:440` |
+| `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:446` |
+| `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:447` |
+| `Withdraw consent` | Plan and Edit settings | `connector/extension/settings/settings.js:1721` |
 | `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
 | `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
 | `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
@@ -638,6 +640,7 @@ Names a person reads as landmarks rather than presses:
 | `Your courses` | Plan and Edit settings | `connector/extension/settings/settings.html:32` |
 | `Course access` | Plan and Edit settings | `connector/extension/settings/settings.html:74` |
 | `Course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:154` |
+| `Course data consent` | Plan and Edit settings | `connector/extension/settings/settings.html:172` |
 
 ---
 

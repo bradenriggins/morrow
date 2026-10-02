@@ -14,7 +14,7 @@
     "build": "pnpm -r --if-present build",
     "clean": "pnpm -r --if-present clean",
     "typecheck": "pnpm build",
-    "audit:dependencies": "pnpm audit --audit-level moderate && pnpm --dir installer --ignore-workspace audit --audit-level moderate",
+    "audit:dependencies": "pnpm audit --audit-level moderate && pnpm --dir installer audit --audit-level moderate",
     "test": "pnpm build && pnpm -r --workspace-concurrency=1 --if-present test && pnpm scripts:test && pnpm test:desktop",
     "scripts:test": "node --test --test-concurrency=2 scripts/test/*.test.mjs",
     "check": "pnpm audit:dependencies && pnpm generated:check && pnpm test",

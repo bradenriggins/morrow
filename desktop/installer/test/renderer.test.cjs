@@ -532,6 +532,24 @@ test("setup stops asking once the runtime start window has passed", async (t) =>
   assert.equal(dom.element("#action-title").textContent, "Morrow is getting ready.");
 });
 
+test("an action in flight says it is working instead of going silent", async () => {
+  const seen = [];
+  const dom = await load("working", async (method) => {
+    if (method === "installer:reconcile-bridge") {
+      seen.push({
+        loadingHidden: dom.element("#loading").hidden,
+        loadingText: dom.element("#loading").textContent,
+      });
+    }
+    return ok(state());
+  });
+  const before = dom.element("#action-body").querySelector("[data-action]");
+  await dom.element("#action-body").dispatch("click", { target: before });
+  await settle();
+  assert.deepEqual(seen, [{ loadingHidden: false, loadingText: "Working…" }]);
+  assert.equal(dom.element("#loading").hidden, true);
+});
+
 test("focus survives the busy re-render an action causes", async () => {
   const busy = [];
   const dom = await load("focus", async (method) => {
@@ -1220,6 +1238,30 @@ test("an update that did not start names the running version and offers the retr
     "Morrow could not download the update: this computer does not have enough free space for it."
   );
   assert.equal(dom.element("#updates-actions").querySelector("[data-action]").dataset.action, "check-for-updates");
+});
+
+test("a ready update blocked by course work names the version and offers to try again", async () => {
+  const busy = {
+    schema: "morrow.desktop-update.v1",
+    status: "ready",
+    currentVersion: "1.0.0",
+    availableVersion: "1.0.1",
+    automatic: true,
+    reason: "active_or_uncertain_operations"
+  };
+  const methods = [];
+  const dom = await load("update-busy", async (method) => {
+    methods.push(method);
+    return ok(state({ updates: busy }));
+  });
+  assert.equal(dom.element("#updates-panel").hidden, false);
+  assert.equal(dom.element("#updates-copy").textContent, "Version 1.0.1 is ready, but Morrow is busy with course work and cannot restart yet. Try again when course work is idle.");
+  const retry = dom.element("#updates-actions").querySelector("[data-action]");
+  assert.equal(retry.dataset.action, "install-update");
+  assert.match(dom.element("#updates-actions").innerHTML, /Try again/);
+  await dom.element("#updates-actions").dispatch("click", { target: retry });
+  await settle();
+  assert.ok(methods.includes("installer:install-update"), "the retry asks Morrow to install again");
 });
 
 test("a background update event redraws the open update status without another state request", async () => {

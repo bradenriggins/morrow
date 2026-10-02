@@ -1952,20 +1952,33 @@ try {
   const fullEditOptions = await runtime.editOptions(binding.sourceBindingId);
   const canvasCatalog = JSON.parse(readFileSync(join(EXTENSION, "generated/canvas-api-catalog.json"), "utf8"));
   const canvasWriteOperations = canvasCatalog.operations.filter((operation) => operation.readOnly === false);
-  // Only an irreversible, destructive admitted write stays review-only: never
-  // a standing permission, approved change by change instead. Deleting a New
-  // Quiz takes every item in it with it and Canvas does not restore it;
-  // archiving an Item Bank, deleting one of its entries or a quiz's use of one,
-  // moving an entry, removing a tag, and raising a share to edit can reach
-  // content outside the selected course. Canvas gives no complete list of that
-  // reach. Every other scoped, admitted write with exact readback is an
-  // ordinary standing Edit grant, including the general
-  // New Quiz question update (its id-preserving guard lives in
-  // new-quiz-item-guard.js, not in what is grantable) and creating a New Quiz
-  // or any non-destructive Item Bank write.
+  // An admitted write with its own tailored review reason is never a standing
+  // permission, approved change by change instead. Deleting a New Quiz takes
+  // every item in it with it and Canvas does not restore it; archiving an
+  // Item Bank, deleting one of its entries or a quiz's use of one, moving an
+  // entry, removing a tag, and raising a share to edit can reach content
+  // outside the selected course. Canvas gives no complete list of that reach.
+  // Every other scoped, admitted write with exact readback is an ordinary
+  // standing Edit grant - except a DELETE, which removes what it names and is
+  // approved change by change too, unless it only touches the educator's own
+  // bookmarks, planner, favorites, stream, subscriptions, read state, or AI
+  // chats. That includes the general New Quiz question update (its
+  // id-preserving guard lives in new-quiz-item-guard.js, not in what is
+  // grantable) and creating a New Quiz or any non-destructive Item Bank write.
   const reviewOnlyAdmittedCanvasWrites = new Set([
     "canvas_delete_new_quiz", "canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry", "canvas_item_bank_delete_quiz_bank_entry",
     "canvas_item_bank_move_entry", "canvas_item_bank_remove_entry_tag", "canvas_item_bank_update_share",
+  ]);
+  const standingGrantDeleteTools = new Set([
+    "canvas_delete_bookmark", "canvas_delete_planner_note", "canvas_delete_planner_override",
+    "canvas_delete_ai_conversation", "canvas_delete_ai_experience",
+    "canvas_clear_course_nicknames", "canvas_remove_course_nickname", "canvas_reset_course_favorites",
+    "canvas_remove_group_from_favorites", "canvas_reset_group_favorites",
+    "canvas_hide_stream_item", "canvas_hide_all_stream_items",
+    "canvas_unsubscribe_from_topic_courses", "canvas_unsubscribe_from_topic_groups",
+    "canvas_mark_entry_as_unread_courses", "canvas_mark_entry_as_unread_groups",
+    "canvas_mark_all_entries_as_unread_courses", "canvas_mark_all_entries_as_unread_groups",
+    "canvas_mark_topic_as_unread_courses", "canvas_mark_topic_as_unread_groups",
   ]);
   const supportedCanvasWrite = (operation) => {
     const admission = canvasOperationAdmission(operation);
@@ -1973,9 +1986,13 @@ try {
       && admission.write.state === "admitted"
       && canvasReadbackAssessment(canvasCatalog.operations, operation, admission).state === "structurally_exact";
   };
+  const reviewOnlyDelete = (operation) => String(operation.method || "").toUpperCase() === "DELETE"
+    && !standingGrantDeleteTools.has(operation.toolName)
+    && !reviewOnlyAdmittedCanvasWrites.has(operation.toolName);
   const expectedCanvasEditActions = canvasWriteOperations
     .filter((operation) => supportedCanvasWrite(operation)
-      && !reviewOnlyAdmittedCanvasWrites.has(operation.toolName))
+      && !reviewOnlyAdmittedCanvasWrites.has(operation.toolName)
+      && !reviewOnlyDelete(operation))
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
   const publishedCanvasEditActions = fullEditOptions.options
@@ -1983,7 +2000,7 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.equal(expectedCanvasEditActions.length, 338);
+  assert.equal(expectedCanvasEditActions.length, 261);
   // A bound write with no exact readback is offered for approval one change at a time.
   const nonexactCanvasActions = canvasWriteOperations
     .filter((operation) => {
@@ -1998,6 +2015,9 @@ try {
   const expectedCanvasReviewActions = [...new Set([
     ...[...reviewOnlyAdmittedCanvasWrites].map((toolName) => `action:canvas:${toolName}`),
     ...nonexactCanvasActions,
+    ...canvasWriteOperations
+      .filter((operation) => supportedCanvasWrite(operation) && reviewOnlyDelete(operation))
+      .map((operation) => `action:canvas:${operation.toolName}`),
   ])].sort();
   const publishedCanvasReviewActions = fullEditOptions.options
     .filter((option) => option.availability === "review" && option.id.startsWith("action:canvas:"))
@@ -2033,12 +2053,13 @@ try {
   assert.equal(fullEditOptions.options.some((option) => option.availability === "edit" && option.verification !== "checked"), false);
   assert.equal(fullEditOptions.options.some((option) => option.verification === "unchecked"), false);
   assert.equal(fullEditOptions.options.some((option) => option.availability === "review" && option.verification !== undefined), false);
-  // Deleting a discussion entry now reads back through the entry list, so it is a checked Edit action.
+  // Deleting a discussion entry removes course content, so it is approved change by
+  // change even though its readback through the entry list is exact.
   const deleteEntryAction = fullEditOptions.options.find((option) => option.id === "action:canvas:canvas_delete_entry_courses");
-  assert.equal(deleteEntryAction?.availability, "edit");
-  assert.equal(deleteEntryAction?.verification, "checked");
+  assert.equal(deleteEntryAction?.availability, "review");
+  assert.equal(deleteEntryAction?.verification, undefined);
   assert.equal(fullEditOptions.options.find((option) => option.id === "canvas_page_content").verification, "checked");
-  process.stderr.write("[browser-test] published Edit actions equal the exact course-scoped Canvas writes, retain four destructive review cases, omit every nonexact action, and refuse a blanket field grant\n");
+  process.stderr.write("[browser-test] published Edit actions equal the exact course-scoped Canvas writes, keep every DELETE review-only, omit every nonexact action, and refuse a blanket field grant\n");
   process.stderr.write("[browser-test] one Canvas site anchor selected three exact courses, including course 501 after paged discovery\n");
 
   await popup.bringToFront();

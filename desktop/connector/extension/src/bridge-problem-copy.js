@@ -64,6 +64,11 @@ const COPY = {
     detail: "Morrow Bridge starts a connection only when you select Pair Morrow in its popup or its setup guide.",
     action: "Open the Morrow Bridge popup and select Pair Morrow.",
   },
+  bridge_consent_sender_refused: {
+    title: "Consent was not withdrawn from Plan and Edit settings",
+    detail: "Morrow Bridge withdraws course data consent only when you select Withdraw consent in its Plan and Edit settings.",
+    action: "Open Plan and Edit settings and select Withdraw consent.",
+  },
   bridge_reconnect_sender_refused: {
     title: "Connection check was not started from Morrow Bridge",
     detail: "Only the Morrow Bridge popup can retry its saved connection to Morrow.",

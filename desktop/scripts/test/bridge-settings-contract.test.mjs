@@ -340,16 +340,14 @@ function canvasOption(options, toolName) {
   return options.find((entry) => entry.id === `action:canvas:${toolName}`);
 }
 
-// Only an admitted Canvas write that is both destructive and irreversible is
-// still published for review only: deleting a New Quiz takes every item in
-// it and Canvas does not restore it; archiving an Item Bank and deleting one
-// of its entries or a quiz's use of one can each reach every quiz, in every
-// course, that draws from the bank, which Canvas gives no complete list of.
-// scripts/test/canvas-new-quiz-item-guard.test.mjs holds the general New
-// Quiz question update, which is destructive-free (its id-preserving guard
-// lives in new-quiz-item-guard.js, independent of what is grantable) and so
-// is an ordinary standing Edit grant when its exact readback is available,
-// like creating a New Quiz and the other eight Item Bank writes.
+// An admitted Canvas write with its own tailored review reason: deleting a New Quiz takes every
+// item in it and Canvas does not restore it; archiving an Item Bank and deleting one of its
+// entries or a quiz's use of one can each reach every quiz, in every course, that draws from the
+// bank, which Canvas gives no complete list of.
+// scripts/test/canvas-new-quiz-item-guard.test.mjs holds the general New Quiz question update,
+// which is destructive-free (its id-preserving guard lives in new-quiz-item-guard.js, independent
+// of what is grantable) and so is an ordinary standing Edit grant when its exact readback is
+// available, like creating a New Quiz and the other eight Item Bank writes.
 const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
   ["canvas_delete_new_quiz", /Canvas does not restore it/],
   ["canvas_item_bank_archive_bank", /approved change by change rather than switched on in advance/],
@@ -360,12 +358,53 @@ const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
   ["canvas_item_bank_update_share", /approved change by change rather than switched on in advance/],
 ]);
 
-function supportedEditableCanvasWrites() {
+// Every admitted Canvas DELETE removes what it names, so every one is approved change by change
+// - except the listed personal preference changes, which touch only the educator's own bookmarks,
+// planner, favorites, stream, subscriptions, read state, and AI chats. This mirror of the policy's
+// exemption set must name the same tools: a DELETE missing here fails the contract below instead
+// of silently becoming a standing grant.
+const CANVAS_DELETE_STANDING_GRANTS = new Set([
+  "canvas_delete_bookmark",
+  "canvas_delete_planner_note",
+  "canvas_delete_planner_override",
+  "canvas_delete_ai_conversation",
+  "canvas_delete_ai_experience",
+  "canvas_clear_course_nicknames",
+  "canvas_remove_course_nickname",
+  "canvas_reset_course_favorites",
+  "canvas_remove_group_from_favorites",
+  "canvas_reset_group_favorites",
+  "canvas_hide_stream_item",
+  "canvas_hide_all_stream_items",
+  "canvas_unsubscribe_from_topic_courses",
+  "canvas_unsubscribe_from_topic_groups",
+  "canvas_mark_entry_as_unread_courses",
+  "canvas_mark_entry_as_unread_groups",
+  "canvas_mark_all_entries_as_unread_courses",
+  "canvas_mark_all_entries_as_unread_groups",
+  "canvas_mark_topic_as_unread_courses",
+  "canvas_mark_topic_as_unread_groups",
+]);
+
+function admittedExactCanvasWrites() {
   return canvasOperations.filter((operation) => operation.readOnly === false
     && canvasAdmissionIsBound(canvasOperationAdmission(operation))
     && canvasOperationAdmission(operation).write.state === "admitted"
-    && canvasReadbackAssessment(canvasOperations, operation).state === "structurally_exact"
-    && !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName));
+    && canvasReadbackAssessment(canvasOperations, operation).state === "structurally_exact");
+}
+
+function supportedEditableCanvasWrites() {
+  return admittedExactCanvasWrites()
+    .filter((operation) => !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName)
+      && (String(operation.method || "").toUpperCase() !== "DELETE"
+        || CANVAS_DELETE_STANDING_GRANTS.has(operation.toolName)));
+}
+
+function reviewOnlyDeleteWrites() {
+  return admittedExactCanvasWrites()
+    .filter((operation) => String(operation.method || "").toUpperCase() === "DELETE"
+      && !CANVAS_DELETE_STANDING_GRANTS.has(operation.toolName)
+      && !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName));
 }
 
 test("Canvas Edit categories are exactly the bound admitted writes with exact readback", () => {
@@ -374,7 +413,8 @@ test("Canvas Edit categories are exactly the bound admitted writes with exact re
   const supported = supportedEditableCanvasWrites()
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(supported.length, 338);
+  assert.equal(supported.length, 338 - reviewOnlyDeleteWrites().length);
+  assert.ok(reviewOnlyDeleteWrites().length > 0);
   assert.deepEqual(editable, supported);
   // A bound write with no exact readback is offered for review too, one change at a time.
   const uncheckable = canvasOperations.filter((operation) => operation.readOnly === false
@@ -383,7 +423,9 @@ test("Canvas Edit categories are exactly the bound admitted writes with exact re
     && canvasReadbackAssessment(canvasOperations, operation).state !== "structurally_exact");
   assert.deepEqual(
     options.filter((option) => option.availability === "review").map((option) => option.id).sort(),
-    [...new Set([...REVIEW_ONLY_ADMITTED_CANVAS_WRITES.keys(), ...uncheckable.map((operation) => operation.toolName)])]
+    [...new Set([...REVIEW_ONLY_ADMITTED_CANVAS_WRITES.keys(),
+      ...uncheckable.map((operation) => operation.toolName),
+      ...reviewOnlyDeleteWrites().map((operation) => operation.toolName)])]
       .map((toolName) => `action:canvas:${toolName}`).sort(),
   );
   for (const [toolName, reviewReason] of REVIEW_ONLY_ADMITTED_CANVAS_WRITES) {
@@ -394,6 +436,22 @@ test("Canvas Edit categories are exactly the bound admitted writes with exact re
   }
   for (const operation of canvasOperations.filter((entry) => entry.readOnly === false && canvasOperationAdmission(entry).write.state === "held")) {
     assert.equal(canvasOption(options, operation.toolName), undefined, operation.toolName);
+  }
+});
+
+test("Canvas deletions that remove course content are approved change by change", () => {
+  const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
+  for (const toolName of ["canvas_delete_assignment", "canvas_delete_quiz", "canvas_delete_topic_courses",
+      "canvas_delete_entry_courses", "canvas_delete_module", "canvas_delete_file", "canvas_delete_page_courses",
+      "canvas_delete_section", "canvas_delete_user_from_root_account",
+      "canvas_conclude_deactivate_or_delete_enrollment", "canvas_delete_calendar_event"]) {
+    const option = canvasOption(options, toolName);
+    assert.equal(option.availability, "review", toolName);
+    assert.match(option.reviewReason, /Morrow cannot undo it.*one at a time/, toolName);
+  }
+  for (const toolName of CANVAS_DELETE_STANDING_GRANTS) {
+    const option = canvasOption(options, toolName);
+    assert.equal(option.availability, "edit", toolName);
   }
 });
 

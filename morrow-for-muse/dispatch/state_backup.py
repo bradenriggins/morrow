@@ -82,6 +82,12 @@ _FORMAT_VERSION = 1
 _HIGHWATER_NAME = "journal.generation.highwater"
 # The restore marker, written by restore (W6-P1-2).
 _RESTORED_MARKER = "restored_from.json"
+# The in-progress marker: restore writes it before copying a single file
+# and removes it after the final marker lands. A crash mid-restore leaves
+# half-replaced state with this marker and no final marker, which the
+# journal refuses (an interrupted restore is not reconcilable: only a
+# completed restore is).
+_RESTORE_IN_PROGRESS = "restore_in_progress.json"
 _DRIVE = re.compile(r"^[A-Za-z]:")
 
 
@@ -360,6 +366,15 @@ def restore_backup(backup_dir, yes=False):
     tsd = _tree_state_dir()
     journal_dir = os.path.join(tsd, "journal")
     with _ex._journal_locked():
+        os.makedirs(journal_dir, exist_ok=True)
+        progress = os.path.join(journal_dir, _RESTORE_IN_PROGRESS)
+        with open(progress, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "started_at": _utc_now(),
+                "backup_dir": backup_dir,
+            }, indent=2, sort_keys=True) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
         for name, meta in manifest["sets"].items():
             for rel in (meta.get("files") or {}):
                 _check_rel_safe(rel, "restore %s/%s" % (backup_dir, name))
@@ -414,6 +429,10 @@ def restore_backup(backup_dir, yes=False):
                 "backup_created_at": manifest.get("created_at"),
                 "backup_tree_id": manifest.get("tree_id"),
             }, indent=2, sort_keys=True) + "\n")
+        try:
+            os.unlink(progress)
+        except OSError:
+            pass
     sys.stderr.write(
         "morrow: restored backup %s (created %s).\n"
         "morrow: the journal is FAIL-CLOSED until you reconcile. In order:\n"
