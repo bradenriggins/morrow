@@ -386,8 +386,14 @@ export async function executeMoodleInPage(input) {
     return definition;
   };
   const courseArgument = (argumentsValue, binding, context) => {
+    // A course-scoped operation acts on exactly the reviewed course: the
+    // binding must name one, and the argument must be that same course. An
+    // omitted binding course would leave any course_id unpinned. (The
+    // site-level course listing takes no course argument and never reaches
+    // this check, so its binding stays course-free.)
     const courseId = id(argumentsValue.course_id);
-    if (!courseId || (binding.courseId !== undefined && courseId !== id(binding.courseId))) return "";
+    const boundCourse = id(binding.courseId);
+    if (!courseId || !boundCourse || courseId !== boundCourse) return "";
     return courseId;
   };
   const validString = (value, maximum) => typeof value === "string" && value.length <= maximum && !value.includes("\u0000");
