@@ -38,9 +38,19 @@ async function fixture(t, options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-claude-desktop-"));
   // A process a test started from this folder ends before the folder goes, so none outlives it.
   const beforeRemove = [];
+  const serverPidsPath = path.join(root, "server-processes.txt");
   t.after(async () => {
     for (const stop of beforeRemove) await stop();
-    await fs.rm(root, { recursive: true, force: true });
+    const serverPids = (await fs.readFile(serverPidsPath, "utf8").catch((error) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    })).trim().split(/\s+/u).filter(Boolean).map(Number);
+    await waitFor(() => serverPids.every((pid) => !processAlive(pid)));
+    // Windows can release an exited image's file handle just after process death.
+    // Only after proving every owned server ended, allow a bounded filesystem grace.
+    // Persistent cleanup errors still fail the fixture; no live process is ignored.
+    await fs.rm(root, { recursive: true, force: true,
+      maxRetries: process.platform === "win32" ? 5 : 0, retryDelay: 100 });
   });
   const workspace = path.join(root, "Materials with spaces");
   const state = path.join(root, "State");
@@ -61,6 +71,7 @@ async function fixture(t, options = {}) {
   ].join("\n") : "";
   await fs.writeFile(server, `const readline = require("node:readline");
 const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(serverPidsPath)}, String(process.pid) + "\\n");
 ${stubbornServer}
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
@@ -112,6 +123,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     upstreams: await fs.realpath(upstreams),
     descendantPath,
     stopBeforeRemove: (stop) => beforeRemove.push(stop),
+    serverPidsPath,
     setup,
     extracted,
     managedLauncherPath,
@@ -126,6 +138,18 @@ const CONNECTION_OBSERVATION_INTERVAL_MS = 20;
 
 function processEnded(child) {
   return child.exitCode !== null || child.signalCode !== null;
+}
+
+/** Register awaited shutdown before the fixture's file-removal hook, even on early failure. */
+function launchFixture(input, args, options) {
+  const child = spawn(process.execPath, args, options);
+  const closed = once(child, "close");
+  closed.catch(() => {});
+  input.stopBeforeRemove(async () => {
+    if (!processEnded(child)) child.stdin.end();
+    await closed;
+  });
+  return child;
 }
 
 /**
@@ -289,8 +313,7 @@ test("native Claude bundle uses the client Node runtime and requires a completed
   const launcher = path.join(input.extracted, "server", "launch.cjs");
   assert.doesNotMatch(await fs.readFile(launcher, "utf8"), /must-not-be-bundled/);
   assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: false, running: false });
-  const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (child.exitCode === null) child.kill(); });
+  const child = launchFixture(input, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
   const output = [];
   child.stdout.on("data", (chunk) => output.push(chunk));
   child.stderr.on("data", () => {});
@@ -320,7 +343,7 @@ test("the managed Claude launcher terminates its complete stubborn server proces
   if (process.platform === "win32") return t.skip("the POSIX process-group regression is not available on Windows");
   const input = await fixture(t, { stubbornTree: true });
   const launcher = path.join(input.extracted, "server", "launch.cjs");
-  const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
+  const child = launchFixture(input, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
   // Registered before the first wait: a failure anywhere below still ends the whole tree.
   input.stopBeforeRemove(() => stopStubbornTree(child, input));
   child.stdout.resume();
@@ -343,12 +366,14 @@ test("the managed Claude launcher terminates its complete stubborn server proces
 test("the managed Claude launcher refuses malformed UTF-8 before recording a connection", async (t) => {
   const input = await fixture(t, { invalidUtf8: true });
   const launcher = path.join(input.extracted, "server", "launch.cjs");
-  const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (child.exitCode === null) child.kill("SIGKILL"); });
+  const child = launchFixture(input, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
   child.stderr.resume();
   const stopped = once(child, "close");
   await handshake(child, { complete: false });
   await stopped;
+  const serverPid = Number((await fs.readFile(input.serverPidsPath, "utf8")).trim());
+  assert.ok(Number.isSafeInteger(serverPid) && serverPid > 0);
+  await waitFor(() => !processAlive(serverPid));
   await assert.rejects(() => fs.stat(input.setup.receiptPath), { code: "ENOENT" });
 });
 
@@ -456,9 +481,8 @@ test("the Windows start-time query asks for both ids and its answer is read", ()
 for (const invalidJsonRpc of [false, true]) {
   test(invalidJsonRpc ? "a non-JSON-RPC response cannot mark Claude configured" : "fragmented Unicode in a real initialize response is decoded correctly", async (t) => {
     const input = await fixture(t, { fragmentUnicode: true, invalidJsonRpc });
-    const child = spawn(process.execPath, [path.join(input.extracted, "server", "launch.cjs")], { stdio: ["pipe", "pipe", "pipe"] });
-    t.after(() => { if (child.exitCode === null) child.kill(); });
-    const output = [];
+    const child = launchFixture(input, [path.join(input.extracted, "server", "launch.cjs")], { stdio: ["pipe", "pipe", "pipe"] });
+      const output = [];
     child.stdout.on("data", (chunk) => output.push(chunk));
     child.stderr.on("data", () => {});
     await handshake(child);
@@ -477,11 +501,10 @@ const proofSimulation = path.join(__dirname, "fixtures", "claude-proof-simulatio
 /** Starts the fixture launcher with its Claude process proof answered as `mode` says (see the fixture). */
 function launchWithProof(t, input, mode) {
   const log = path.join(input.root, `proof-questions-${crypto.randomUUID()}.log`);
-  const child = spawn(process.execPath, ["--require", proofSimulation, path.join(input.extracted, "server", "launch.cjs")], {
+  const child = launchFixture(input, ["--require", proofSimulation, path.join(input.extracted, "server", "launch.cjs")], {
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env, MORROW_TEST_CLAUDE_PROOF: mode, MORROW_TEST_CLAUDE_PROOF_LOG: log },
   });
-  t.after(() => { if (!processEnded(child)) child.kill(); });
   const output = [];
   child.stdout.on("data", (chunk) => output.push(chunk));
   child.stderr.resume();
@@ -593,8 +616,7 @@ test("a receipt must say whether its Claude process proof answered, and an unver
 test("native removal of the installed launcher closes its proxy and clears the connection receipt", async (t) => {
   const input = await fixture(t);
   const launcher = path.join(input.extracted, "server", "launch.cjs");
-  const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (child.exitCode === null) child.kill(); });
+  const child = launchFixture(input, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
   child.stdout.resume();
   child.stderr.resume();
   await handshake(child);
@@ -611,8 +633,7 @@ test("native removal of the installed launcher closes its proxy and clears the c
 test("a closed client's receipt stops proving installation when its launcher is removed or replaced", async (t) => {
   const input = await fixture(t);
   const launcher = path.join(input.extracted, "server", "launch.cjs");
-  const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (child.exitCode === null) child.kill(); });
+  const child = launchFixture(input, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
   child.stderr.resume();
   await handshake(child);
   await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, child);
@@ -630,8 +651,7 @@ test("a closed client's receipt stops proving installation when its launcher is 
 test("an arbitrary copied launcher cannot refresh the managed connection receipt", async (t) => {
   const input = await fixture(t);
   const firstLauncher = path.join(input.extracted, "server", "launch.cjs");
-  const first = spawn(process.execPath, [firstLauncher], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (first.exitCode === null) first.kill(); });
+  const first = launchFixture(input, [firstLauncher], { stdio: ["pipe", "pipe", "pipe"] });
   first.stderr.resume();
   await handshake(first);
   await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, first);
@@ -639,8 +659,7 @@ test("an arbitrary copied launcher cannot refresh the managed connection receipt
   await fs.mkdir(secondDirectory);
   const secondLauncher = path.join(secondDirectory, "launch.cjs");
   await fs.copyFile(firstLauncher, secondLauncher);
-  const second = spawn(process.execPath, [secondLauncher], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (second.exitCode === null) second.kill(); });
+  const second = launchFixture(input, [secondLauncher], { stdio: ["pipe", "pipe", "pipe"] });
   const errors = [];
   second.stderr.on("data", (chunk) => errors.push(chunk));
   assert.equal((await once(second, "close"))[0], 1);
@@ -655,8 +674,7 @@ test("an arbitrary copied launcher cannot refresh the managed connection receipt
 test("replacing Morrow setup revokes the running old workspace and prevents its installed copy reopening", async (t) => {
   const input = await fixture(t);
   const launcher = path.join(input.extracted, "server", "launch.cjs");
-  const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (child.exitCode === null) child.kill(); });
+  const child = launchFixture(input, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
   child.stderr.resume();
   await handshake(child);
   await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed, child);
@@ -664,7 +682,7 @@ test("replacing Morrow setup revokes the running old workspace and prevents its 
   await fs.rm(path.dirname(input.setup.bundlePath), { recursive: true });
   await stopped;
   assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: false, running: false });
-  const reopened = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
+  const reopened = launchFixture(input, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
   const errors = [];
   reopened.stderr.on("data", (chunk) => errors.push(chunk));
   assert.equal((await once(reopened, "close"))[0], 1);
@@ -674,8 +692,7 @@ test("replacing Morrow setup revokes the running old workspace and prevents its 
 test("the installer record alone activates one generation and revokes a stale receipt and process", async (t) => {
   const input = await fixture(t);
   const launcherA = input.managedLauncherPath;
-  const processA = spawn(process.execPath, [launcherA], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (processA.exitCode === null) processA.kill(); });
+  const processA = launchFixture(input, [launcherA], { stdio: ["pipe", "pipe", "pipe"] });
   processA.stdout.resume();
   processA.stderr.resume();
   await handshake(processA);
@@ -701,7 +718,7 @@ test("the installer record alone activates one generation and revokes a stale re
   const { unpackExtension } = await import("@anthropic-ai/mcpb");
   assert.equal(await unpackExtension({ mcpbPath: setupB.bundlePath, outputDir: extractedB, silent: true }), true);
 
-  const inactiveB = spawn(process.execPath, [launcherB], { stdio: ["pipe", "pipe", "pipe"] });
+  const inactiveB = launchFixture(input, [launcherB], { stdio: ["pipe", "pipe", "pipe"] });
   inactiveB.stderr.resume();
   assert.equal((await once(inactiveB, "close"))[0], 1, "a prepared but unrecorded generation cannot start");
 
@@ -710,12 +727,11 @@ test("the installer record alone activates one generation and revokes a stale re
   assert.deepEqual(await inspect(input), { installed: false, running: false }, "A's valid receipt became stale at the record commit");
   await stoppedA;
 
-  const reopenedA = spawn(process.execPath, [launcherA], { stdio: ["pipe", "pipe", "pipe"] });
+  const reopenedA = launchFixture(input, [launcherA], { stdio: ["pipe", "pipe", "pipe"] });
   reopenedA.stderr.resume();
   assert.equal((await once(reopenedA, "close"))[0], 1, "generation A cannot reopen while B is active");
 
-  const processB = spawn(process.execPath, [launcherB], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => { if (processB.exitCode === null) processB.kill(); });
+  const processB = launchFixture(input, [launcherB], { stdio: ["pipe", "pipe", "pipe"] });
   processB.stdout.resume();
   processB.stderr.resume();
   await handshake(processB);
@@ -740,7 +756,7 @@ test("a missing, linked, malformed, or oversized installer record fails before s
     }
     if (state === "malformed") await fs.writeFile(input.installerRecordPath, "{not-json}\n");
     if (state === "oversized") await fs.writeFile(input.installerRecordPath, Buffer.alloc(64 * 1024 + 1, 0x78));
-    const child = spawn(process.execPath, [input.managedLauncherPath], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = launchFixture(input, [input.managedLauncherPath], { stdio: ["pipe", "pipe", "pipe"] });
     const errors = [];
     child.stderr.on("data", (chunk) => errors.push(chunk));
     assert.equal((await once(child, "close"))[0], 1, state);
@@ -906,7 +922,7 @@ test("every setup check binds the runtime manifest, Node, server, and upstream b
 test("the launcher fails closed before spawn when a bound file changes", async (t) => {
   const input = await fixture(t);
   await fs.appendFile(input.upstreams, "\nchanged");
-  const child = spawn(process.execPath, [input.managedLauncherPath], { stdio: ["pipe", "pipe", "pipe"] });
+  const child = launchFixture(input, [input.managedLauncherPath], { stdio: ["pipe", "pipe", "pipe"] });
   const errors = [];
   child.stderr.on("data", (chunk) => errors.push(chunk));
   assert.equal((await once(child, "close"))[0], 1);

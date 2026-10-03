@@ -605,7 +605,7 @@ test("a failed commit releases the held lease and preserves the downloaded versi
     adapter,
     policy: enabledPolicy(),
     acquireRestartLease: async () => ({ status: "granted", leaseId: "failed-install-lease" }),
-    releaseRestartLease: async (leaseId) => { released.push(leaseId); },
+    releaseRestartLease: async (leaseId) => { assert.notEqual(attempts.record, null); released.push(leaseId); },
     commitRestartLease: async () => ({ status: "busy" }),
     updateAttempts: attempts,
     confirmUpdatedRuntime: async () => ({ status: "verified" })
@@ -1500,6 +1500,86 @@ test("a hung lease commit times out, releases the lease, and clears the attempt 
   assert.equal(acquisitions, 2);
   clock.fireTimeout(INSTALL_LEASE_COMMIT_TIMEOUT_MS);
   await retry;
+  controller.stop();
+});
+
+test("a late closing commit with an unconfirmed release keeps recovery evidence and blocks retry", async () => {
+  const clock = testClock();
+  const attempts = memoryAttempts();
+  const commit = deferred();
+  let acquisitions = 0;
+  const adapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
+  const controller = createUpdateController({
+    adapter, clock, policy: enabledPolicy(), updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
+    acquireRestartLease: async () => { acquisitions += 1; return { status: "granted", leaseId: "late-commit-lease" }; },
+    commitRestartLease: () => commit.promise,
+    releaseRestartLease: async () => {
+      assert.notEqual(attempts.record, null, "recovery evidence must survive until release is confirmed");
+      throw new Error("closing owner no longer accepts release");
+    }
+  });
+  await controller.check();
+  await settle();
+  const pending = controller.installWhenIdle();
+  await settle();
+  await settle();
+  const recorded = attempts.record;
+  assert.notEqual(recorded, null);
+  clock.fireTimeout(INSTALL_LEASE_COMMIT_TIMEOUT_MS);
+  assert.equal((await pending).reason, "active_or_uncertain_operations");
+  assert.deepEqual(attempts.record, recorded);
+  assert.equal(attempts.clears, 0);
+  commit.resolve({ status: "closing" });
+  await settle();
+  await controller.reconcileAfterRepair();
+  await controller.installWhenIdle();
+  await controller.check();
+  assert.equal(acquisitions, 1);
+  assert.equal(adapter.checks, 1);
+  assert.equal(adapter.installs, 0);
+  assert.deepEqual(attempts.record, recorded);
+  controller.stop();
+  const restartAdapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.2" } }) });
+  const restarted = createUpdateController({
+    adapter: restartAdapter, clock: testClock(), policy: enabledPolicy(),
+    ...grantedRestartLease(), updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => ({ status: "verified" })
+  });
+  assert.equal((await restarted.start()).reason, "update_rolled_back");
+  assert.deepEqual(attempts.record, recorded);
+  assert.equal(restartAdapter.checks, 0);
+  await restarted.check();
+  await settle();
+  assert.equal(restarted.snapshot().availableVersion, "1.0.2");
+  assert.equal((await restarted.installWhenIdle()).status, "installing");
+  assert.equal(restartAdapter.installs, 1);
+  assert.equal(attempts.record.toVersion, "1.0.2");
+  restarted.stop();
+});
+
+test("a confirmed release with a failed record clear retains evidence and fences the current process", async () => {
+  const attempts = memoryAttempts();
+  attempts.clear = async () => false;
+  let acquisitions = 0;
+  const adapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
+  const controller = createUpdateController({
+    adapter, clock: testClock(), policy: enabledPolicy(), updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
+    acquireRestartLease: async () => { acquisitions += 1; return { status: "granted", leaseId: "failed-clear-lease" }; },
+    commitRestartLease: async () => ({ status: "busy" }),
+    releaseRestartLease: async () => { assert.notEqual(attempts.record, null); }
+  });
+  await controller.check();
+  await settle();
+  assert.equal((await controller.installWhenIdle()).reason, "active_or_uncertain_operations");
+  const record = attempts.record;
+  await controller.reconcileAfterRepair();
+  await controller.check();
+  await controller.installWhenIdle();
+  assert.equal(acquisitions, 1);
+  assert.equal(adapter.checks, 1);
+  assert.deepEqual(attempts.record, record);
   controller.stop();
 });
 

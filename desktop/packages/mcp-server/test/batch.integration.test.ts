@@ -1,4 +1,6 @@
 import { once } from "node:events";
+import type { DatabaseSync } from "node:sqlite";
+import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1157,6 +1159,52 @@ describe("MorrowRuntime durable batches", () => {
       await runtime.close();
     }
   }, 20_000);
+
+  it("rolls back every batch grant when the second durable approval fails through the review page", async () => {
+    const runtime = await MorrowRuntime.connect(config(), { statePath: ":memory:" });
+    try {
+      const created = await runtime.batchCreate({
+        name: "Atomic durable approval", mode: "stage_writes", concurrency: 1,
+        operations: [41, 42].map((course) => ({ childId: `course:${course}`, tool: "edit_page", sourceBindingId: `canvas:${course}`, arguments: { course_id: String(course), title: `Course ${course}` } })),
+      });
+      const reviewUrl = String(created.approvalUrl);
+      const batchId = String((created.batch as JsonObject).batchId);
+      const children = runtime.batchApprovalGet(batchId).children as { operation: { operationId: string } }[];
+      const ids = children.map((child) => child.operation.operationId);
+      // A transient disk/SQLite failure occurs after the first grant UPDATE.
+      // Only the isolated in-memory journal is affected; no provider is called.
+      const database = (runtime.gateway as unknown as { effects: { database: DatabaseSync } }).effects.database;
+      const refusedId = ids[1]!.replaceAll("'", "''");
+      database.exec(`CREATE TEMP TRIGGER refuse_second_grant BEFORE UPDATE OF state ON provider_effect_operations WHEN NEW.operation_id='${refusedId}' AND NEW.state='approved' BEGIN SELECT RAISE(ABORT, 'review fixture disk failure'); END`);
+      const page = await fetch(reviewUrl);
+      const body = await page.text();
+      const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1] || "";
+      const cookie = page.headers.get("set-cookie")?.split(";", 1)[0] || "";
+      expect(nonce).toBeTruthy();
+      const approveUrl = `${reviewUrl}/approve`;
+      const response = await fetch(approveUrl, {
+        method: "POST", redirect: "manual",
+        headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: new URL(reviewUrl).origin, referer: reviewUrl },
+        body: new URLSearchParams({ nonce, presence: bridgeSignedPresence(runtime.approval, approveUrl, nonce) }),
+      });
+      expect(response.status).toBe(409);
+      for (const operationId of ids) {
+        expect(runtime.gateway.operationGet(operationId)).toMatchObject({ state: "awaiting_approval", dispatchAttempt: 0 });
+      }
+      expect(runtime.batchApprovalStatus(batchId)).toMatchObject({ approval: "awaiting_approval", applying: false });
+      database.exec("DROP TRIGGER refuse_second_grant");
+      // Previously approved children are preserved; only the waiting child gets
+      // a new grant, and cancellation still revokes the complete parent.
+      runtime.gateway.approveOperation(ids[0]!);
+      const existingGrant = runtime.gateway.operationGet(ids[0]!).approvalGrantDigest;
+      runtime.approveBatch(batchId);
+      expect(runtime.gateway.operationGet(ids[0]!).approvalGrantDigest).toBe(existingGrant);
+      expect(ids.map((id) => runtime.gateway.operationGet(id).state)).toEqual(["approved", "approved"]);
+      runtime.cancelBatchApproval(batchId);
+      expect(ids.map((id) => runtime.gateway.operationGet(id).state)).toEqual(["cancelled", "cancelled"]);
+      expect(() => runtime.approveBatch(batchId)).toThrow("batch cannot be approved from cancelled");
+    } finally { await runtime.close(); }
+  });
 
   it("stages multi-course writes, then reconciles approval and verified provider truth separately", async () => {
     const runtime = await MorrowRuntime.connect(config(), { statePath: ":memory:" });

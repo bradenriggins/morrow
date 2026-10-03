@@ -2457,6 +2457,8 @@ class LocalChromiumTransport:
                              {"assignment[name]": "X"})
     """
 
+    commits_write_approval = True
+
     def __init__(self, base_url, launcher):
         self.base = normalize_canvas_base(base_url)
         self.launcher = launcher
@@ -2606,6 +2608,9 @@ class LocalChromiumTransport:
         js = _API_JS % (json.dumps(method.upper()), json.dumps(url),
                         json.dumps(data or None), json.dumps(bool(as_json)),
                         json.dumps(max_bytes))
+        if method.upper() != "GET":
+            from dispatch import executor
+            executor.commit_deferred_write_approval()
         try:
             raw = self.cdp.evaluate(tab, js, await_promise=True,
                                     timeout=timeout, context_id=context_id)

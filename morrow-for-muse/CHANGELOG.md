@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.11 (2026-10-03)
+
+Install `morrow-muse-connector-0.4.11.zip` from the `muse/v0.4.11`
+release and verify it with `SHA256SUMS` before unzipping, as described
+in `INSTALL.md`.
+
+- Refuse an expired approval at the first browser dispatch after course, account,
+  isolated-world, and SDK credential checks. Recheck its signed time window
+  under the consumption lock and release a refused operation without sending.
+- Preserve single use and the existing same-operation retry lease. Reapproving
+  a paused batch does not extend a prepared write's original approval window.
+- State the actual `plan-write` default: one hour, with the returned `expires_at`
+  as the deadline. The earlier 24-hour default claim was stale.
+
 ## 0.4.10 (2026-10-02)
 
 Install `morrow-muse-connector-0.4.10.zip` from the `muse/v0.4.10`

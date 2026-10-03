@@ -20,3 +20,13 @@ allowBuilds:
 auditConfig:
   ignoreGhsas:
     - GHSA-86w9-cpqp-85rv
+    # GHSA-ch52-4w7c-c8xp / CVE-2026-93748: unpatched shared HTTP-cache disclosure.
+    # Pinned build-only path: electron-builder26.15.3 -> app-builder-lib ->
+    # @electron/get3.1.0 -> got11.8.6 -> cacheable-request7.0.4 -> http-cache-semantics4.2.0.
+    # Morrow sets no HTTP response cache; actual builder and positive-control proof
+    # confirms CachePolicy is never constructed in the release download path.
+    # The application production closure excludes the chain. Bundled Node/npm has
+    # a dormant copy, but Morrow never invokes npm/npx/corepack.
+    # Rechecked by dependency-cache-audit.test.cjs; review on every builder bump.
+    # Remove when a patched package or supported stable builder/get5 toolchain ships.
+    - GHSA-ch52-4w7c-c8xp

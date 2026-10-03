@@ -608,8 +608,9 @@ function aliasEdges(key: string): readonly [string, string] {
 }
 
 /**
- * One matcher for each kind of word edge, so each edge is tested once at a position rather than
- * once for every alias. Within a matcher the longest alias is tried first.
+ * Group aliases by word edge, with bounded matcher sizes. Large alternations
+ * are disproportionately slow on the shipped Node 22 engine. The merge below
+ * still chooses the leftmost, longest match across every group and chunk.
  */
 function aliasMatchers(keys: Iterable<string>): readonly RegExp[] {
   const groups = new Map<string, { readonly edges: readonly [string, string]; readonly keys: string[] }>();
@@ -620,22 +621,44 @@ function aliasMatchers(keys: Iterable<string>): readonly RegExp[] {
     group.keys.push(key);
     groups.set(edges.join("\u0000"), group);
   }
-  return [...groups.values()].map(({ edges: [before, after], keys: grouped }) => new RegExp(
-    `${before}(?:${grouped.sort((left, right) => right.length - left.length).map(aliasBody).join("|")})${after}`,
-    "giu",
-  ));
+  return [...groups.values()].flatMap(({ edges: [before, after], keys: grouped }) => {
+    const sorted = grouped.sort((left, right) => right.length - left.length);
+    const matchers: RegExp[] = [];
+    for (let offset = 0; offset < sorted.length; offset += 128) {
+      matchers.push(new RegExp(
+        `${before}(?:${sorted.slice(offset, offset + 128).map(aliasBody).join("|")})${after}`,
+        "giu",
+      ));
+    }
+    return matchers;
+  });
 }
 
 /** Every alias the matchers find, leftmost first and the longest where two start together. */
 function aliasMatches(text: string, matchers: readonly RegExp[]): Array<{ readonly index: number; readonly text: string }> {
-  const found = matchers.flatMap((matcher) => [...text.matchAll(matcher)].map((match) => ({ index: match.index!, text: match[0] })))
-    .sort((left, right) => left.index - right.index || right.text.length - left.text.length);
+  const scanners = matchers.map((matcher) => new RegExp(matcher.source, matcher.flags));
+  const candidates = scanners.map((scanner) => scanner.exec(text));
   const output: Array<{ readonly index: number; readonly text: string }> = [];
   let cursor = 0;
-  for (const match of found) {
-    if (match.index < cursor) continue;
-    output.push(match);
-    cursor = match.index + match.text.length;
+  while (cursor < text.length) {
+    let next: { readonly index: number; readonly text: string } | undefined;
+    for (const match of candidates) {
+      if (match && (!next || match.index < next.index
+        || (match.index === next.index && match[0].length > next.text.length))) {
+        next = { index: match.index, text: match[0] };
+      }
+    }
+    if (!next) break;
+    output.push(next);
+    cursor = next.index + next.text.length;
+    for (const [index, scanner] of scanners.entries()) {
+      // Only a consumed/overlapping candidate needs another scan. Keep later
+      // candidates and exhausted chunks, avoiding rescans of the whole suffix.
+      if (candidates[index] && candidates[index]!.index < cursor) {
+        scanner.lastIndex = cursor;
+        candidates[index] = scanner.exec(text);
+      }
+    }
   }
   return output;
 }

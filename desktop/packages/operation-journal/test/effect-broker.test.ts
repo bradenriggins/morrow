@@ -853,3 +853,33 @@ describe("ProviderEffectBroker", () => {
     broker.close();
   });
 });
+
+
+describe("atomic approval groups", () => {
+  it("does not approve a valid child when another child has expired", () => {
+    let now = new Date("2026-10-03T00:00:00Z");
+    const broker = new ProviderEffectBroker({ path: ":memory:", now: () => now });
+    try {
+      const valid = create(broker, { approvalTtlMs: 120_000 });
+      const expired = create(broker, { approvalTtlMs: 60_000 });
+      now = new Date("2026-10-03T00:01:00Z");
+      expect(() => broker.approveAll([valid.operationId, expired.operationId])).toThrow("batch approval preview expired");
+      expect([valid, expired].map((operation) => broker.get(operation.operationId).state)).toEqual(["awaiting_approval", "awaiting_approval"]);
+      expect(() => broker.reserveDispatch(valid.operationId)).toThrow("operation cannot dispatch from awaiting_approval");
+    } finally { broker.close(); }
+  });
+
+  it("leaves earlier grants untouched and creates none if another child changed state", () => {
+    const broker = new ProviderEffectBroker({ path: ":memory:" });
+    try {
+      const waiting = create(broker);
+      const approved = broker.approve(create(broker).operationId);
+      expect(() => broker.approveAll([waiting.operationId, approved.operationId])).toThrow("operation cannot be approved from approved");
+      expect(broker.get(waiting.operationId).approvalGrantDigest).toBeNull();
+      expect(broker.get(approved.operationId).approvalGrantDigest).toBe(approved.approvalGrantDigest);
+      const cancelled = broker.cancel(create(broker).operationId);
+      expect(() => broker.approveAll([waiting.operationId, cancelled.operationId])).toThrow("operation cannot be approved from cancelled");
+      expect(broker.get(waiting.operationId).state).toBe("awaiting_approval");
+    } finally { broker.close(); }
+  });
+});

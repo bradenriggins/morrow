@@ -1634,7 +1634,7 @@ def approval_used(record: dict | None) -> bool:
     return _use_key(record) in _load_consumed()
 
 
-def _record_consumed(use_key: str) -> None:
+def _record_consumed(use_key: str, record=None) -> None:
     """Mark an approval's use key consumed (single-use). Fails closed.
 
     The read-modify-write runs under an exclusive inter-process lock
@@ -1659,8 +1659,14 @@ def _record_consumed(use_key: str) -> None:
             # (parsed ~3x and fully rewritten per dispatch) stays
             # bounded instead of growing forever.
             consumed, _dropped = _prune_consumed_dict(consumed)
-            consumed[use_key] = datetime.datetime.now(
-                datetime.timezone.utc).isoformat()
+            # Sample after lock acquisition and all consumed-set work: a grant can
+            # expire while waiting for another dispatcher, without a provider call.
+            if record is not None:
+                _verify_seal(record)
+                now = check_approval_window(record)
+            else:
+                now = datetime.datetime.now(datetime.timezone.utc)
+            consumed[use_key] = now.isoformat()
             tmp = CONSUMED_PATH + ".tmp"
             try:
                 # W6-P2-2: 0600 at open, never open-then-chmod.
@@ -1773,6 +1779,26 @@ def _entry_is_write(entry: dict) -> bool:
     if isinstance(eff, (list, tuple, set, frozenset)):
         return "write" in eff
     return False
+
+
+def check_approval_window(record):
+    """Recheck the signed grant window at its first provider dispatch."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    # W6-P2-2: refuse admission while the clock is untrustworthy.
+    _check_clock_rollback(now)
+    issued = _parse_time(record.get("at"), "at")
+    expires = _parse_time(record.get("expires_at"), "expires_at")
+    if issued > now + datetime.timedelta(seconds=_APPROVAL_SKEW_SECONDS):
+        raise ApprovalMismatch("approval for %r is dated in the future"
+                               % record.get("op"))
+    if expires <= now:
+        raise ApprovalMismatch("approval for %r expired at %s"
+                               % (record.get("op"), record.get("expires_at")))
+    if (expires - issued).total_seconds() > MAX_APPROVAL_TTL_SECONDS:
+        raise ApprovalMismatch(
+            "approval for %r exceeds the maximum %dh TTL"
+            % (record.get("op"), MAX_APPROVAL_TTL_SECONDS // 3600))
+    return now
 
 
 def check_write_approval(entry: dict, params: dict, approval: dict | None,
@@ -1942,21 +1968,7 @@ def _verify_record_binding(entry: dict, params: dict, record: dict,
             "approval category %r does not match this dispatch's category "
             "%r; an approval is bound to one operation family"
             % (record.get("category"), expected_category))
-    now = datetime.datetime.now(datetime.timezone.utc)
-    # W6-P2-2: refuse admission while the clock is untrustworthy.
-    _check_clock_rollback(now)
-    issued = _parse_time(record.get("at"), "at")
-    expires = _parse_time(record.get("expires_at"), "expires_at")
-    if issued > now + datetime.timedelta(seconds=_APPROVAL_SKEW_SECONDS):
-        raise ApprovalMismatch("approval for %r is dated in the future"
-                               % entry.get("name"))
-    if expires <= now:
-        raise ApprovalMismatch("approval for %r expired at %s"
-                               % (entry.get("name"), record.get("expires_at")))
-    if (expires - issued).total_seconds() > MAX_APPROVAL_TTL_SECONDS:
-        raise ApprovalMismatch(
-            "approval for %r exceeds the maximum %dh TTL"
-            % (entry.get("name"), MAX_APPROVAL_TTL_SECONDS // 3600))
+    check_approval_window(record)
     subject = request_subject(entry, params)
     if record.get("request_digest") != request_digest(subject):
         raise ApprovalMismatch(
@@ -2024,7 +2036,7 @@ def consume_approval(record: dict | None) -> None:
     if not isinstance(digest, str) or not digest:
         raise ApprovalMismatch(
             "cannot consume an approval record with no op_digest")
-    _record_consumed(_use_key(record))
+    _record_consumed(_use_key(record), record=record)
 
 
 def persist_signed_record(record: dict, op_id: str | None) -> None:

@@ -1072,6 +1072,42 @@ export class ProviderEffectBroker {
     });
   }
 
+  /** Approve a reviewed group at one instant, committing every grant or none. */
+  approveAll(operationIdValues: readonly string[]): readonly EffectOperationRecord[] {
+    const operationIds = operationIdValues.map((value) => identifier(value, "operation id"));
+    if (operationIds.length === 0 || new Set(operationIds).size !== operationIds.length) {
+      throw new Error("approval group must contain distinct operations");
+    }
+    return this.transaction(() => {
+      // Read the clock after taking the write lock. A lock wait must not extend
+      // an expired preview, and every child shares the same approval instant.
+      const now = this.instant();
+      const operations = operationIds.map((operationId) => this.get(operationId));
+      for (const current of operations) {
+        if (current.state !== "awaiting_approval") {
+          throw new Error(`operation cannot be approved from ${current.state}`);
+        }
+        if (!current.approvalExpiresAt || current.approvalExpiresAt <= now) {
+          throw new Error("batch approval preview expired");
+        }
+      }
+      for (const current of operations) {
+        const grantDigest = sha256Json({
+          operationId: current.operationId,
+          planDigest: current.planDigest,
+          authority: current.plan.authority,
+          approvalExpiresAt: current.approvalExpiresAt,
+          nonce: randomBytes(32).toString("base64url"),
+        });
+        this.database.prepare(`
+          UPDATE provider_effect_operations
+          SET state='approved', approval_grant_digest=?, updated_at=? WHERE operation_id=?
+        `).run(grantDigest, now, current.operationId);
+      }
+      return operationIds.map((operationId) => this.get(operationId));
+    });
+  }
+
   /**
    * Saved changes still holding a target that were named under an earlier target
    * rule. The caller names what each one targets under the rule in force now, so

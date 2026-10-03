@@ -568,6 +568,8 @@ class ItemBankSdk:
     The tab is dedicated to the SDK so the tenant tab is never disturbed.
     """
 
+    commits_write_approval = True
+
     def __init__(self, cdp, canvas_base: str, course_id, token_wait_s: int = 180):
         # LANE2-D14: the course_id is interpolated into URL paths (the
         # external-tools lookup and the LTI launch URL), so it must be a
@@ -871,6 +873,9 @@ class ItemBankSdk:
             "path": json.dumps(str(path)),
             "body": json.dumps(body_json),
         }
+        if method != "GET":
+            from dispatch import executor
+            executor.commit_deferred_write_approval()
         try:
             outcome = self._cdp.evaluate(tab, program, await_promise=True,
                                          timeout=120,

@@ -1694,10 +1694,7 @@ export class MorrowRuntime {
         throw new Error("batch approval preview expired");
       }
     }
-    for (const operationId of operationIds) {
-      const approved = this.gateway.approveOperation(operationId);
-      if (approved.state !== "approved") throw new Error("batch approval preview expired");
-    }
+    this.gateway.approveOperations(operationIds);
     return this.batchApprovalGet(batchId);
   }
 

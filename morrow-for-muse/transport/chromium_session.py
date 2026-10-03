@@ -353,6 +353,7 @@ class ChromiumSession:
     # Marker read by executor.build_headers: skip credential injection at
     # egress, because the browser owns the authenticated session.
     browser_owned_auth = True
+    defers_write_approval = True
 
     def __init__(self, base_url, launcher=None, transport=None):
         self._base = lc.normalize_canvas_base(base_url)
@@ -801,9 +802,13 @@ class ChromiumSession:
         last_exc = None
         while attempts < ex.MAX_ATTEMPTS:
             attempts += 1
+            if is_write and not getattr(sdk, "commits_write_approval", False):
+                ex.commit_deferred_write_approval(self)
             try:
                 status, body_text = sdk.request(method, path, data,
                                                course_id=course_id)
+            except ex.WriteNotAttempted:
+                raise
             except ibsdk.ItemBankSdkMaybeAttempted as exc:
                 # LANE6-8: the page-context program may already have
                 # issued its fetch when the outcome was lost (context
@@ -1122,6 +1127,8 @@ class ChromiumSession:
         last_exc = None
         while attempts < ex.MAX_ATTEMPTS:
             attempts += 1
+            if is_write and not getattr(transport, "commits_write_approval", False):
+                ex.commit_deferred_write_approval(self)
             try:
                 status, api_headers, body_text = transport.api(
                     method, path, data, as_json=as_json,
@@ -1129,6 +1136,8 @@ class ChromiumSession:
                 # A completed provider call proves the session was live
                 # (W4-P2-4 taxonomy evidence).
                 self._had_live_session = True
+            except ex.WriteNotAttempted:
+                raise
             except lc.CsrfTokenMissing as exc:
                 if is_write:
                     raise CsrfWriteNotSent(str(exc)) from exc

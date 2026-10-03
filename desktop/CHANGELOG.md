@@ -2,6 +2,26 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
+## 1.0.12 (2026-10-03)
+
+This release includes Morrow Bridge 1.0.136 and unsigned installers for Mac with Apple silicon and Windows x64.
+
+- Keep a failed batch review from approving only some of its changes. A failed review leaves the whole batch awaiting approval.
+- Require a new review for previously staged work after you disconnect an account and pair it again.
+- Close an unresolved change after checking a fresh course read, including after reconnecting the same account.
+- Keep large course rosters responsive while replacing known learner names with private labels.
+
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+
+### Technical notes
+
+- Batch grants commit in one SQLite transaction after their states and deadlines are checked under the write lock.
+- Each connection receives a fresh opaque authority nonce. Disconnect persists a timestamp-only invalidation floor before clearing browser receipt history.
+- Bounded privacy matchers retain the global earliest/longest overlap selection.
+- An uncertain updater commit retains its durable attempt and fences same-process retry until recovery is confirmed.
+
 ## 1.0.11 (2026-10-02)
 
 This release includes Morrow Bridge 1.0.135 and unsigned installers for Mac with Apple silicon and Windows x64.
