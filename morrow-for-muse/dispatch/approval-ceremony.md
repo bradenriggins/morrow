@@ -187,7 +187,10 @@ exactly one winner.
 Approval is burned post-claim, pre-write: after the target-identity
 check, the before-state freshness check, and all local request
 prevalidation pass, immediately before the first provider call
-(W4 approval ordering). A refused target or stale before-state leaves
+(W4 approval ordering). Chromium defers consumption through its fresh account,
+tab/world, and SDK credential prechecks. The signed time window is checked again
+under the consumption lock; an expired or untrustworthy clock refuses the first
+write as not sent and releases its claim. A refused target or stale before-state leaves
 the approval unconsumed and reusable; the op_id claim is released.
 If dispatch burns the approval and the write then fails retryably,
 the retry re-runs under the SAME op_id against the saved brief: no

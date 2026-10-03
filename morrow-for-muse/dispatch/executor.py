@@ -7972,7 +7972,54 @@ def _render_dry_run(entry, params, session, pack, plan, op_id,
                      "was consumed")}
 
 
-def _burn_write_approval(approval_record, op_id) -> None:
+_DEFERRED_WRITE_APPROVAL = contextvars.ContextVar(
+    "morrow_deferred_write_approval", default=None)
+
+
+@contextmanager
+def _write_approval_boundary(session):
+    state = ({"session": session, "pending": None}
+             if getattr(session, "defers_write_approval", False) else None)
+    token = _DEFERRED_WRITE_APPROVAL.set(state)
+    try:
+        yield
+    finally:
+        _DEFERRED_WRITE_APPROVAL.reset(token)
+
+
+def commit_deferred_write_approval(session=None):
+    """Commit once after Chromium's account/tab/credential prechecks, before CDP send.
+
+    Later retry/step calls retain the original operation's admitted lease. Nested
+    or later operations get their own scope, and cannot inherit this approval.
+    """
+    state = _DEFERRED_WRITE_APPROVAL.get()
+    if not state or not state["pending"]:
+        return
+    if session is not None and state["session"] is not session:
+        raise WriteNotAttempted(
+            "The reviewed write belongs to another browser session. Nothing was sent.")
+    record, op_id = state["pending"]
+    try:
+        _burn_write_approval_now(record, op_id)
+    except Exception as exc:
+        raise WriteNotAttempted(
+            "The reviewed write approval could not be used: %s. Nothing was sent; "
+            "prepare and approve the write again." % exc) from exc
+    state["pending"] = None
+
+
+def _burn_write_approval(record, op_id):
+    if record is None:
+        return
+    state = _DEFERRED_WRITE_APPROVAL.get()
+    if state is not None:
+        state["pending"] = (record, op_id)
+        return
+    _burn_write_approval_now(record, op_id)
+
+
+def _burn_write_approval_now(approval_record, op_id) -> None:
     """Persist the signed write approval under the final op_id, then mark
     it single-use (W4 approval ordering).
 
@@ -8140,12 +8187,13 @@ def dispatch_entry(entry: dict, params: dict, session: SessionStore, pack: dict,
     token = _ACTIVE_ID_LABELS.set(holder)
     rosters = _wire.begin_course_rosters()
     try:
-        out = _dispatch_entry_inner(
-            entry, params, session, pack, plan=plan, op_id=op_id, kind=kind,
-            approval=approval,
-            catalog_status=catalog_status, dry_run=dry_run,
-            require_educator_channel=require_educator_channel,
-            mode_ctx=mode_ctx, _labels=holder)
+        with _write_approval_boundary(session):
+            out = _dispatch_entry_inner(
+                entry, params, session, pack, plan=plan, op_id=op_id, kind=kind,
+                approval=approval,
+                catalog_status=catalog_status, dry_run=dry_run,
+                require_educator_channel=require_educator_channel,
+                mode_ctx=mode_ctx, _labels=holder)
     except Exception as exc:
         _relabel_exception(exc, holder.get("map"))
         raise
@@ -9883,6 +9931,18 @@ def undo_admission_entry(entry: dict) -> dict:
 
 
 def dispatch_undo(entry: dict, params: dict, result_payload, of_op_id: str,
+                  session: SessionStore, pack: dict, approval: dict = None,
+                  dry_run=False,
+                  require_educator_channel: bool = True,
+                  mode_ctx: dict = None) -> dict:
+    """Dispatch the inverse with its own first-write approval boundary."""
+    with _write_approval_boundary(session):
+        return _dispatch_undo_inner(entry, params, result_payload, of_op_id, session, pack,
+            approval=approval, dry_run=dry_run,
+            require_educator_channel=require_educator_channel, mode_ctx=mode_ctx)
+
+
+def _dispatch_undo_inner(entry: dict, params: dict, result_payload, of_op_id: str,
                   session: SessionStore, pack: dict, approval: dict = None,
                   dry_run=False,
                   require_educator_channel: bool = True,

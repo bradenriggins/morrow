@@ -372,7 +372,8 @@ a frozen plan, an approval record, or a course resolution by hand:
 3. When the educator approves, in any words ("Yes" is enough), run
    `approve-write` with their reply verbatim. It signs that reply, then
    sends the write through every gate and prints the result. An
-   approval is single use and expires after 24 hours. If the educator
+   approval is single use. `plan-write` defaults to a one-hour approval
+   window; use the returned `expires_at` as the deadline. If the educator
    declines or changes anything, run
    `plan-write` again with the new request. A prepared write that is
    never approved is deleted when it expires, and every purge deletes
