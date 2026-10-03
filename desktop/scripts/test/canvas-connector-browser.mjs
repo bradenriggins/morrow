@@ -1936,9 +1936,12 @@ try {
   const binding = bindings.find((entry) => entry.courseId === "42");
   const binding43 = bindings.find((entry) => entry.courseId === "43");
   const binding501 = bindings.find((entry) => entry.courseId === "501");
-  assert.match(binding.sourceBindingId, /^canvas:[0-9a-f]{20}:g1:c42$/);
-  assert.match(binding43.sourceBindingId, /^canvas:[0-9a-f]{20}:g1:c43$/);
-  assert.match(binding501.sourceBindingId, /^canvas:[0-9a-f]{20}:g1:c501$/);
+  const siteAuthority = /^canvas:[0-9a-f]{20}:g1:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  for (const selected of [binding, binding43, binding501]) {
+    assert.match(selected.sourceBindingId.replace(/:c[0-9]+$/, ""), siteAuthority);
+    assert.equal(selected.sourceBindingId, `${binding.sourceBindingId.replace(/:c42$/, "")}:c${selected.courseId}`,
+      "selected courses must share the site's current connection authority");
+  }
   const waitForPublishedEditPermission = (matches, message) => waitFor(async () => {
     const permission = (await runtime.editOptions(binding.sourceBindingId)).editPermission;
     if (!permission || !matches(permission)) return null;
