@@ -632,6 +632,7 @@ function createUpdateController({
   let attemptReconciliationTerminal = attempts === null;
   let attemptReconciliationPromise = null;
   let restartCommitted = false;
+  let restartRecoveryBlocked = false;
   // A recorded update that did not start blocks automatic checking, so Morrow
   // reports what happened and waits for the person to ask for the retry instead
   // of downloading the same version again on its own.
@@ -842,6 +843,9 @@ function createUpdateController({
   async function check() {
     bindEvents();
     if (setUnavailableIfNeeded()) return plainSnapshot(state);
+    // Startup reconciliation cannot prove that this process's in-flight commit
+    // was reversed. Preserve its fence until the next process starts.
+    if (restartRecoveryBlocked) return plainSnapshot(state);
     if (unresolvedAttemptBlocked) {
       await reconcileAttempt();
       if (unresolvedAttemptBlocked) return plainSnapshot(state);
@@ -1027,6 +1031,7 @@ function createUpdateController({
   }
 
   function reconcileAfterRepair() {
+    if (restartRecoveryBlocked) return Promise.resolve(plainSnapshot(state));
     return reconcileAttempt(async () => {
       // Repair re-hardens the state directory; the unreadable record it left
       // behind is removed here so checks and downloads work again. A record
@@ -1086,17 +1091,28 @@ function createUpdateController({
   }
 
   async function releaseFailedCommit(leaseId, version, attempt) {
+    // A rejected or timed-out commit may have crossed the owner's closing
+    // boundary before its acknowledgment arrived. Only a confirmed release
+    // proves that ordinary work can resume and the durable attempt is obsolete.
+    try {
+      await releaseRestartLease(leaseId);
+    } catch {
+      restartRecoveryBlocked = true;
+      automaticCheckBlocked = true;
+      unresolvedAttemptBlocked = true;
+      return deferredInstall(version);
+    }
     let recordCleared = attempt.record === null;
     if (!recordCleared) {
       try { recordCleared = await attempts.clear(attempt.record) === true; }
       catch { recordCleared = false; }
     }
-    let leaseReleased = false;
-    try {
-      await releaseRestartLease(leaseId);
-      leaseReleased = true;
-    } catch { /* A failed release leaves the restart decision uncertain. */ }
-    if (!recordCleared || !leaseReleased) return deferredInstall(version);
+    if (!recordCleared) {
+      restartRecoveryBlocked = true;
+      automaticCheckBlocked = true;
+      unresolvedAttemptBlocked = true;
+      return deferredInstall(version);
+    }
     return transition("ready", version, "update_install_failed");
   }
 
