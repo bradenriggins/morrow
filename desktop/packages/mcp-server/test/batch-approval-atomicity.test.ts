@@ -38,6 +38,7 @@ function plan(broker: ProviderEffectBroker): EffectOperationRecord {
 function harness(options: {
   readonly operationGet?: (broker: ProviderEffectBroker, operationId: string) => JsonObject;
   readonly clock?: { current: Date };
+  readonly beforeApproval?: () => void;
 } = {}): {
   runtime: MorrowRuntime;
   broker: ProviderEffectBroker;
@@ -87,6 +88,10 @@ function harness(options: {
       ? options.operationGet(broker, operationId)
       : effectOperationProjection(broker.get(operationId)),
     approveOperation: (operationId: string) => effectOperationProjection(broker.approve(operationId)),
+    approveOperations: (operationIds: readonly string[]) => {
+      options.beforeApproval?.();
+      return broker.approveAll(operationIds).map(effectOperationProjection);
+    },
   } as unknown as GatewayRuntime;
   const runtime = new (MorrowRuntime as unknown as new (
     gateway: GatewayRuntime,
@@ -108,6 +113,23 @@ function harness(options: {
 }
 
 describe("approveBatch atomicity", () => {
+  it("leaves no grant when expiry crosses after preflight and before the write lock", () => {
+    const clock = { current: new Date() };
+    let expiry = 0;
+    const fixture = harness({ clock, beforeApproval: () => { clock.current = new Date(expiry + 1); } });
+    const realNow = Date.now;
+    try {
+      expiry = Date.parse(fixture.operations[0]!.approvalExpiresAt!);
+      clock.current = new Date(expiry - 1);
+      Date.now = () => clock.current.getTime();
+      expect(() => fixture.runtime.approveBatch(fixture.batchId)).toThrow("batch approval preview expired");
+      for (const operation of fixture.operations) {
+        expect(fixture.broker.get(operation.operationId)).toMatchObject({ state: "awaiting_approval", approvalGrantDigest: null });
+        expect(() => fixture.broker.reserveDispatch(operation.operationId)).toThrow("operation cannot dispatch from awaiting_approval");
+      }
+    } finally { Date.now = realNow; fixture.close(); }
+  });
+
   it("approves every reviewed child together", () => {
     const fixture = harness();
     try {
@@ -146,16 +168,15 @@ describe("approveBatch atomicity", () => {
     }
   });
 
-  it("stops at the first expired grant instead of approving the rest", () => {
+  it("refuses the whole durable approval group when its grants expired", () => {
     const clock = { current: new Date() };
     const fixture = harness({ clock });
     try {
-      // Both grants expire behind the preview's back: the broker cancels each
-      // expired child on approve, and the batch must fail on the first one
-      // instead of silently approving whatever is left.
+      // Both grants expire behind the preview's back. The group transaction
+      // refuses without persisting any approval or changing another child.
       clock.current = new Date(clock.current.getTime() + 16 * 60_000);
       expect(() => fixture.runtime.approveBatch(fixture.batchId)).toThrow("batch approval preview expired");
-      expect(fixture.broker.get(fixture.operations[0]!.operationId).state).toBe("cancelled");
+      expect(fixture.broker.get(fixture.operations[0]!.operationId).state).toBe("awaiting_approval");
       expect(fixture.broker.get(fixture.operations[1]!.operationId).state).toBe("awaiting_approval");
     } finally {
       fixture.close();

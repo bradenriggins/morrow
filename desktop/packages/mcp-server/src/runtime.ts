@@ -2840,6 +2840,12 @@ export class GatewayRuntime {
     return effectOperationProjection(approved);
   }
 
+  approveOperations(operationIds: readonly string[]): readonly JsonObject[] {
+    const approved = this.effects.approveAll(operationIds);
+    for (const operation of approved) this.noteEffectState(operation);
+    return approved.map(effectOperationProjection);
+  }
+
   cancelOperation(operationId: string): JsonObject {
     const cancelled = this.effects.cancel(operationId);
     this.noteEffectState(cancelled);
