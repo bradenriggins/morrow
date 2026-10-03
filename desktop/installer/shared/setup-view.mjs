@@ -155,7 +155,7 @@ export function progress(current) {
 function notFoundDetail(assistant) {
   if (assistant?.statusUnavailable === true) return "Morrow could not check this assistant. Select Check status again.";
   if (assistant?.id === "claude-desktop") return "Claude Desktop is not installed on this computer. Get it from claude.ai/download, then select Check status.";
-  if (assistant?.id === "codex") return "The ChatGPT desktop app with local MCP support was not found. Install the supported desktop app, then select Check status. ChatGPT in a browser is a separate setup.";
+  if (assistant?.id === "codex") return "The ChatGPT desktop app with local MCP support or Codex CLI was not found. Install the supported desktop app, then select Check status. This setup does not connect ChatGPT browser or phone chats.";
   return "Not found on this computer.";
 }
 
@@ -171,7 +171,7 @@ function assistantCards(current, chosenAssistantId) {
     return `<button class="assistant-card" type="button" data-action="choose-assistant" data-assistant-id="${escapeHtml(assistant.id)}" aria-pressed="${selected}"${available ? "" : " disabled"}>
       <span class="assistant-title">${escapeHtml(assistant.title)}</span>
       ${configured ? '<span class="assistant-badge">Ready</span>' : ""}
-      <span class="assistant-detail">${escapeHtml(detail)}</span>
+      <span class="assistant-detail">${escapeHtml(detail)}${assistant.id === "codex" && available ? " Use the ChatGPT desktop app with local MCP support, or Codex CLI in your terminal. This setup does not connect browser or phone chats." : ""}</span>
     </button>`;
   };
   const primary = assistants.filter((assistant) => assistant?.tier !== "advanced");
@@ -499,7 +499,7 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
   if (previewCompleted(current)) {
     const firstRequests = EXAMPLE_REQUESTS.map((request) => request.replace("[course name]", () => bridge.firstPreviewCourseName || bridge.selectedCourseName || "[course name]"));
     const entryHelp = assistant.id === "codex"
-      ? '<p>In the ChatGPT desktop app, open <strong>Settings → MCP servers</strong> and check that <strong>morrow</strong> is enabled. In a new chat, type <strong>/mcp</strong> to view connected servers. This setup uses the desktop app’s local connection. Allow your assistant to use Morrow tools when it asks; course changes still follow Morrow’s separate permissions and review.</p>'
+      ? '<p>In the ChatGPT desktop app with local MCP support, open <strong>Settings → MCP servers</strong> and check that <strong>morrow</strong> is enabled. In a new chat, type <strong>/mcp</strong> to view connected servers. If you use <strong>Codex CLI</strong> instead, run <strong>codex</strong> in your terminal on this computer, use <strong>/mcp</strong> to check Morrow, and send your request there. This setup does not connect ChatGPT browser or phone chats. Allow your assistant to use Morrow tools when it asks; course changes still follow Morrow’s separate permissions and review.</p>'
       : "";
     const openAction = assistant.id === "claude-desktop"
       ? '<div class="inline-actions"><button class="primary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button></div>'
@@ -576,7 +576,7 @@ function restartPanel(assistant) {
     copy: folder
       ? `${assistant.title} reads Morrow's entry only from the project folder you chose, and only when it starts there.`
       : `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
-    body: `<ol class="instructions">${reopen}<li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
+    body: `<ol class="instructions">${reopen}<li>Return here and select <strong>Check ${title}</strong>.</li></ol>${assistant.id === "codex" ? '<p>If you use <strong>Codex CLI</strong> instead of the ChatGPT desktop app, exit the CLI and run <strong>codex</strong> again in your terminal on this computer. Use <strong>/mcp</strong> to check Morrow, then continue in that terminal chat. This setup does not connect ChatGPT browser or phone chats.</p>' : ""}<div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
   };
 }
 
