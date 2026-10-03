@@ -16,7 +16,7 @@ Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/
 
 ### Technical notes
 
-This is an unpublished candidate. It keeps Bridge 1.0.136 and the existing account, permission, approval, and recovery contracts. Native Mac and Windows qualification must pass before publication. Published Desktop 1.0.12 assets remain unchanged.
+This release includes Morrow Bridge 1.0.136 and unsigned installers for Mac with Apple silicon and Windows x64. It keeps the existing account, permission, approval, and recovery contracts. Desktop 1.0.12 assets remain available unchanged.
 
 ## 1.0.12 (2026-10-03)
 
