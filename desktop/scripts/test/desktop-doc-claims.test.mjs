@@ -330,7 +330,7 @@ test("the published 1.0.12 release is the Mac and Windows download", () => {
   const bridgeVersion = JSON.parse(read("connector/extension/manifest.json")).version;
   assert.ok(flat("README.md").includes(`This checkout contains Morrow Desktop ${version} with Morrow Bridge ${bridgeVersion}`));
   assert.match(flat("README.md"), /Published downloads are Mac 1\.0\.12 and Windows 1\.0\.12/);
-  assert.doesNotMatch(flat("README.md"), /unpublished .* candidate/);
+  assert.match(flat("README.md"), /1\.0\.13 is an unpublished first-use guidance candidate/);
   assert.doesNotMatch(flat("CHANGELOG.md").split("## 1.0.6")[0], /prepared but has not been published|Mac download remains on published 1\.0\.6/);
   assert.match(flat("installer\/WINDOWS-DEPLOYMENT.md"), /Published 1\.0\.12: `Morrow-1\.0\.12-win-x64\.exe`/);
 });

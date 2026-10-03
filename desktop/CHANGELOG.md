@@ -2,6 +2,18 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
+## 1.0.13 (2026-10-03)
+
+### Know where to start
+
+- Setup explains that you ask for course work in your chosen AI assistant. Morrow connects that assistant to your courses.
+- After the connection check, copy a read-only first request into your assistant. Setup also explains how to return for your next task and where to manage connections and permissions.
+- First-use requests ask the assistant to report anything it could not read and leave the course unchanged.
+
+### Technical notes
+
+This is an unpublished candidate. It keeps Bridge 1.0.136 and the existing account, permission, approval, and recovery contracts. Native Mac and Windows qualification must pass before publication. Published Desktop 1.0.12 assets remain unchanged.
+
 ## 1.0.12 (2026-10-03)
 
 This release includes Morrow Bridge 1.0.136 and unsigned installers for Mac with Apple silicon and Windows x64.

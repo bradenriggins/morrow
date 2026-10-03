@@ -1036,13 +1036,13 @@ test("copying an example request sends its exact text through the clipboard chan
   assert.equal(copyButtons.length, 3);
 
   const second = copyButtons[1];
-  assert.equal(second.dataset.prompt, "Move the due date of the first assignment in [course name] one week later.");
+  assert.equal(second.dataset.prompt, "Use Morrow to list the assignments in BIOL 101 and their due dates. Tell me anything you could not read. Do not change the course.");
   await dom.element("#action-body").dispatch("click", { target: second });
   await settle();
 
   assert.deepEqual(calls.at(-1), {
     method: "installer:copy-to-clipboard",
-    payload: { text: "Move the due date of the first assignment in [course name] one week later." }
+    payload: { text: "Use Morrow to list the assignments in BIOL 101 and their due dates. Tell me anything you could not read. Do not change the course." }
   });
   const labels = dom.element("#action-body").querySelectorAll("[data-action]")
     .filter((element) => element.dataset.action === "copy-example-prompt").map((element) => element.textContent);

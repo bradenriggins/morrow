@@ -677,9 +677,9 @@ test("the completed course connection shows the three status lines, then three e
   assert.ok(view.body.indexOf("home-status") < view.body.indexOf('<div class="prompt">'), "the status lines come before the example requests");
 
   const prompts = [
-    "Find images with no alternative text in [course name].",
-    "Move the due date of the first assignment in [course name] one week later.",
-    "Summarize the modules in [course name] and flag anything that needs review."
+    "Use Morrow to list the modules in BIOL 101 and summarize what each covers. Tell me anything you could not read. Do not change the course.",
+    "Use Morrow to list the assignments in BIOL 101 and their due dates. Tell me anything you could not read. Do not change the course.",
+    "Use Morrow to review the pages in BIOL 101 and flag anything that needs review. Tell me anything you could not read. Do not change the course."
   ];
   for (const prompt of prompts) {
     assert.ok(view.body.includes(`<div class="prompt"><span class="prompt-text">${prompt}</span>`), `the body names the request in its own text column: ${prompt}`);

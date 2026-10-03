@@ -1,5 +1,7 @@
 # Morrow Desktop
 
+Desktop 1.0.13 is an unpublished first-use guidance candidate. Desktop 1.0.12 remains the published Mac and Windows download until the new package passes native qualification.
+
 [![CI](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml/badge.svg)](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/bradenriggins/morrow)](LICENSE)
 [![Website](https://img.shields.io/badge/website-meetmorrow.app-1f6feb)](https://meetmorrow.app)
