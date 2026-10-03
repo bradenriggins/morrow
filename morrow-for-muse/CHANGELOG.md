@@ -2,6 +2,9 @@
 
 ## 0.4.11 (unreleased)
 
+The `morrow-muse-connector-0.4.11.zip` package is not published yet.
+Build it from this source checkout as described in `INSTALL.md`.
+
 - Refuse an expired approval at the first browser dispatch after course, account,
   isolated-world, and SDK credential checks. Recheck its signed time window
   under the consumption lock and release a refused operation without sending.

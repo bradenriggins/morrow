@@ -1,6 +1,6 @@
 # Morrow for Muse: Canvas connector and Moodle module (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.4.10. Canvas and Moodle operations use
+You are operating the Morrow for Muse connector, v0.4.11. Canvas and Moodle operations use
 the VM's installed Chromium and the educator's browser-owned session.
 The private native helper is the sign-in surface. Never ask for, print,
 log, or store a password, cookie, sesskey, or token.

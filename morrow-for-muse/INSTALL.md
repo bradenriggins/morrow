@@ -48,8 +48,7 @@ Native Moodle helper onboarding still needs release qualification.
   background loop instead (step 7).
 - Network egress from the VM, direct or via the VM's
   `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
-  needs `github.com` and `release-assets.githubusercontent.com` for the
-  package, your Canvas or Moodle site, and `pypi.org` and
+  needs your Canvas or Moodle site, and `pypi.org` and
   `files.pythonhosted.org` to install the optional runtime packages. It
   probes the Canvas tenant when Canvas is configured.
 - The URL for your Canvas or Moodle site and the ability to sign in to it
@@ -57,15 +56,17 @@ Native Moodle helper onboarding still needs release qualification.
 
 ## Step 1: get the package and unzip it
 
-Download the versioned package and its checksums from the GitHub release. Run these commands in an empty download folder. Verify the package before you unzip it.
+The `morrow-muse-connector-0.4.11.zip` package is not published yet.
+For local qualification, build it from this source repository. From the
+`morrow-for-muse` source directory, run the build script (not shipped in the release):
 
 ```
-curl -fL -o morrow-muse-connector-0.4.10.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.10/morrow-muse-connector-0.4.10.zip
-curl -fL -o SHA256SUMS https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.10/SHA256SUMS
-sha256sum --check SHA256SUMS
+python3 scripts/carve.py --zip
 ```
 
-The checksum check must print `morrow-muse-connector-0.4.10.zip: OK`. Stop if a download or checksum check fails.
+Use the ZIP path printed by the command. Keep its SHA256 and build manifest
+with your qualification record. Stop if the build fails. A future published
+release must also provide checksums to verify before installation.
 
 Unzip the release into the skills directory. Run these commands from
 the folder that holds the zip. Running them again is safe: they update
@@ -75,7 +76,7 @@ sign-in in `helper/profile/`.
 ```
 mkdir -p ~/workspace/skills
 rm -rf ~/workspace/skills/morrow-muse-connector ~/workspace/skills/morrow-canvas/morrow-muse-connector
-unzip -q morrow-muse-connector-0.4.10.zip -d ~/workspace/skills/
+unzip -q morrow-muse-connector-0.4.11.zip -d ~/workspace/skills/
 cd ~/workspace/skills
 if [ -d morrow-canvas ]; then
   cp -R morrow-muse-connector/. morrow-canvas/
