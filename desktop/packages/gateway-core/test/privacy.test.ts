@@ -1415,6 +1415,8 @@ describe("bidirectional roster dictionary", () => {
       };
 
       expect(output.users).toHaveLength(2_500);
+      expect(JSON.stringify(output)).not.toContain("Learner Person");
+      expect(JSON.stringify(output)).toContain("Student A2500");
       expect(roster.identityReads).toBe(1);
       expect(roster.readyChecks).toBe(1);
       // 2,500 learners publish through one durable vault transaction, never one per learner.
@@ -1423,6 +1425,23 @@ describe("bidirectional roster dictionary", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   }, 10_000);
+
+  it("keeps the longest overlapping unspaced name across matcher chunks", () => {
+    const roster = new LearnerRoster();
+    const long = { id: "long", name: "李明华" };
+    const short = { id: "short", name: "李明" };
+    roster.register(scope, [
+      long,
+      ...Array.from({ length: 140 }, (_, index) => ({ id: `padding-${index}`, name: `陈${String.fromCodePoint(0x5000 + index)}文` })),
+      short,
+    ]);
+    const vault = new LearnerVault(":memory:");
+    const longLabel = vault.tokenize(scope, long);
+    const shortLabel = vault.tokenize(scope, short);
+    expect(redactKnownLearnerText("李明华的作业和李明的作业", {
+      learnerRoster: roster, learnerScope: scope, learnerVault: vault,
+    })).toBe(`${longLabel}的作业和${shortLabel}的作业`);
+  });
 
   it("preserves structural identifiers while redacting learner text", () => {
     const roster = new LearnerRoster();

@@ -608,8 +608,9 @@ function aliasEdges(key: string): readonly [string, string] {
 }
 
 /**
- * One matcher for each kind of word edge, so each edge is tested once at a position rather than
- * once for every alias. Within a matcher the longest alias is tried first.
+ * Group aliases by word edge, with bounded matcher sizes. Large alternations
+ * are disproportionately slow on the shipped Node 22 engine. The merge below
+ * still chooses the leftmost, longest match across every group and chunk.
  */
 function aliasMatchers(keys: Iterable<string>): readonly RegExp[] {
   const groups = new Map<string, { readonly edges: readonly [string, string]; readonly keys: string[] }>();
@@ -620,10 +621,17 @@ function aliasMatchers(keys: Iterable<string>): readonly RegExp[] {
     group.keys.push(key);
     groups.set(edges.join("\u0000"), group);
   }
-  return [...groups.values()].map(({ edges: [before, after], keys: grouped }) => new RegExp(
-    `${before}(?:${grouped.sort((left, right) => right.length - left.length).map(aliasBody).join("|")})${after}`,
-    "giu",
-  ));
+  return [...groups.values()].flatMap(({ edges: [before, after], keys: grouped }) => {
+    const sorted = grouped.sort((left, right) => right.length - left.length);
+    const matchers: RegExp[] = [];
+    for (let offset = 0; offset < sorted.length; offset += 128) {
+      matchers.push(new RegExp(
+        `${before}(?:${sorted.slice(offset, offset + 128).map(aliasBody).join("|")})${after}`,
+        "giu",
+      ));
+    }
+    return matchers;
+  });
 }
 
 /** Every alias the matchers find, leftmost first and the longest where two start together. */
