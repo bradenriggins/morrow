@@ -1443,6 +1443,19 @@ describe("bidirectional roster dictionary", () => {
     })).toBe(`${longLabel}的作业和${shortLabel}的作业`);
   });
 
+  it("rescans a chunk after an earlier winning match overlaps its first candidate", () => {
+    const roster = new LearnerRoster();
+    const identities = ["Bob Carol David", "David Ellen", "Alex Bob",
+      ...Array.from({ length: 62 }, (_, index) => `Padding Name ${index}`)]
+      .map((name, index) => ({ id: String(index + 1), name }));
+    roster.register(scope, identities);
+    const vault = new LearnerVault(":memory:");
+    const labels = identities.slice(0, 3).map((identity) => vault.tokenize(scope, identity));
+    expect(redactKnownLearnerText("Alex Bob Carol David Ellen", {
+      learnerRoster: roster, learnerScope: scope, learnerVault: vault,
+    })).toBe(`${labels[2]} ${labels[0]} ${labels[1]}`);
+  });
+
   it("preserves structural identifiers while redacting learner text", () => {
     const roster = new LearnerRoster();
     roster.register(scope, [{ id: "learner-canvas:a:101", name: "Canvas A Learner 101" }]);
