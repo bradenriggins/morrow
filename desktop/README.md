@@ -1,6 +1,5 @@
 # Morrow Desktop
 
-Desktop 1.0.13 is an unpublished first-use guidance candidate. Desktop 1.0.12 remains the published Mac and Windows download until the new package passes native qualification.
 
 [![CI](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml/badge.svg)](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/bradenriggins/morrow)](LICENSE)
@@ -13,6 +12,8 @@ Morrow Desktop, the app for Mac and Windows, connects the AI assistant you alrea
 Morrow helps instructors, instructional designers, and course reviewers turn lesson and quiz requests into reviewed changes and checked results. Ask an assistant set up with Morrow for a change, review the exact change in Morrow, and see what the course platform saved. You keep the teaching decisions.
 
 Morrow Desktop runs on your computer and connects to an assistant through MCP. The app sets up ChatGPT, Claude Desktop, Claude Code, or Gemini CLI, and the source route sets up those four plus Cursor and VS Code, which the app does not set up. A selected Codex update has passed a live test-course check; each other assistant still needs its own complete live checks. See the [test record](docs/implementation/BT2-LIVE-PROOF.md).
+
+Morrow Desktop 1.0.13 is an unpublished first-use guidance candidate. Morrow Desktop 1.0.12 remains the published Mac and Windows download until the new package passes native qualification.
 
 ## What a user installs
 

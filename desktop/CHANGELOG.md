@@ -10,6 +10,10 @@ Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/
 - After the connection check, copy a read-only first request into your assistant. Setup also explains how to return for your next task and where to manage connections and permissions.
 - First-use requests ask the assistant to report anything it could not read and leave the course unchanged.
 
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+
 ### Technical notes
 
 This is an unpublished candidate. It keeps Bridge 1.0.136 and the existing account, permission, approval, and recovery contracts. Native Mac and Windows qualification must pass before publication. Published Desktop 1.0.12 assets remain unchanged.
