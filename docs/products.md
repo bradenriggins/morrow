@@ -16,7 +16,7 @@ Start: [`desktop/README.md`](../desktop/README.md). Current limits: [`desktop/LI
 
 ## Morrow for Muse (`morrow-for-muse/`)
 
-The 0.4.9 release includes the Canvas connector and Moodle browser
+The 0.4.11 release includes the Canvas connector and Moodle browser
 operations. Canvas uses the educator's browser sign-in and the
 live-proven operation catalog. Moodle runs through installed Chromium
 with pinned adapters, but native first-use, production admission, and

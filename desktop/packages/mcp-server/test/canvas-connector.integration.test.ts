@@ -2257,16 +2257,17 @@ describe("Canvas connector gateway path", () => {
     }
   }, CASE_TIMEOUT_MS);
 
-  it("settles a refused Canvas page write as failed, locks the page after an uncertain one, and releases it only on a person-confirmed close-out", async () => {
+  it.each(["legacy", "nonce-same-generation", "nonce-new-generation", "legacy-to-nonce", "historical-legacy-to-nonce"])("settles a refused Canvas page write and closes an uncertain one after fresh person evidence (%s)", async (connectionCase) => {
     const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-write-outcome-"));
     const port = await reserveLoopbackPort();
     const root = resolve("../..");
     const morrow = await MorrowRuntime.connect(connectorConfig(directory, port), { statePath: join(directory, "gateway.sqlite3") });
     const runtime = morrow.gateway;
     const extensionId = "a".repeat(32);
-    const sourceBindingId = "canvas:write-outcome-account";
-    const wrongCourseBindingId = "canvas:wrong-course-account";
-    const wrongConnectionBindingId = "canvas:other-course-42-session";
+    let sourceBindingId = connectionCase === "legacy" ? "canvas:write-outcome-account"
+      : `canvas:057e6e2c0017998759e2:g1:${connectionCase.endsWith("legacy-to-nonce") ? "" : "11111111-1111-4111-8111-111111111111:"}c42`;
+    const wrongCourseBindingId = "canvas:057e6e2c0017998759e2:g1:33333333-3333-4333-8333-333333333333:c43";
+    const wrongConnectionBindingId = "canvas:eeeeeeeeeeeeeeeeeeee:g1:44444444-4444-4444-8444-444444444444:c42";
     const browserCatalogDigest = bridgeCatalogDigestForTests(root);
     const editPermission = {
       schema: "morrow.bridge.edit-permission.v1" as const,
@@ -2556,6 +2557,15 @@ describe("Canvas connector gateway path", () => {
       expect(runtime.effects.get(uncertainId)).toMatchObject({ state: "applied_or_unknown", dispatchAttempt: 1 });
       expect(writeCommands).toBe(3);
 
+      const historicalHolder = connectionCase === "historical-legacy-to-nonce";
+      if (historicalHolder) {
+        const journal = new DatabaseSync(join(directory, "gateway.sqlite3"));
+        try {
+          journal.prepare("UPDATE provider_effect_operations SET target_identity_version='morrow.effect-target.v4', target_identity_digest=? WHERE operation_id=?")
+            .run("4".repeat(64), uncertainId);
+        } finally { journal.close(); }
+      }
+
       // The refusal names the request that holds the page, so the person knows
       // exactly which saved request to resolve.
       const blockedId = await correction("Cells have protective membranes.", "Cells have thin membranes.");
@@ -2639,6 +2649,72 @@ describe("Canvas connector gateway path", () => {
       expect(failedExactClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
       expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
 
+      if (connectionCase !== "legacy") {
+        const generation = connectionCase === "nonce-same-generation" ? 1 : 2;
+        sourceBindingId = `canvas:057e6e2c0017998759e2:g${generation}:22222222-2222-4222-8222-222222222222:c42`;
+        editPermission.sourceBindingId = sourceBindingId;
+        bridge.updateBindings([{
+          sourceBindingId, provider: "canvas", origin: "https://school.instructure.com",
+          courseId: "42", principalFingerprint: "c".repeat(64), sessionGeneration: generation,
+          catalogDigest: browserCatalogDigest, runtimeVerified: true,
+          editPolicyRevision: editPermission.revision, editOptionsAvailable: true,
+          editPermission: { schema: editPermission.schema, revision: editPermission.revision, scopeDigest: editPermission.scopeDigest, catalogDigest: editPermission.catalogDigest, sourceBindingId },
+        }]);
+        await new Promise((wake) => setTimeout(wake, 30));
+      }
+
+      if (historicalHolder) {
+        for (const [foreignId, foreignCourse, principal] of [
+          [wrongCourseBindingId, "43", "c".repeat(64)],
+          [wrongConnectionBindingId, "42", "f".repeat(64)],
+        ]) {
+          bridge.updateBindings([{
+            sourceBindingId: foreignId!, provider: "canvas", origin: "https://school.instructure.com",
+            courseId: foreignCourse!, principalFingerprint: principal!, sessionGeneration: 1,
+            catalogDigest: browserCatalogDigest, runtimeVerified: true, editPolicyRevision: 0,
+          }]);
+          await new Promise((wake) => setTimeout(wake, 30));
+          const foreign = await runtime.call("canvas_update_course_settings", {
+            course_id: foreignCourse!, hide_final_grades: true,
+            _morrow: { source_binding_id: foreignId! },
+          });
+          const foreignOperationId = operationId(foreign);
+          runtime.approveOperation(foreignOperationId);
+          const foreignDispatch = await runtime.dispatchOperation(foreignOperationId);
+          expect(foreignDispatch.structuredContent).toMatchObject({ data: {
+            reason: "provider_effect_target_scope_unknown", blockingOperationId: uncertainId,
+          } });
+          expect(runtime.effects.get(foreignOperationId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+          expect(writeCommands).toBe(3);
+        }
+        bridge.updateBindings([{
+          sourceBindingId, provider: "canvas", origin: "https://school.instructure.com",
+          courseId: "42", principalFingerprint: "c".repeat(64), sessionGeneration: 2,
+          catalogDigest: browserCatalogDigest, runtimeVerified: true,
+          editPolicyRevision: editPermission.revision, editOptionsAvailable: true,
+          editPermission: { schema: editPermission.schema, revision: editPermission.revision,
+            scopeDigest: editPermission.scopeDigest, catalogDigest: editPermission.catalogDigest, sourceBindingId },
+        }]);
+        await new Promise((wake) => setTimeout(wake, 30));
+        // Naming an older-rule holder after a nonce reconnect preserves its exact target.
+        const sameTargetId = await correction("Cells have protective membranes.", "Cells have thin membranes.");
+        const sameTarget = await runtime.dispatchOperation(sameTargetId);
+        expect(sameTarget.structuredContent).toMatchObject({ data: {
+          reason: "provider_effect_target_conflict", blockingOperationId: uncertainId,
+        } });
+        expect(runtime.effects.get(sameTargetId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+        const differentTarget = await runtime.call("canvas_update_course_settings", {
+          course_id: "42", hide_final_grades: true,
+          _morrow: { source_binding_id: sourceBindingId },
+        });
+        const differentTargetId = operationId(differentTarget);
+        runtime.approveOperation(differentTargetId);
+        await runtime.dispatchOperation(differentTargetId);
+        expect(runtime.effects.get(differentTargetId).dispatchAttempt).toBe(1);
+        expect(writeCommands).toBe(4);
+      }
+      const writesBeforeClose = historicalHolder ? 4 : 3;
+
       const freshRead = await runtime.call("canvas_show_page_courses", {
         course_id: "42",
         url_or_id: "lesson",
@@ -2676,7 +2752,7 @@ describe("Canvas connector gateway path", () => {
         personObservedStateDigest: observedState,
       });
       // Closing sends nothing.
-      expect(writeCommands).toBe(3);
+      expect(writeCommands).toBe(writesBeforeClose);
 
       // A settled record is not described as one Morrow failed to check.
       const afterClose = await runtime.reconcileOperation(uncertainId);
@@ -2690,9 +2766,21 @@ describe("Canvas connector gateway path", () => {
 
       // With the page no longer held, the refused change can be sent.
       const released = await runtime.dispatchOperation(blockedId);
-      expect(released.isError, JSON.stringify(released)).not.toBe(true);
-      expect(released.structuredContent).toMatchObject({ effectState: "verified" });
-      expect(writeCommands).toBe(4);
+      if (connectionCase === "legacy") {
+        expect(released.isError, JSON.stringify(released)).not.toBe(true);
+        expect(released.structuredContent).toMatchObject({ effectState: "verified" });
+      } else {
+        // Fresh read evidence can close an old uncertainty; old write authority cannot return.
+        expect(released.isError).toBe(true);
+        expect((released.structuredContent as JsonObject)?.data).not.toMatchObject({ reason: "provider_effect_target_conflict" });
+        expect(runtime.effects.get(blockedId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+        expect(writeCommands).toBe(writesBeforeClose);
+        const freshPlanId = await correction("Cells have protective membranes.", "Cells have thin membranes.");
+        const freshDispatch = await runtime.dispatchOperation(freshPlanId);
+        expect(freshDispatch.isError, JSON.stringify(freshDispatch)).not.toBe(true);
+        expect(freshDispatch.structuredContent).toMatchObject({ effectState: "verified" });
+      }
+      expect(writeCommands).toBe(writesBeforeClose + 1);
     } finally {
       await bridge?.close();
       await morrow.close();

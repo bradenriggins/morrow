@@ -48,7 +48,8 @@ Native Moodle helper onboarding still needs release qualification.
   background loop instead (step 7).
 - Network egress from the VM, direct or via the VM's
   `https_proxy`/`HTTPS_PROXY` (authenticated or not). The installer
-  needs your Canvas or Moodle site, and `pypi.org` and
+  needs `github.com` and `release-assets.githubusercontent.com` for the
+  package, your Canvas or Moodle site, and `pypi.org` and
   `files.pythonhosted.org` to install the optional runtime packages. It
   probes the Canvas tenant when Canvas is configured.
 - The URL for your Canvas or Moodle site and the ability to sign in to it
@@ -56,17 +57,15 @@ Native Moodle helper onboarding still needs release qualification.
 
 ## Step 1: get the package and unzip it
 
-The `morrow-muse-connector-0.4.11.zip` package is not published yet.
-For local qualification, build it from this source repository. From the
-`morrow-for-muse` source directory, run the build script (not shipped in the release):
+Download the versioned package and its checksums from the GitHub release. Run these commands in an empty download folder. Verify the package before you unzip it.
 
 ```
-python3 scripts/carve.py --zip
+curl -fL -o morrow-muse-connector-0.4.11.zip https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.11/morrow-muse-connector-0.4.11.zip
+curl -fL -o SHA256SUMS https://github.com/bradenriggins/morrow/releases/download/muse/v0.4.11/SHA256SUMS
+sha256sum --check SHA256SUMS
 ```
 
-Use the ZIP path printed by the command. Keep its SHA256 and build manifest
-with your qualification record. Stop if the build fails. A future published
-release must also provide checksums to verify before installation.
+The checksum check must print `morrow-muse-connector-0.4.11.zip: OK`. Stop if a download or checksum check fails.
 
 Unzip the release into the skills directory. Run these commands from
 the folder that holds the zip. Running them again is safe: they update

@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.4.11 (unreleased)
+## 0.4.11 (2026-10-03)
 
-The `morrow-muse-connector-0.4.11.zip` package is not published yet.
-Build it from this source checkout as described in `INSTALL.md`.
+Install `morrow-muse-connector-0.4.11.zip` from the `muse/v0.4.11`
+release and verify it with `SHA256SUMS` before unzipping, as described
+in `INSTALL.md`.
 
 - Refuse an expired approval at the first browser dispatch after course, account,
   isolated-world, and SDK credential checks. Recheck its signed time window

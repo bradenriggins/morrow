@@ -9962,8 +9962,8 @@ export class GatewayRuntime {
 
   /**
    * The site one saved change was made on, read from the connection it was made
-   * through. A course connected again carries a new generation and is the same
-   * connection, so the generation is not part of the match.
+   * through. A course connected again carries a new generation and connection nonce.
+   * Those ephemeral values are not part of the person, site and course match.
    */
   private async historicalProviderScope(
     operation: EffectOperationRecord,
@@ -9973,7 +9973,7 @@ export class GatewayRuntime {
     if (!mapping || !operation.sourceBindingId || !isCanvasConnector(mapping)) return null;
     const bindingTool = this.browserBindingsTool(mapping);
     if (!bindingTool) return null;
-    const connection = (id: string): string => id.replace(/:g[0-9]+:/u, ":g:");
+    const connection = (id: string): string => id.replace(/:g[0-9]+(?::[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?:/u, ":g:");
     try {
       const bindings = await this.callSourceOwned(bindingTool.publicName, {}, options);
       if (bindings.isError === true) return null;
@@ -10057,9 +10057,9 @@ export class GatewayRuntime {
       exactReadTargetIdentity,
     ])];
     // The same person, site and course, connected again: a course connection made
-    // again carries a new generation, and a reading through it is still that
+    // again carries a new generation and nonce, and a reading through it is still that
     // person's reading of that course. The strict match runs first.
-    const pattern = operation.sourceBindingId.replace(/:g[0-9]+:/u, ":g%:");
+    const pattern = operation.sourceBindingId.replace(/:g[0-9]+(?::[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?:/u, ":g%:");
     for (const matchActorDigest of [true, false]) {
       for (const targetIdentityDigest of names) {
         if (!targetIdentityDigest) continue;
