@@ -3473,8 +3473,12 @@ async function reserveReceiptNow(command) {
   }
   const area = discoveryArea();
   const stored = await area.get(["usedEffectReceipts", "usedEffectReceiptFloorAt"]);
+  const invalidation = await chrome.storage.local.get("effectReceiptInvalidatedBefore");
   const used = storedUsedReceipts(stored.usedEffectReceipts);
-  const floorAt = Number.isSafeInteger(stored.usedEffectReceiptFloorAt) ? stored.usedEffectReceiptFloorAt : 0;
+  const floorAt = Math.max(
+    Number.isSafeInteger(stored.usedEffectReceiptFloorAt) ? stored.usedEffectReceiptFloorAt : 0,
+    Number.isSafeInteger(invalidation.effectReceiptInvalidatedBefore) ? invalidation.effectReceiptInvalidatedBefore : 0,
+  );
   if (used.some((entry) => entry.id === receipt)) {
     return problem("effect_receipt_refused", "The provider effect receipt is missing or was already used.", false);
   }
@@ -6717,7 +6721,9 @@ async function connectCourseTab(requestedTabId, expectedUrl, expectedCourseConne
     const sessionGeneration = sameSite.reduce((greatest, candidate) => (
       Math.max(greatest, Number.isInteger(candidate.sessionGeneration) ? candidate.sessionGeneration : 0)
     ), 0) + 1;
-    const next = { ...anchorBase, sessionGeneration, siteAnchorId: `${profile.provider}:${digest.slice(0, 20)}:g${sessionGeneration}` };
+    // A disconnect forgets site history. A new nonce prevents an old reviewed binding from
+    // becoming authoritative again when the same account reconnects with generation one.
+    const next = { ...anchorBase, sessionGeneration, siteAnchorId: `${profile.provider}:${digest.slice(0, 20)}:g${sessionGeneration}:${crypto.randomUUID()}` };
     const replaced = (stored.bindings || []).filter((candidate) => sameSitePrincipal(candidate, next));
     const bindings = (stored.bindings || []).filter((candidate) => !sameSitePrincipal(candidate, next));
     const editPolicies = { ...storedPolicies(stored.editPolicies) };
@@ -6943,6 +6949,19 @@ async function disconnectConnector() {
     const revokedOrigins = validCourseConnectionIntent(pendingIntent, Date.now(), COURSE_CONNECTION_INTENT_TTL_MS)
       ? pendingIntent.origins
       : [];
+    // Keep only a monotonic timestamp after forgetting receipt IDs and account state. The
+    // persistent mark survives a browser restart (session storage does not), including migration
+    // from an older worker's receipt list. It is serialized with write receipt reservations.
+    const receiptState = await discoveryArea().get(["usedEffectReceipts", "usedEffectReceiptFloorAt"]);
+    const invalidation = await chrome.storage.local.get("effectReceiptInvalidatedBefore");
+    const invalidatedBefore = storedUsedReceipts(receiptState.usedEffectReceipts).reduce(
+      (mark, entry) => Math.max(mark, entry.at),
+      Math.max(Date.now(),
+        Number.isSafeInteger(receiptState.usedEffectReceiptFloorAt) ? receiptState.usedEffectReceiptFloorAt : 0,
+        Number.isSafeInteger(invalidation.effectReceiptInvalidatedBefore) ? invalidation.effectReceiptInvalidatedBefore : 0),
+    );
+    await chrome.storage.local.set({ effectReceiptInvalidatedBefore: invalidatedBefore });
+    await discoveryArea().set({ usedEffectReceiptFloorAt: invalidatedBefore });
     // The course file access opt-in goes with the connection. Every file read already re-checks the
     // Chrome permission, so this is state hygiene, not a new boundary: it keeps Settings reading off
     // after a disconnect where Chrome kept the optional HTTPS permission.
@@ -6959,8 +6978,6 @@ async function disconnectConnector() {
       [PAIRING_AUTHORITY_KEY]: pairingAuthority(crypto.randomUUID(), "disconnected"),
       [COURSE_CONNECTION_AUTHORITY_KEY]: courseConnectionAuthority("disconnected", revokedOrigins, Date.now() + COURSE_CONNECTION_INTENT_TTL_MS),
     });
-    // usedEffectReceiptFloorAt stays: it only rises, and clearing it would accept a change prepared
-    // before this disconnect a second time.
     await discoveryArea().remove(["courseDiscoveries", "usedEffectReceipts", CANVAS_LIST_CONTINUATIONS_KEY]);
     await chrome.storage.local.remove(["token", "bindings", "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", COURSE_FILE_STORAGE_ACCESS_KEY, COURSE_CONNECTION_INTENT_KEY]);
   });

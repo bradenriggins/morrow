@@ -2050,7 +2050,113 @@ async function servePagesScenario(site) {
   process.send({ ready: true });
 }
 
+async function reviewReconnectReplayScenario(withdraw = false, edge = null) {
+    const originalNow = Date.now;
+    let clock = originalNow();
+    if (edge)
+        Date.now = () => clock;
+    let providerWrites = 0;
+    const requests = [];
+    const value = fixture({ initialLocal: { [consentKey]: consentValue, token }, folderMarker: activeFolderMarker, loopbackFetch: pairingMorrow(requests), tabMessage: async ({ message }) => {
+            if (message?.type === 'morrow_canvas_probe')
+                return { ok: true, profile: { origin: courseOrigin, id: '7' } };
+            if (message?.type === 'morrow_canvas_check_course')
+                return { ok: true, profile: { origin: courseOrigin, id: '7' }, course: { id: '42', name: 'Biology' } };
+            if (message?.type === 'morrow_canvas_list_courses')
+                return { ok: true, profile: { origin: courseOrigin, id: '7' }, courses: [{ id: '42', name: 'Biology' }], pageUrl: courseOrigin + '/api/v1/courses?per_page=100', nextUrl: null, complete: true };
+            if (message?.type !== 'morrow_canvas_execute')
+                return null;
+            if (message.operation?.toolName === 'canvas_edit_section') {
+                providerWrites++;
+                return { ok: true, sent: true, status: 200, truncated: false, data: { id: 5, course_id: 42, name: 'Section B' } };
+            }
+            if (message.operation?.toolName === 'canvas_get_section_information_sections')
+                return { ok: true, sent: true, status: 200, truncated: false, data: { id: 5, course_id: 42, name: 'Section B' } };
+            throw Error('unexpected operation ' + message.operation?.toolName);
+        } });
+    await importWorker('review-reconnect-replay');
+    const firstSocket = await authenticate(value);
+    async function selectCourse() {
+        value.granted.add(coursePermission);
+        const prepared = await sendRuntime(value, { type: 'morrow_connect_course_prepare', tabId: 9 });
+        assert(prepared.ok, JSON.stringify(prepared));
+        const connected = await sendRuntime(value, { type: 'morrow_connect_course_complete', intentId: prepared.result.id });
+        assert(connected.ok, JSON.stringify(connected));
+        const discovered = await sendRuntime(value, { type: 'morrow_course_discovery_start', siteAnchorId: connected.result.siteAnchorId }, settingsSender());
+        assert(discovered.ok, JSON.stringify(discovered));
+        const selected = await sendRuntime(value, { type: 'morrow_course_selection_save', siteAnchorId: connected.result.siteAnchorId, discoveryReceiptId: discovered.result.discoveryReceiptId, courseIds: ['42'] }, settingsSender());
+        assert(selected.ok, JSON.stringify(selected));
+        return structuredClone(value.local.values.bindings[0]);
+    }
+    const before = await selectCourse();
+    const command = { ...semanticWriteCommand(), sourceBindingId: before.sourceBindingId };
+    firstSocket.receive(command);
+    const firstResult = await eventually(() => firstSocket.sent.find(m => m.schema === 'morrow.bridge.result.v1' && m.requestId === command.requestId));
+    assert(firstResult.ok, JSON.stringify(firstResult));
+    assert.equal(providerWrites, 1);
+    if (edge === 'future-receipt') {
+        value.session.values.usedEffectReceipts.push('legacy-used-receipt', { id: 'future-used-receipt', at: clock + 1000 });
+        value.local.values.effectReceiptInvalidatedBefore = clock + 500;
+    }
+    if (edge === 'storage-failure' || edge === 'session-storage-failure') {
+        const area = edge === 'storage-failure' ? value.local : value.session;
+        const key = edge === 'storage-failure' ? 'effectReceiptInvalidatedBefore' : 'usedEffectReceiptFloorAt';
+        const set = area.set;
+        let fail = true;
+        area.set = async (update) => { if (fail && Object.hasOwn(update, key)) {
+            fail = false;
+            throw Error('synthetic_storage_failure');
+        } return set(update); };
+        const failed = await sendRuntime(value, { type: 'morrow_disconnect' }, settingsSender());
+        assert.equal(failed.ok, false);
+        assert(value.session.values.usedEffectReceipts.some(entry => entry.id === command.outerGrant.effectReceiptId));
+        assert.equal(value.local.values.bindings.length, 1, 'account state is not forgotten before its tombstone is durable');
+    }
+    const disconnected = await sendRuntime(value, { type: withdraw ? 'morrow_course_data_consent_withdraw' : 'morrow_disconnect' }, settingsSender());
+    assert(disconnected.ok, JSON.stringify(disconnected));
+    const savedFloor = value.local.values.effectReceiptInvalidatedBefore;
+    if (edge === 'future-receipt')
+        assert(savedFloor >= clock + 1000);
+    if (edge === 'clock-rollback')
+        clock -= 1000;
+    assert(value.local.values.effectReceiptInvalidatedBefore >= command.createdAt);
+    // Simulate browser restart's empty session storage: the real worker must consult local tombstone.
+    await value.session.remove(Object.keys(value.session.values));
+    if (withdraw) {
+        const accepted = await sendRuntime(value, { type: 'morrow_course_data_consent_accept' });
+        assert(accepted.ok, JSON.stringify(accepted));
+    }
+    const paired = await sendRuntime(value, { type: 'morrow_pair' });
+    assert(paired.ok, JSON.stringify(paired));
+    const secondSocket = await authenticate(value, 10, 1);
+    const after = await selectCourse();
+    assert.notEqual(after.sourceBindingId, before.sourceBindingId);
+    const replay = { ...command, sourceBindingId: after.sourceBindingId, requestId: 'request-replayed-after-disconnect', generation: 10 };
+    secondSocket.receive(replay);
+    const replayResult = await eventually(() => secondSocket.sent.find(m => m.schema === 'morrow.bridge.result.v1' && m.requestId === replay.requestId));
+    assert.equal(providerWrites, 1, 'an already-used provider receipt must remain refused after disconnect/reconnect');
+    assert.equal(replayResult.problem?.code ?? replayResult.error?.code, 'effect_receipt_refused');
+    if (edge) {
+        const tied = { ...semanticWriteCommand(), sourceBindingId: after.sourceBindingId, requestId: 'clock-not-past-tombstone', generation: 10, createdAt: clock, outerGrant: { ...command.outerGrant, effectReceiptId: 'effect:new-before-floor' } };
+        secondSocket.receive(tied);
+        const refused = await eventually(() => secondSocket.sent.find(m => m.schema === 'morrow.bridge.result.v1' && m.requestId === tied.requestId));
+        assert.equal(refused.problem?.code ?? refused.error?.code, 'effect_receipt_refused');
+        assert.equal(providerWrites, 1);
+        assert.equal(value.local.values.effectReceiptInvalidatedBefore, savedFloor);
+        clock = savedFloor + 1;
+    }
+    const fresh = { ...semanticWriteCommand(), sourceBindingId: after.sourceBindingId, requestId: 'fresh-after-disconnect', generation: 10, createdAt: Date.now(), outerGrant: { ...command.outerGrant, effectReceiptId: 'effect:fresh-after-disconnect' } };
+    secondSocket.receive(fresh);
+    const freshResult = await eventually(() => secondSocket.sent.find(m => m.schema === 'morrow.bridge.result.v1' && m.requestId === fresh.requestId));
+    assert(freshResult.ok, JSON.stringify(freshResult));
+    assert.equal(providerWrites, 2);
+    Date.now = originalNow;
+}
+
 const scenarios = {
+  "review-reconnect-replay": reviewReconnectReplayScenario,
+  "review-consent-replay": () => reviewReconnectReplayScenario(true),
+  ...Object.fromEntries(['same-ms','clock-rollback','future-receipt','storage-failure','session-storage-failure'].map(edge=>['review-'+edge,()=>reviewReconnectReplayScenario(false,edge)])),
   "consent-connect": consentConnectScenario,
   "consent-pre-effect": () => preEffectScenario("consent"),
   "socket-pre-effect": () => preEffectScenario("socket"),
@@ -2432,3 +2538,11 @@ test("the popup reopens the selected closed course, not a different saved site t
   assert.deepEqual(await worker.tabsCreated(), [{ url: `${courseOrigin}/courses/42`, active: false }]);
   assert.equal(page.hidden("#error"), true);
 });
+
+test("disconnect gives course connections fresh identities and fences consumed receipts while allowing new writes", async () => { await isolatedScenario("review-reconnect-replay"); });
+
+test("consent withdrawal and a cold session retain receipt invalidation while new consent allows fresh writes", async () => { await isolatedScenario("review-consent-replay"); });
+
+for (const edge of ['same-ms','clock-rollback','future-receipt','storage-failure','session-storage-failure']) {
+  test(`disconnect receipt invalidation remains fail-closed through ${edge} and permits a fresh later command`, async () => { await isolatedScenario('review-'+edge); });
+}

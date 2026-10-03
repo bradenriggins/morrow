@@ -72,9 +72,9 @@ function storageArea() {
 }
 
 /** The receipt record of one browser session, with the service worker's own reservation running against it. */
-function receiptRecord() {
+function receiptRecord(local = storageArea()) {
   const area = storageArea();
-  const sandbox = { chrome: { storage: { session: area, local: area } } };
+  const sandbox = { chrome: { storage: { session: area, local } } };
   runInNewContext([
     workerConstant("USED_EFFECT_RECEIPT_LIMIT"),
     workerFunction("problem"),
@@ -185,4 +185,18 @@ test("receipts written by an earlier build are still refused after this one take
   const refused = await reserve("effect:earlier-build", 1_700_000_000_000);
   assert.equal(refused.code, "effect_receipt_refused");
   assert.match(refused.message, /already used/);
+});
+
+
+test("disconnect receipt tombstone survives empty session storage and never lowers an older floor", async () => {
+  const local = storageArea();
+  await local.set({ effectReceiptInvalidatedBefore: 400 });
+  const restarted = receiptRecord(local);
+  assert.equal((await restarted.reserve("old-after-browser-restart", 399))?.code, "effect_receipt_refused");
+  assert.equal(await restarted.reserve("new-after-browser-restart", 401), null);
+  const suspended = receiptRecord(local);
+  await suspended.area.set({ usedEffectReceiptFloorAt: 500, usedEffectReceipts: ["legacy-used-receipt"] });
+  assert.equal((await suspended.reserve("legacy-used-receipt", 600))?.code, "effect_receipt_refused");
+  assert.equal((await suspended.reserve("older-than-session-floor", 450))?.code, "effect_receipt_refused");
+  assert.equal(await suspended.reserve("new-after-worker-restart", 501), null);
 });
