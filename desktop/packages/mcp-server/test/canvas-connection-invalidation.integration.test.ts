@@ -109,12 +109,24 @@ it("a fresh handshake preserves course authority, but a new connection identity 
         bridge.updateBindings([binding]);
         await new Promise(r => setTimeout(r, 30));
         expect(JSON.stringify(await runtime.dispatchOperation(staleId))).toContain("provider_effect_target_conflict");
+        const newConnection = { ...binding, sourceBindingId: binding.sourceBindingId + ":nonce-uncertain-check" };
+        bridge.updateBindings([newConnection]);
+        await new Promise(r => setTimeout(r, 30));
+        const rebound = await runtime.call("canvas_update_course_settings", { course_id: "42", hide_final_grades: false, _morrow: { operation_id: "review-new-connection-unknown-target", source_binding_id: newConnection.sourceBindingId } });
+        expect(rebound.isError, JSON.stringify(rebound)).not.toBe(true);
+        const reboundId = operationId(rebound);
+        runtime.approveOperation(reboundId);
+        const blocked = await runtime.dispatchOperation(reboundId);
+        expect(JSON.stringify(blocked)).toContain("provider_effect_target_conflict");
+        expect(writes).toBe(1);
+        bridge.updateBindings([binding]);
+        await new Promise(r => setTimeout(r, 30));
         for (const [index, changed] of [
             { ...binding, principalFingerprint: "e".repeat(64) },
             { ...binding, sessionGeneration: 2 },
             { ...binding, courseId: "43" },
             { ...binding, origin: "https://other.instructure.com" },
-            { ...binding, provider: "moodle" as const, siteUrl: "https://school.instructure.com" },
+            { ...binding, provider: "moodle" as const, siteUrl: "https://school.instructure.com/" },
             { ...binding, runtimeVerified: false },
             null,
         ].entries()) {
