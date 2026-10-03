@@ -269,7 +269,7 @@ test("a Moodle site that answers its own probe is never refused as Blackboard", 
 
   assert.equal(answer.ok, true);
   assert.equal(answer.result.provider, "moodle");
-  assert.match(answer.result.siteAnchorId, /^moodle:[0-9a-f]{20}:g1$/);
+  assert.match(answer.result.siteAnchorId, /^moodle:[0-9a-f]{20}:g1:[0-9a-f-]{36}$/);
   assert.deepEqual(fixture.records.removedPermissions, []);
 });
 
