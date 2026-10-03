@@ -20,6 +20,8 @@ function edges(value) {
 test("the cache advisory exception stays confined to its reviewed pinned build chain", () => {
   const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
   assert.equal(manifest.devDependencies["electron-builder"], "26.15.3", "review exception on builder upgrade");
+  const direct = { ...manifest.dependencies, ...manifest.devDependencies, ...manifest.optionalDependencies };
+  assert.ok(!["http-cache-semantics", "cacheable-request", "got", "@electron/get", "app-builder-lib"].some((name) => Object.hasOwn(direct, name)), "unreviewed direct dependency on the cache chain");
   const reviewedParents = [
     [vulnerable, /^cacheable-request@7\.0\.4$/u],
     ["cacheable-request@7.0.4", /^got@11\.8\.6$/u],
