@@ -1,0 +1,69 @@
+name: latest published Desktop upgrade QA
+on:
+  push:
+    branches: [qa/latest-release-upgrade-20261003]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  latest-upgrade:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Parse the isolated PowerShell fixture before running it
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE 'desktop/scripts/test/desktop-windows-latest-upgrade.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) { throw ($errors | Out-String) }
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: morrow-windows-desktop-37151870644
+          run-id: 37151870644
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Pin published baseline and reused candidate
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'latest-upgrade-evidence'
+          New-Item -ItemType Directory -Path $out | Out-Null
+          "MORROW_LATEST_UPGRADE_OUT=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $old = Join-Path $env:RUNNER_TEMP 'Morrow-1.0.12-win-x64.exe'
+          Invoke-WebRequest 'https://github.com/bradenriggins/morrow/releases/download/desktop%2Fv1.0.12/Morrow-1.0.12-win-x64.exe' -OutFile $old
+          if ((Get-FileHash $old -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd3239085f09facc568b0d9f07241c7c3460530e9dbc08c5ad650344ae78dbfdd') { throw 'Published 1.0.12 installer hash mismatch.' }
+          $new = Join-Path $env:GITHUB_WORKSPACE 'candidate\Morrow-1.0.13-win-x64.exe'
+          if ((Get-FileHash $new -Algorithm SHA256).Hash.ToLowerInvariant() -ne '97328bf29a19895dbeb3dd3b1c6228f27ae68d1ed7f85d2a6e2eef43d34bd09e') { throw 'Qualified 1.0.13 installer hash mismatch.' }
+          $p = Get-Content 'candidate/package-receipt.json' -Raw | ConvertFrom-Json
+          if ($p.source.head -ne 'b60e135c86f76d0a1720799ff166b15fe0955246' -or $p.source.dirty -ne $false -or $p.version -ne '1.0.13') { throw 'Candidate receipt/source mismatch.' }
+      - name: Upgrade synthetic profile and check unrelated profile and service boundaries
+        shell: pwsh
+        run: |
+          function NormalProfileSnapshot {
+            $roots = @("$env:APPDATA\Morrow", "$env:APPDATA\Morrow Desktop", "$env:LOCALAPPDATA\Morrow", "$env:USERPROFILE\.codex")
+            return @($roots | ForEach-Object {
+              $root = $_
+              [ordered]@{ root = $root; exists = [bool](Test-Path -LiteralPath $root); files = @(if (Test-Path -LiteralPath $root) { Get-ChildItem -LiteralPath $root -Recurse -File | Sort-Object FullName | ForEach-Object { [ordered]@{ path = $_.FullName; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash } } }) }
+            }) | ConvertTo-Json -Depth 8 -Compress
+          }
+          function MorrowServices { return @(Get-CimInstance Win32_Service | Where-Object { $_.Name -match 'Morrow' -or $_.PathName -match 'Morrow' } | Select-Object Name,State,StartMode,PathName) | ConvertTo-Json -Depth 5 -Compress }
+          $before = NormalProfileSnapshot
+          $servicesBefore = MorrowServices
+          $id = [guid]::NewGuid().ToString('N')
+          $state = Join-Path $env:LOCALAPPDATA "MorrowLatestUpgradeTest-$id"
+          $install = Join-Path $env:RUNNER_TEMP "morrow-latest-upgrade-install-$id"
+          $receipt = Join-Path $env:MORROW_LATEST_UPGRADE_OUT 'latest-upgrade.json'
+          & desktop/scripts/test/desktop-windows-latest-upgrade.ps1 -OldInstaller (Join-Path $env:RUNNER_TEMP 'Morrow-1.0.12-win-x64.exe') -OldSha256 'd3239085f09facc568b0d9f07241c7c3460530e9dbc08c5ad650344ae78dbfdd' -OldSourceHead 'ed4f91f59a33a560994712c00d7ef9b17f8bac69' -NewInstaller (Join-Path $env:GITHUB_WORKSPACE 'candidate\Morrow-1.0.13-win-x64.exe') -NewSha256 '97328bf29a19895dbeb3dd3b1c6228f27ae68d1ed7f85d2a6e2eef43d34bd09e' -NewSourceHead 'b60e135c86f76d0a1720799ff166b15fe0955246' -NewVersion '1.0.13' -InstallDirectory $install -StateDirectory $state -Receipt $receipt
+          $after = NormalProfileSnapshot
+          $servicesAfter = MorrowServices
+          if ($before -cne $after) { throw 'An ordinary profile outside the disposable root changed.' }
+          if ($servicesBefore -cne $servicesAfter) { throw 'Morrow service state changed.' }
+          [ordered]@{ schema = 'morrow.latest-upgrade-isolation.v1'; applicationSource = 'b60e135c86f76d0a1720799ff166b15fe0955246'; qualificationSource = $env:GITHUB_SHA; ordinaryProfilesUnchanged = $true; servicesUnchanged = $true; disposableProfile = $true } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:MORROW_LATEST_UPGRADE_OUT 'isolation.json') -Encoding utf8
+      - name: Upload bounded upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: latest-upgrade-${{ github.run_id }}
+          path: ${{ runner.temp }}/latest-upgrade-evidence
+          if-no-files-found: error
