@@ -314,7 +314,7 @@ test("the README names the desktop artifacts the build configuration actually pr
   }
   const windowsGuide = flat("installer/WINDOWS-DEPLOYMENT.md");
   assert.match(windowsGuide, /No Windows 1\.0\.6 or 1\.0\.7 installer was published/);
-  assert.match(windowsGuide, /The Windows download is the published 1\.0\.12 installer/);
+  assert.match(windowsGuide, /The Windows download is the published 1\.0\.13 installer/);
   assert.match(windowsGuide, /Every published Windows artifact so far is unsigned/);
   assert.doesNotMatch(windowsGuide, /Every Morrow Desktop release so far, including 1\.0\.5/);
   assert.match(readme, /Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature/,
@@ -322,17 +322,17 @@ test("the README names the desktop artifacts the build configuration actually pr
   assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
 });
 
-test("the published 1.0.12 release is the Mac and Windows download", () => {
-  assert.match(flat("README.md"), /Morrow Desktop 1\.0\.12 is for Mac with Apple silicon and Windows x64/);
-  assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.12` runs on Mac with Apple silicon and Windows x64/);
-  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.12 \(2026-10-03\).*## 1\.0\.11 \(2026-10-02\)/);
+test("the published 1.0.13 release is the Mac and Windows download", () => {
+  assert.match(flat("README.md"), /Morrow Desktop 1\.0\.13 is for Mac with Apple silicon and Windows x64/);
+  assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.13` runs on Mac with Apple silicon and Windows x64/);
+  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.13 \(2026-10-03\).*## 1\.0\.11 \(2026-10-02\)/);
   const version = JSON.parse(read("package.json")).version;
   const bridgeVersion = JSON.parse(read("connector/extension/manifest.json")).version;
   assert.ok(flat("README.md").includes(`This checkout contains Morrow Desktop ${version} with Morrow Bridge ${bridgeVersion}`));
-  assert.match(flat("README.md"), /Published downloads are Mac 1\.0\.12 and Windows 1\.0\.12/);
-  assert.doesNotMatch(flat("README.md"), /unpublished .* candidate/);
+  assert.match(flat("README.md"), /Published downloads are Mac 1\.0\.13 and Windows 1\.0\.13/);
+  assert.doesNotMatch(flat("README.md"), /unpublished first-use guidance candidate/);
   assert.doesNotMatch(flat("CHANGELOG.md").split("## 1.0.6")[0], /prepared but has not been published|Mac download remains on published 1\.0\.6/);
-  assert.match(flat("installer\/WINDOWS-DEPLOYMENT.md"), /Published 1\.0\.12: `Morrow-1\.0\.12-win-x64\.exe`/);
+  assert.match(flat("installer\/WINDOWS-DEPLOYMENT.md"), /Published 1\.0\.13: `Morrow-1\.0\.13-win-x64\.exe`/);
 });
 
 // electron-builder.config.cjs takes its target platform from MORROW_TARGET_PLATFORM

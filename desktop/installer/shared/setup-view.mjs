@@ -155,6 +155,7 @@ export function progress(current) {
 function notFoundDetail(assistant) {
   if (assistant?.statusUnavailable === true) return "Morrow could not check this assistant. Select Check status again.";
   if (assistant?.id === "claude-desktop") return "Claude Desktop is not installed on this computer. Get it from claude.ai/download, then select Check status.";
+  if (assistant?.id === "codex") return "The ChatGPT desktop app with local MCP support or Codex CLI was not found. Install the supported desktop app, then select Check status. This setup does not connect ChatGPT browser or phone chats.";
   return "Not found on this computer.";
 }
 
@@ -170,7 +171,7 @@ function assistantCards(current, chosenAssistantId) {
     return `<button class="assistant-card" type="button" data-action="choose-assistant" data-assistant-id="${escapeHtml(assistant.id)}" aria-pressed="${selected}"${available ? "" : " disabled"}>
       <span class="assistant-title">${escapeHtml(assistant.title)}</span>
       ${configured ? '<span class="assistant-badge">Ready</span>' : ""}
-      <span class="assistant-detail">${escapeHtml(detail)}</span>
+      <span class="assistant-detail">${escapeHtml(detail)}${assistant.id === "codex" && available ? " Use the ChatGPT desktop app with local MCP support, or Codex CLI in your terminal. This setup does not connect browser or phone chats." : ""}</span>
     </button>`;
   };
   const primary = assistants.filter((assistant) => assistant?.tier !== "advanced");
@@ -231,7 +232,7 @@ function assistantDetail(assistant) {
   if (assistant.statusUnavailable === true) return "Morrow could not check this assistant. Select Check status again.";
   if (assistant.configured === true) return "Morrow is set up in this assistant.";
   if (assistant.pending === true) return assistant.checking === true ? "Morrow is checking the connection to Claude Desktop." : "Waiting for your approval in Claude Desktop.";
-  if (assistant.detected !== true) return "Not found on this computer.";
+  if (assistant.detected !== true) return notFoundDetail(assistant);
   return "Not set up yet.";
 }
 
@@ -297,9 +298,9 @@ const HOME_STATUS_ROWS = Object.freeze([
 ]);
 
 const EXAMPLE_REQUESTS = Object.freeze([
-  "Find images with no alternative text in [course name].",
-  "Move the due date of the first assignment in [course name] one week later.",
-  "Summarize the modules in [course name] and flag anything that needs review.",
+  "Use Morrow to list the modules in [course name] and summarize what each covers. Tell me anything you could not read. Do not change the course.",
+  "Use Morrow to list the assignments in [course name] and their due dates. Tell me anything you could not read. Do not change the course.",
+  "Use Morrow to review the pages in [course name] and flag anything that needs review. Tell me anything you could not read. Do not change the course.",
 ]);
 
 function examplePrompt(text) {
@@ -496,14 +497,18 @@ function actionPanel(current, { chosenAssistantId = null, platform = null, bridg
   const course = bridge.firstPreviewCourseName || bridge.selectedCourseName || "your selected course";
   if (previewCompleted(current) && restartAssistant(current)) return restartPanel(restartAssistant(current));
   if (previewCompleted(current)) {
+    const firstRequests = EXAMPLE_REQUESTS.map((request) => request.replace("[course name]", () => bridge.firstPreviewCourseName || bridge.selectedCourseName || "[course name]"));
+    const entryHelp = assistant.id === "codex"
+      ? '<p>In the ChatGPT desktop app with local MCP support, open <strong>Settings → MCP servers</strong> and check that <strong>morrow</strong> is enabled. In a new chat, type <strong>/mcp</strong> to view connected servers. If you use <strong>Codex CLI</strong> instead, run <strong>codex</strong> in your terminal on this computer, use <strong>/mcp</strong> to check Morrow, and send your request there. This setup does not connect ChatGPT browser or phone chats. Allow your assistant to use Morrow tools when it asks; course changes still follow Morrow’s separate permissions and review.</p>'
+      : "";
     const openAction = assistant.id === "claude-desktop"
       ? '<div class="inline-actions"><button class="primary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button></div>'
       : `<div class="info-box"><strong>Open ${escapeHtml(assistant.title)}</strong><p>Open ${escapeHtml(assistant.title)} and start a new chat to work with your courses.</p></div>`;
     return {
       summary: "First read complete",
       title: "Morrow is ready.",
-      copy: `Morrow read ${course} successfully. Continue in ${assistant.title}. Give it course names, course IDs, or course links and ask what you want to do.`,
-      body: `${openAction}${homeStatusLines(current)}<h3>Try asking in ${escapeHtml(assistant.title)}</h3><p>Copy one, paste it into a new chat in ${escapeHtml(assistant.title)}, replacing [course name] with your course, and send.</p>${EXAMPLE_REQUESTS.map(examplePrompt).join("")}`,
+      copy: `Morrow read ${course} successfully. Continue in ${assistant.title}. Start a new chat there and try a read-only task below.`,
+      body: `${openAction}${entryHelp}${homeStatusLines(current)}<h3>Your first task in ${escapeHtml(assistant.title)}</h3><p>Copy one, paste it into a new chat in ${escapeHtml(assistant.title)}, and send. If the course name is missing, replace [course name] with your course.</p>${firstRequests.map(examplePrompt).join("")}<div class="info-box"><strong>Next time, open ${escapeHtml(assistant.title)}</strong><p>Keep a signed-in Canvas or Moodle tab open in Chrome. Ask your assistant for course work using course names, course IDs, or course links. Return to Morrow to check connections or manage setup; use Morrow Bridge to manage course access and Plan or Edit permission.</p></div>`,
     };
   }
   if (previewReady(current)) {
@@ -571,7 +576,7 @@ function restartPanel(assistant) {
     copy: folder
       ? `${assistant.title} reads Morrow's entry only from the project folder you chose, and only when it starts there.`
       : `${assistant.title} reads its settings only when it starts. It cannot use Morrow until you open it again.`,
-    body: `<ol class="instructions">${reopen}<li>Return here and select <strong>Check ${title}</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
+    body: `<ol class="instructions">${reopen}<li>Return here and select <strong>Check ${title}</strong>.</li></ol>${assistant.id === "codex" ? '<p>If you use <strong>Codex CLI</strong> instead of the ChatGPT desktop app, exit the CLI and run <strong>codex</strong> again in your terminal on this computer. Use <strong>/mcp</strong> to check Morrow, then continue in that terminal chat. This setup does not connect ChatGPT browser or phone chats.</p>' : ""}<div class="inline-actions"><button class="primary-button" type="button" data-action="check-assistant-connection">Check ${title}</button></div>`,
   };
 }
 

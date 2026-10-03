@@ -1,5 +1,6 @@
 # Morrow Desktop
 
+
 [![CI](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml/badge.svg)](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/bradenriggins/morrow)](LICENSE)
 [![Website](https://img.shields.io/badge/website-meetmorrow.app-1f6feb)](https://meetmorrow.app)
@@ -11,6 +12,8 @@ Morrow Desktop, the app for Mac and Windows, connects the AI assistant you alrea
 Morrow helps instructors, instructional designers, and course reviewers turn lesson and quiz requests into reviewed changes and checked results. Ask an assistant set up with Morrow for a change, review the exact change in Morrow, and see what the course platform saved. You keep the teaching decisions.
 
 Morrow Desktop runs on your computer and connects to an assistant through MCP. The app sets up ChatGPT, Claude Desktop, Claude Code, or Gemini CLI, and the source route sets up those four plus Cursor and VS Code, which the app does not set up. A selected Codex update has passed a live test-course check; each other assistant still needs its own complete live checks. See the [test record](docs/implementation/BT2-LIVE-PROOF.md).
+
+Morrow Desktop 1.0.13 includes first-use guidance and Morrow Bridge 1.0.136.
 
 ## What a user installs
 
@@ -337,14 +340,14 @@ Client configuration contains only the local Node command, server entry path, wo
 
 ## The Morrow Desktop app
 
-Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout carries Morrow Desktop 1.0.12. Published downloads are Mac 1.0.12 and Windows 1.0.12.
+Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout carries Morrow Desktop 1.0.13. Published downloads are Mac 1.0.13 and Windows 1.0.13.
 
 | System | Artifact | What has been checked |
 | --- | --- | --- |
-| macOS on Apple silicon | Published 1.0.12: `Morrow-1.0.12-mac-arm64.dmg`, with a matching `.zip` | The exact 1.0.12 package passed the native Mac smoke check, including gateway readiness and sealed-payload verification. |
-| Windows on x64 | Published 1.0.12: `Morrow-1.0.12-win-x64.exe`, a one-click per-user NSIS installer | The exact 1.0.12 installer passed install, start, damaged-payload refusal, exact repair, uninstall, upgrade retention, and retained-data checks on native Windows. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. No Windows 1.0.6 or 1.0.7 release asset was published. |
+| macOS on Apple silicon | Published 1.0.13: `Morrow-1.0.13-mac-arm64.dmg`, with a matching `.zip` | The exact 1.0.13 package passed the native Mac smoke check, including gateway readiness and sealed-payload verification. |
+| Windows on x64 | Published 1.0.13: `Morrow-1.0.13-win-x64.exe`, a one-click per-user NSIS installer | The exact 1.0.13 installer passed install, start, damaged-payload refusal, exact repair, uninstall, upgrade retention, and retained-data checks on native Windows. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. No Windows 1.0.6 or 1.0.7 release asset was published. |
 
-There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. Morrow Desktop 1.0.12 is for Mac with Apple silicon and Windows x64. The [Morrow downloads page](https://meetmorrow.app/download) names the currently published Mac and Windows versions. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
+There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. Morrow Desktop 1.0.13 is for Mac with Apple silicon and Windows x64. The [Morrow downloads page](https://meetmorrow.app/download) names the currently published Mac and Windows versions. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
 You need a Mac with Apple silicon and macOS 13 or later, or an x64 computer with Windows 10 or Windows 11. On that computer you also need Chrome 116 or later and one supported assistant already installed: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
 
@@ -532,4 +535,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-This checkout contains Morrow Desktop 1.0.12 with Morrow Bridge 1.0.136. Published downloads are Mac 1.0.12 and Windows 1.0.12. The exact published files passed native platform smoke before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+This checkout contains Morrow Desktop 1.0.13 with Morrow Bridge 1.0.136. Published downloads are Mac 1.0.13 and Windows 1.0.13. The exact published files passed native platform smoke before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
