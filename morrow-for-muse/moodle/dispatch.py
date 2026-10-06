@@ -194,8 +194,30 @@ class MoodleDispatcher:
                 except Exception:
                     pass
 
-        result = boundary.invoke(entry['name'],
-            {**arguments, '_morrow': {'source_binding_id': binding['sourceBindingId']}}, {}, invoke)
+        try:
+            result = boundary.invoke(entry['name'],
+                {**arguments, '_morrow': {'source_binding_id': binding['sourceBindingId']}}, {}, invoke)
+        except Exception as exc:
+            if state['claim']:
+                if is_write and state['started']:
+                    try:
+                        executor.journal_claimed_outcome(op_id, {'op_id': str(op_id),
+                            'kind': 'dispatch', 'entry_name': entry['name'], 'effects': entry['effects'],
+                            'params_digest': executor.digest_of(arguments),
+                            'receipt': {'ok': False, 'error': 'moodle_dispatch_interrupted',
+                                        'detail': type(exc).__name__},
+                            'verification': 'unconfirmed', 'uncertain': True}, state['claim'])
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        executor.release_op_id(op_id, state['claim'],
+                            'Moodle dispatch failed before any effect could apply: %s'
+                            % type(exc).__name__)
+                    except Exception:
+                        pass
+                    state['claim'] = None
+            raise
         if result.get('isError'):
             result = {'ok': False, 'error': 'moodle_execution_or_privacy_unconfirmed'}
         verified = result.get('ok') is True and (not is_write or
