@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "e15f9c6a451596f43e94a5f1a10564dd8c546979",
+  "candidateCommit": "40139560a82c34d57ac4a8a0e47e3757e5644622",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -2832,14 +2832,14 @@
     },
     {
       "path": "installer/test/windows-codex-native-proof.test.cjs",
-      "sourceCommit": "7fd31e57fb9e0b46c41c632bc87546ab10bb7ae2",
+      "sourceCommit": "40139560a82c34d57ac4a8a0e47e3757e5644622",
       "originalPath": "installer/test/windows-codex-native-proof.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "fcfa887bd7a444d17e917d92f79541d81b61b8577baec5de1870b61d25d95cdd"
+      "beforeDigest": "fcfa887bd7a444d17e917d92f79541d81b61b8577baec5de1870b61d25d95cdd",
+      "afterDigest": "773c64aed804afc6db7b079cdd7965453ea232b9651c82daa143e62181e9955a"
     },
     {
       "path": "integrations/morrow-legacy/extension/morrow-gateway-bridge-bindings.js",
@@ -10920,14 +10920,14 @@
     },
     {
       "path": "scripts/test/windows-codex-cli-native.cjs",
-      "sourceCommit": "455fb5a35ef942e0cef2c35a5b563dd0f24ccbdb",
+      "sourceCommit": "40139560a82c34d57ac4a8a0e47e3757e5644622",
       "originalPath": "scripts/test/windows-codex-cli-native.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "8e1cc4dc90119b620131719a0ffa63a530b9a30c53ab4e414de54ecc919dad11",
-      "afterDigest": "85ce3e5264ae7b4d5f2844d083c4250214869050d26998ee971064f58e72005a"
+      "beforeDigest": "85ce3e5264ae7b4d5f2844d083c4250214869050d26998ee971064f58e72005a",
+      "afterDigest": "8f475ee6ff24be47834a25806751cb88bb8fb97e1f2591359ceb161405bb6d75"
     },
     {
       "path": "scripts/test/workflow-action-pins.test.mjs",
