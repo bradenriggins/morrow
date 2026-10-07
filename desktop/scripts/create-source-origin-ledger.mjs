@@ -7,9 +7,23 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const maxBuffer = 64 * 1024 * 1024;
+const gitRoot = execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], {
+  encoding: "utf8",
+}).trim();
+const sourcePrefix = execFileSync("git", ["-C", root, "rev-parse", "--show-prefix"], {
+  encoding: "utf8",
+}).trim().replace(/\/$/, "");
+const gitPath = (path) => sourcePrefix ? `${sourcePrefix}/${path}` : path;
+
+function sourcePaths() {
+  return git(["ls-tree", "-r", "--name-only", "HEAD"])
+    .split("\n")
+    .filter((path) => path && (!sourcePrefix || path.startsWith(`${sourcePrefix}/`)))
+    .map((path) => sourcePrefix ? path.slice(sourcePrefix.length + 1) : path);
+}
 
 function git(args, encoding = "utf8") {
-  return execFileSync("git", ["-C", root, ...args], {
+  return execFileSync("git", ["-C", gitRoot, ...args], {
     encoding,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -20,7 +34,7 @@ function sha256(bytes) {
 }
 
 function tracked(path, revision = "HEAD") {
-  return execFileSync("git", ["-C", root, "show", `${revision}:${path}`], {
+  return execFileSync("git", ["-C", gitRoot, "show", `${revision}:${gitPath(path)}`], {
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer,
   });
@@ -35,14 +49,12 @@ function beforeDigest(commit, path) {
 }
 
 const candidateCommit = git(["rev-parse", "HEAD"]).trim();
-const paths = git(["ls-tree", "-r", "--name-only", "HEAD"])
-  .split("\n")
-  .map((path) => path.trim())
+const paths = sourcePaths()
   .filter((path) => path && path !== "config/source-origin-ledger.json")
   .sort();
 
 const entries = paths.map((path) => {
-  const sourceCommit = git(["log", "-1", "--format=%H", "--", path]).trim() || candidateCommit;
+  const sourceCommit = git(["log", "-1", "--format=%H", "--", gitPath(path)]).trim() || candidateCommit;
   const ownership = path === "pnpm-lock.yaml"
     ? "generated"
     : path.startsWith("integrations/")
