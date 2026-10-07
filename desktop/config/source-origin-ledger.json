@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "455fb5a35ef942e0cef2c35a5b563dd0f24ccbdb",
+  "candidateCommit": "1316189efcb721fb83fec94eebd260e8d92d472d",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -2216,14 +2216,14 @@
     },
     {
       "path": "installer/shared/assistant-app-detection.cjs",
-      "sourceCommit": "6e12721450ea06b91bd4f94547b9bb9598e1109d",
+      "sourceCommit": "1316189efcb721fb83fec94eebd260e8d92d472d",
       "originalPath": "installer/shared/assistant-app-detection.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "d0ce34b01115ee64001516646a9283a8d0f2a6ccb6b89eca3239e4d3cedb2ed2",
-      "afterDigest": "36a6525a8b15309588285d486c51871e3a57950f58986ce3607272508f2d3c22"
+      "beforeDigest": "36a6525a8b15309588285d486c51871e3a57950f58986ce3607272508f2d3c22",
+      "afterDigest": "606549a81533d1d96941c96af13b5a773da0131bb0c8837270b8e5dd1e5829e7"
     },
     {
       "path": "installer/shared/blackboard.cjs",
@@ -2480,14 +2480,14 @@
     },
     {
       "path": "installer/test/assistant-app-detection.test.cjs",
-      "sourceCommit": "6e12721450ea06b91bd4f94547b9bb9598e1109d",
+      "sourceCommit": "1316189efcb721fb83fec94eebd260e8d92d472d",
       "originalPath": "installer/test/assistant-app-detection.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "eddd2d402283277507a4e9883307c2f15c4be0b4be3ab8e01da74a3900fa0fe2",
-      "afterDigest": "b193040e2974d161db671b62076d5a92d31e95c1135f4c05724e5d2443441810"
+      "beforeDigest": "b193040e2974d161db671b62076d5a92d31e95c1135f4c05724e5d2443441810",
+      "afterDigest": "ab8ae4672dea66b338e0358231b6a0367f2cb2bd7017d1d8e0fe2d5ea3ae3608"
     },
     {
       "path": "installer/test/assistant-detection-routing.test.cjs",
