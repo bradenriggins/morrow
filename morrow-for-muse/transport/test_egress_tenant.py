@@ -105,9 +105,9 @@ def test_selected_tenant_is_the_only_direct_probe(config, monkeypatch, settings,
         monkeypatch.setenv("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", host)
     calls = []
     monkeypatch.setattr(egress, "direct_egress_ok",
-                        lambda target, timeout: (calls.append(target) or True, "ok"))
+                        lambda target, timeout, port: (calls.append((target, port)) or True, "ok"))
     assert egress.probe_egress()["mode"] == "direct"
-    assert calls == [host]
+    assert calls == [(host, 443)]
 
 
 @pytest.mark.parametrize("settings", [
@@ -130,9 +130,9 @@ def test_invalid_or_ambiguous_tenant_blocks_without_network(config, settings):
 def test_explicit_probe_host_remains_supported(config, monkeypatch):
     calls = []
     monkeypatch.setattr(egress, "direct_egress_ok",
-                        lambda host, timeout: (calls.append(host) or True, "ok"))
+                        lambda host, timeout, port: (calls.append((host, port)) or True, "ok"))
     assert egress.probe_egress(test_host="school.instructure.com")["mode"] == "direct"
-    assert calls == ["school.instructure.com"]
+    assert calls == [("school.instructure.com", 443)]
 
 
 def test_proxy_selection_needs_no_network_or_tenant(config):
@@ -141,13 +141,17 @@ def test_proxy_selection_needs_no_network_or_tenant(config):
     assert "password" not in result["detail"]
 
 
+@pytest.mark.parametrize("provider", ["canvas", "moodle"])
+@pytest.mark.parametrize("port", [443, 8443])
 @pytest.mark.parametrize("pin_matches", [True, False])
 def test_direct_probe_preserves_tls_hostname_and_certificate_pin(config, monkeypatch,
-                                                                 pin_matches):
+                                                                 pin_matches, port, provider):
     import base64
     import hashlib
     import ssl
 
+    name = "CANVAS_BASE" if provider == "canvas" else "MOODLE_BASE"
+    config[0].write_text("%s=https://school.instructure.com:%s\n" % (name, port))
     cert = b"synthetic-leaf-certificate"
     digest = hashlib.sha256(cert if pin_matches else b"other-cert").digest()
     monkeypatch.setenv("MORROW_EGRESS_PIN", base64.b64encode(digest).decode())
@@ -178,9 +182,11 @@ def test_direct_probe_preserves_tls_hostname_and_certificate_pin(config, monkeyp
 
     monkeypatch.setattr(egress.socket, "create_connection", connect)
     monkeypatch.setattr(egress.ssl, "create_default_context", lambda: FakeContext())
-    ok, detail = egress.direct_egress_ok("school.instructure.com")
-    assert ok is pin_matches
-    assert calls == [("school.instructure.com", 443)]
+    result = egress.probe_egress()
+    assert (result["mode"] == "direct") is pin_matches
+    detail = result["detail"]
+    assert calls == [("school.instructure.com", port)]
+    assert "school.instructure.com:%s" % port in detail
     if not pin_matches:
         assert "CertPinMismatch" in detail
 
@@ -188,3 +194,29 @@ def test_direct_probe_preserves_tls_hostname_and_certificate_pin(config, monkeyp
 def test_malformed_certificate_pin_blocks_before_connection(config, monkeypatch):
     monkeypatch.setenv("MORROW_EGRESS_PIN", "invalid")
     assert egress.direct_egress_ok("school.instructure.com")[0] is False
+
+
+@pytest.mark.parametrize("provider", ["canvas", "moodle"])
+@pytest.mark.parametrize("port", ["0", "65536", "-1", "bad"])
+def test_invalid_configured_port_blocks_before_socket(config, provider, port):
+    name = "CANVAS_BASE" if provider == "canvas" else "MOODLE_BASE"
+    config[0].write_text("%s=https://school.instructure.com:%s\n" % (name, port))
+    result = egress.probe_egress()
+    assert result["mode"] == "blocked"
+    assert "no network request was made" in result["detail"]
+
+
+@pytest.mark.parametrize("confirmation,expected", [
+    ("canvas.school.edu", "direct"),
+    ("other.school.edu", "blocked"),
+])
+def test_custom_canvas_file_confirmation_governs_probe(config, monkeypatch,
+                                                       confirmation, expected):
+    config[0].write_text(
+        "CANVAS_BASE=https://canvas.school.edu:8443\n"
+        "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=%s\n" % confirmation)
+    calls = []
+    monkeypatch.setattr(egress, "direct_egress_ok",
+                        lambda host, timeout, port: (calls.append((host, port)) or True, "ok"))
+    assert egress.probe_egress()["mode"] == expected
+    assert calls == ([("canvas.school.edu", 8443)] if expected == "direct" else [])

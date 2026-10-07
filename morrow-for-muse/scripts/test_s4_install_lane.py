@@ -350,6 +350,8 @@ def test_upgrade_backup_needs_no_sha256sum_and_prunes_by_mtime(
 
     env = _base_env(bindir, home)
     env["MORROW_CRON"] = "0"
+    # Muse has an absolute-path Chromium fallback even when PATH omits it.
+    env["CHROMIUM_BIN"] = os.path.join(work, "missing-chromium")
     rc, text = _install(tree, env)
     assert rc != 0, text[-3000:]
     # Past backup, retention, and migration without sha256sum: the run

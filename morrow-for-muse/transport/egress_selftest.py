@@ -170,7 +170,7 @@ def main():
     real_direct = egress.direct_egress_ok
     try:
         with no_proxy_env():
-            egress.direct_egress_ok = lambda host, timeout=3: (True, "ok")
+            egress.direct_egress_ok = lambda host, timeout=3, port=443: (True, "ok")
             p = egress.probe_egress(test_host="school.instructure.com")
         check("probe direct mode", p["mode"] == "direct", p["mode"])
         check("probe direct needs no forwarder",
@@ -179,7 +179,7 @@ def main():
 
         with no_proxy_env():
             egress.direct_egress_ok = (
-                lambda host, timeout=3: (False, "boom"))
+                lambda host, timeout=3, port=443: (False, "boom"))
             p = egress.probe_egress(test_host="school.instructure.com")
         check("probe blocked mode", p["mode"] == "blocked", p["mode"])
         check("probe blocked names proxy try",

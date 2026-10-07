@@ -161,7 +161,8 @@ it does, in order:
    naming what it tried.
 4. **Egress probe.** Runs the egress probe: an authenticated proxy from
    the environment, else a bare proxy, else one quick direct TLS
-   handshake to the selected Canvas or Moodle tenant host. Without a valid
+   handshake to the selected Canvas or Moodle tenant host and configured
+   HTTPS port (443 by default). Without a valid
    LMS address, direct mode stops without a network request. Configure
    `CANVAS_BASE` or `MOODLE_BASE` in the environment or `helper/env` before
    this step. If both addresses are set, select `MORROW_LMS_PROVIDER`.

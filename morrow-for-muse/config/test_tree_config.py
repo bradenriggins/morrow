@@ -315,3 +315,32 @@ def test_doctor_checks_the_helper_on_the_tree_port(tree_env, fake_helper,
     out = capsys.readouterr().out
     assert "helper: reachable (http://127.0.0.1:%d/status)" % fake_helper \
         in out
+
+
+@pytest.mark.parametrize("confirmation,accepted", [
+    ("canvas.school.edu", True),
+    ("other.school.edu", False),
+    ("canvas.school.edu:8443", False),
+    ("canvas.school.edu/path", False),
+])
+def test_custom_canvas_confirmation_uses_helper_env(tmp_path, monkeypatch,
+                                                   confirmation, accepted):
+    env_file = tmp_path / "helper-env"
+    env_file.write_text("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=%s\n" % confirmation)
+    monkeypatch.setenv("MORROW_HELPER_ENV_FILE", str(env_file))
+    monkeypatch.delenv("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", raising=False)
+    base = "https://canvas.school.edu:8443"
+    if accepted:
+        assert tree_config.normalize_tenant_base(base) == base + "/"
+    else:
+        with pytest.raises(ValueError):
+            tree_config.normalize_tenant_base(base)
+
+
+def test_custom_canvas_confirmation_environment_wins(tmp_path, monkeypatch):
+    env_file = tmp_path / "helper-env"
+    env_file.write_text("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED=canvas.school.edu\n")
+    monkeypatch.setenv("MORROW_HELPER_ENV_FILE", str(env_file))
+    monkeypatch.setenv("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", "other.school.edu")
+    with pytest.raises(ValueError):
+        tree_config.normalize_tenant_base("https://canvas.school.edu")

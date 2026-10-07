@@ -261,19 +261,25 @@ def _configured_lms_base():
     return tree_config.normalize_lms_base(base) if base else ""
 
 
-def default_test_host():
-    """The validated selected LMS host, or None before configuration.
+def default_test_endpoint():
+    """The validated selected LMS (host, port), or (None, 443).
 
     Invalid configuration raises ValueError. There is no public fallback:
     probing an unrelated site neither proves tenant access nor has a
     configured destination to authorize the request.
     """
     base = _configured_lms_base()
-    return urlparse(base).hostname if base else None
+    parsed = urlparse(base)
+    return (parsed.hostname, parsed.port or 443) if base else (None, 443)
 
 
-def direct_egress_ok(host, timeout=DIRECT_PROBE_TIMEOUT):
-    """One quick TLS handshake to host:443. Returns (ok, detail).
+def default_test_host():
+    """The validated selected LMS hostname, or None before configuration."""
+    return default_test_endpoint()[0]
+
+
+def direct_egress_ok(host, timeout=DIRECT_PROBE_TIMEOUT, port=443):
+    """One quick TLS handshake to host:port. Returns (ok, detail).
 
     Uses only stdlib sockets; carries no credentials and performs no HTTP.
     W6-P2-6: when MORROW_EGRESS_PIN is set, the peer's leaf certificate
@@ -285,11 +291,11 @@ def direct_egress_ok(host, timeout=DIRECT_PROBE_TIMEOUT):
         return False, "%s is malformed: %s" % (EGRESS_PIN_ENV_VAR, exc)
     try:
         ctx = ssl.create_default_context()
-        with socket.create_connection((host, 443), timeout=timeout) as sock:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as tls:
                 check_cert_pin(tls.getpeercert(binary_form=True), pins,
                                "egress probe to %s" % host)
-        return True, "TLS handshake to %s:443 succeeded" % host
+        return True, "TLS handshake to %s:%s succeeded" % (host, port)
     except CertPinMismatch as exc:
         return False, "%s: %s" % (type(exc).__name__, exc)
     except Exception as exc:
@@ -337,7 +343,7 @@ def probe_egress(proxy_url=None, test_host=None, timeout=DIRECT_PROBE_TIMEOUT):
                        "the protected loopback forwarder" % redacted),
         }
     try:
-        host = test_host or default_test_host()
+        host, port = (test_host, 443) if test_host else default_test_endpoint()
     except ValueError:
         host = None
     if not host:
@@ -350,19 +356,19 @@ def probe_egress(proxy_url=None, test_host=None, timeout=DIRECT_PROBE_TIMEOUT):
                        "address (CANVAS_BASE or MOODLE_BASE); no network "
                        "request was made"),
         }
-    ok, why = direct_egress_ok(host, timeout=timeout)
+    ok, why = direct_egress_ok(host, timeout=timeout, port=port)
     if ok:
         return {
             "mode": "direct",
             "proxy": None,
             "needs_forwarder": False,
             "upstream": None,
-            "detail": ("direct egress to %s:443 works; no proxy and no "
-                       "forwarder needed" % host),
+            "detail": ("direct egress to %s:%s works; no proxy and no "
+                       "forwarder needed" % (host, port)),
         }
     tried = ("authenticated proxy (no https_proxy/HTTPS_PROXY in "
              "environment); unauthenticated proxy (same); direct TLS to "
-             "%s:443 (failed: %s)" % (host, why))
+             "%s:%s (failed: %s)" % (host, port, why))
     return {
         "mode": "blocked",
         "proxy": None,
