@@ -8,6 +8,8 @@ const {
   createBoundedCommandReader,
   readBoundedCommandOutput,
   readProcessStartTimes,
+  terminatePidTree,
+  terminateProcessTree,
 } = require("../shared/process-lifetime.cjs");
 
 function stalledChild() {
@@ -67,6 +69,25 @@ function slowCommandReader(answerAfterMs, answer, calls = []) {
     return options.timeoutMs > answerAfterMs ? answer(argumentsValue) : null;
   };
 }
+
+test("Windows tree termination uses taskkill for the whole tree and force escalation", () => {
+  const launches = [];
+  const child = { pid: 9876, kill() { throw new Error("fallback should not run"); } };
+  const spawnProcess = (command, args, options) => {
+    launches.push({ command, args, options });
+    const killer = new EventEmitter();
+    killer.unref = () => {};
+    return killer;
+  };
+
+  assert.equal(terminateProcessTree(child, false, "win32", spawnProcess), true);
+  assert.equal(terminatePidTree(4242, true, "win32", spawnProcess), true);
+  assert.deepEqual(launches.map(({ command, args }) => [command, args]), [
+    ["taskkill.exe", ["/PID", "9876", "/T"]],
+    ["taskkill.exe", ["/PID", "4242", "/T", "/F"]],
+  ]);
+  assert.equal(launches.every(({ options }) => options.windowsHide === true && options.stdio === "ignore"), true);
+});
 
 test("a Windows process start query waits for a cold PowerShell start", async () => {
   const calls = [];
