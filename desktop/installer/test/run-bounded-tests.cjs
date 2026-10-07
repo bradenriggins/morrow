@@ -10,6 +10,8 @@ const path = require("node:path");
 const FILE_TIMEOUT_MS = process.platform === "win32" ? 600_000 : 60_000;
 const SUITE_TIMEOUT_MS = process.platform === "win32" ? 900_000 : 300_000;
 const DEPENDENCY_TIMEOUT_MS = 30_000;
+// Suite mode runs every file in one process tree. Node's --test-timeout
+// cancels one file worker, so a hung test cannot hold the suite bound.
 
 function usage() {
   return "Usage: node test/run-bounded-tests.cjs --per-file|--suite";
@@ -54,11 +56,11 @@ async function main() {
   const files = testFiles();
   if (mode === "--suite") {
     const concurrency = process.platform === "win32" ? 1 : 2;
-    assertPassed(await runNode(["--test", `--test-concurrency=${concurrency}`, ...files], "full installer test suite", SUITE_TIMEOUT_MS), SUITE_TIMEOUT_MS);
+    assertPassed(await runNode(["--test", `--test-concurrency=${concurrency}`, `--test-timeout=${FILE_TIMEOUT_MS}`, ...files], "full installer test suite", SUITE_TIMEOUT_MS), SUITE_TIMEOUT_MS);
     return;
   }
   for (const file of files) {
-    const result = await runNode(["--test", "--test-concurrency=1", file], file, FILE_TIMEOUT_MS);
+    const result = await runNode(["--test", "--test-concurrency=1", `--test-timeout=${FILE_TIMEOUT_MS}`, file], file, FILE_TIMEOUT_MS);
     assertPassed(result, FILE_TIMEOUT_MS);
   }
 }

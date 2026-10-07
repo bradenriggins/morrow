@@ -63,11 +63,11 @@ function parseUnixProcessStartTimes(output) {
   return started;
 }
 
-function terminateProcessTree(child, force = false, platform = process.platform) {
+function terminateProcessTree(child, force = false, platform = process.platform, spawnProcess = spawn) {
   if (!child || !exactPid(child.pid)) return false;
   if (platform === "win32") {
     try {
-      const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", ...(force ? ["/F"] : [])], {
+      const killer = spawnProcess("taskkill.exe", ["/PID", String(child.pid), "/T", ...(force ? ["/F"] : [])], {
         stdio: "ignore",
         windowsHide: true,
       });
@@ -84,6 +84,22 @@ function terminateProcessTree(child, force = false, platform = process.platform)
   } catch {
     try { return child.kill(force ? "SIGKILL" : "SIGTERM"); } catch { return false; }
   }
+}
+
+function pidHandle(pid) {
+  return {
+    pid,
+    kill(signal) {
+      process.kill(pid, signal);
+      return true;
+    },
+  };
+}
+
+/** Ends one PID's process tree. Used when reclaim has a pid and no ChildProcess handle. */
+function terminatePidTree(pid, force = false, platform = process.platform, spawnProcess = spawn) {
+  if (!exactPid(pid)) return false;
+  return terminateProcessTree(pidHandle(pid), force, platform, spawnProcess);
 }
 
 function createBoundedCommandReader(dependencies = {}) {
@@ -211,6 +227,8 @@ module.exports = {
   readBoundedCommandOutput,
   readProcessStartedAt,
   readProcessStartTimes,
+  terminatePidTree,
+  terminateProcessTree,
   windowsPowerShellPath,
   windowsProcessStartQuery,
 };

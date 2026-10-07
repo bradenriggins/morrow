@@ -224,6 +224,7 @@ test("the Windows job runs bounded tests and packages through one retained relea
   assert.match(boundedRunner, /runOwnedProcess/);
   assert.doesNotMatch(boundedRunner, /\bspawn(?:Sync)?\(/);
   assert.match(boundedRunner, /assertPassed\(result, FILE_TIMEOUT_MS\);/);
+  assert.match(boundedRunner, /`--test-timeout=\$\{FILE_TIMEOUT_MS\}`/);
 });
 
 test("the Windows job upgrades the exact published 3720 artifact before its final smoke", () => {

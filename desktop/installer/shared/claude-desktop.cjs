@@ -459,7 +459,7 @@ function proofCommand(command, args, timeoutMs) {
       resolve(value);
     };
     const abandon = () => {
-      try { proofChild.kill("SIGKILL"); } catch {}
+      terminateOwned(proofChild, true);
       settle(null);
     };
     const timer = setTimeout(abandon, timeoutMs);
@@ -632,25 +632,30 @@ process.stdin.pipe(child.stdin);
 child.stdout.pipe(process.stdout);
 child.stderr.pipe(process.stderr);
 child.stdin.on("error", () => {});
-function terminateTree(force) {
-  if (!Number.isSafeInteger(child.pid) || child.pid < 1) return;
+function terminateOwned(owned, force) {
+  if (!owned || !Number.isSafeInteger(owned.pid) || owned.pid < 1) return;
   if (process.platform === "win32") {
     try {
-      const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", ...(force ? ["/F"] : [])], {
+      const killer = spawn("taskkill.exe", ["/PID", String(owned.pid), "/T", ...(force ? ["/F"] : [])], {
         stdio: "ignore", windowsHide: true
       });
-      killer.once("error", () => { try { child.kill(force ? "SIGKILL" : "SIGTERM"); } catch {} });
+      killer.once("error", () => { try { owned.kill(force ? "SIGKILL" : "SIGTERM"); } catch {} });
       killer.unref();
       return;
     } catch {}
-  } else {
+  }
+  try { owned.kill(force ? "SIGKILL" : "SIGTERM"); } catch {}
+}
+function terminateTree(force) {
+  if (!Number.isSafeInteger(child.pid) || child.pid < 1) return;
+  if (process.platform !== "win32") {
     try { process.kill(-child.pid, force ? "SIGKILL" : "SIGTERM"); return; } catch {}
   }
-  try { child.kill(force ? "SIGKILL" : "SIGTERM"); } catch {}
+  terminateOwned(child, force);
 }
 function finish(code) {
   if (proofRetryTimer) clearTimeout(proofRetryTimer);
-  if (activeProof) { try { activeProof.kill("SIGKILL"); } catch {} }
+  if (activeProof) terminateOwned(activeProof, true);
   if (terminateTimer) clearTimeout(terminateTimer);
   if (forceTimer) clearTimeout(forceTimer);
   if (finalTimer) clearTimeout(finalTimer);

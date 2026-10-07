@@ -18,6 +18,7 @@ const {
   verifyClaudeProcessProof,
   windowsProcessStartQuery
 } = require("../shared/claude-desktop.cjs");
+const { terminateProcessTree } = require("../shared/process-lifetime.cjs");
 const installerController = require("../shared/installer-controller.cjs");
 const { freshRecord } = require("../shared/state-policy.cjs");
 
@@ -135,9 +136,34 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 }
 
 const CONNECTION_OBSERVATION_INTERVAL_MS = 20;
+const WAIT_FOR_TIMEOUT_MS = 60_000;
+const LAUNCHER_STOP_MS = 8_000;
+const LAUNCHER_FORCE_MS = 2_000;
 
 function processEnded(child) {
   return child.exitCode !== null || child.signalCode !== null;
+}
+
+function forceStopLauncher(child) {
+  if (process.platform === "win32") terminateProcessTree(child, true);
+  else {
+    try { child.kill("SIGKILL"); } catch {}
+  }
+}
+
+async function waitForClose(child, closed, timeoutMs) {
+  if (processEnded(child)) return;
+  const outcome = await Promise.race([
+    closed.then(() => "closed"),
+    new Promise((resolve) => setTimeout(() => resolve("timeout"), timeoutMs)),
+  ]);
+  if (outcome === "timeout" && !processEnded(child)) {
+    forceStopLauncher(child);
+    await Promise.race([
+      closed,
+      new Promise((resolve) => setTimeout(resolve, LAUNCHER_FORCE_MS)),
+    ]);
+  }
 }
 
 /** Register awaited shutdown before the fixture's file-removal hook, even on early failure. */
@@ -146,24 +172,30 @@ function launchFixture(input, args, options) {
   const closed = once(child, "close");
   closed.catch(() => {});
   input.stopBeforeRemove(async () => {
-    if (!processEnded(child)) child.stdin.end();
-    await closed;
+    if (!processEnded(child)) {
+      try { child.stdin.end(); } catch {}
+    }
+    await waitForClose(child, closed, LAUNCHER_STOP_MS);
   });
   return child;
 }
 
 /**
  * Waits until `predicate` holds. A busy computer only makes it wait longer:
- * it fails when a process it names ends first, and the bounded test runner
- * ends a wait that never settles.
+ * it fails when a process it names ends first. Each wait has its own bound
+ * so one hung launcher cannot hold the installer suite budget.
  */
 async function waitFor(predicate, ...processes) {
+  const started = Date.now();
   for (;;) {
     if (await predicate()) return;
     const ended = processes.find(processEnded);
     if (ended) {
       if (await predicate()) return;
       assert.fail(`process ${ended.pid} ended before the expected connection state was observed`);
+    }
+    if (Date.now() - started > WAIT_FOR_TIMEOUT_MS) {
+      assert.fail(`timed out after ${WAIT_FOR_TIMEOUT_MS} ms waiting for the expected connection state`);
     }
     await new Promise((resolve) => setTimeout(resolve, CONNECTION_OBSERVATION_INTERVAL_MS));
   }
@@ -518,8 +550,8 @@ async function receiptOf(input) {
 
 async function closeLauncher(child) {
   const stopped = once(child, "close");
-  child.stdin.end();
-  await stopped;
+  try { child.stdin.end(); } catch {}
+  await waitForClose(child, stopped, LAUNCHER_STOP_MS);
 }
 
 test("messages keep flowing while the Claude process proof runs, one proof at a time, and the receipt waits for its answer", async (t) => {

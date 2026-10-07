@@ -7,6 +7,7 @@ const localRequire = createRequire(import.meta.url);
 const {
   processMatchesExactStart,
   readProcessStartedAt,
+  terminatePidTree,
 } = localRequire("./process-lifetime.cjs");
 
 const SNAPSHOT_SCHEMA = "morrow.installer-runtime.v1";
@@ -203,32 +204,47 @@ function processAlive(pid) {
   }
 }
 
+/**
+ * True when this PID is gone, or when a later process reused it.
+ * A failed identity query is not success while the PID still runs, and is
+ * success when the PID left during that query.
+ */
+async function pidTreeReclaimed(pid, recordedStartedAt, alive, matches) {
+  if (!alive(pid)) return true;
+  if (!recordedStartedAt) return false;
+  const identity = await matches(pid, recordedStartedAt);
+  if (!alive(pid)) return true;
+  return identity === false;
+}
+
 /** Builds the identity-bound child reclaimer. Dependencies are injectable for the PID-reuse regression. */
 export function createChildProcessReclaimer(dependencies = {}) {
   const alive = dependencies.processAlive || processAlive;
   const matches = dependencies.processMatchesExactStart || processMatchesExactStart;
   const signal = dependencies.signalProcess || ((pid, name) => process.kill(pid, name));
+  const platform = dependencies.platform || process.platform;
+  const killTree = dependencies.terminatePidTree || ((pid, force) => terminatePidTree(pid, force, platform));
   const wait = dependencies.pause || pause;
   const now = dependencies.now || Date.now;
   return async (pid, recordedStartedAt, timeoutMs) => {
-    if (!validPid(pid) || !alive(pid)) return true;
-    const initialIdentity = recordedStartedAt ? await matches(pid, recordedStartedAt) : null;
-    if (initialIdentity !== true) return initialIdentity === false;
-    const signalDeadline = now() + Math.floor(timeoutMs / 2);
-    try { signal(pid, "SIGTERM"); } catch { return !alive(pid); }
+    const deadline = now() + timeoutMs;
+    if (!validPid(pid) || await pidTreeReclaimed(pid, recordedStartedAt, alive, matches)) return true;
+    const signalDeadline = Math.min(deadline, now() + Math.floor(timeoutMs / 2));
+    try { signal(pid, "SIGTERM"); } catch { if (!alive(pid)) return true; }
     while (now() < signalDeadline) {
       if (!alive(pid)) return true;
       await wait(CHILD_RECLAIM_POLL_MS);
     }
-    const finalIdentity = await matches(pid, recordedStartedAt);
-    if (finalIdentity !== true) return finalIdentity === false;
-    const finalDeadline = now() + Math.floor(timeoutMs / 2);
-    try { signal(pid, "SIGKILL"); } catch { return !alive(pid); }
-    while (now() < finalDeadline) {
+    if (await pidTreeReclaimed(pid, recordedStartedAt, alive, matches)) return true;
+    try {
+      if (platform === "win32") killTree(pid, true);
+      else signal(pid, "SIGKILL");
+    } catch { if (!alive(pid)) return true; }
+    while (now() < deadline) {
       if (!alive(pid)) return true;
       await wait(CHILD_RECLAIM_POLL_MS);
     }
-    return await matches(pid, recordedStartedAt) === false;
+    return await pidTreeReclaimed(pid, recordedStartedAt, alive, matches);
   };
 }
 

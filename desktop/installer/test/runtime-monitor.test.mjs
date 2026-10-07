@@ -42,6 +42,7 @@ test("child reclaim never signals a different process that reused the transport 
   let clock = 0;
   const identities = [true, false];
   const reclaim = createChildProcessReclaimer({
+    platform: "linux",
     processAlive: () => true,
     processMatchesExactStart: async () => identities.shift() ?? false,
     signalProcess: (_pid, signal) => { signals.push(signal); },
@@ -56,6 +57,7 @@ test("child reclaim never signals a different process that reused the transport 
   clock = 0;
   const matching = [true, true, false];
   const reclaimMatching = createChildProcessReclaimer({
+    platform: "linux",
     processAlive: () => true,
     processMatchesExactStart: async () => matching.shift() ?? false,
     signalProcess: (_pid, signal) => { signals.push(signal); },
@@ -64,6 +66,67 @@ test("child reclaim never signals a different process that reused the transport 
   });
   assert.equal(await reclaimMatching(1234, "2026-09-14T00:00:00.000Z", 100), true);
   assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("child reclaim succeeds when the PID disappears while its identity is being read", async () => {
+  let alive = true;
+  const reclaim = createChildProcessReclaimer({
+    platform: "linux",
+    processAlive: () => alive,
+    processMatchesExactStart: async () => {
+      alive = false;
+      return null;
+    },
+    signalProcess: () => { throw new Error("must not signal a process that already left"); },
+    pause: async () => {},
+    now: () => 0,
+  });
+  assert.equal(await reclaim(4242, "2026-09-14T00:00:00.000Z", 100), true);
+});
+
+test("child reclaim treats a PID that dies during the post-SIGTERM identity check as reclaimed", async () => {
+  let alive = true;
+  let clock = 0;
+  let identityChecks = 0;
+  const signals = [];
+  const reclaim = createChildProcessReclaimer({
+    platform: "linux",
+    processAlive: () => alive,
+    processMatchesExactStart: async () => {
+      identityChecks += 1;
+      if (identityChecks === 1) return true;
+      alive = false;
+      return null;
+    },
+    signalProcess: (_pid, signal) => { signals.push(signal); },
+    pause: async (milliseconds) => { clock += milliseconds; },
+    now: () => clock,
+  });
+  assert.equal(await reclaim(4242, "2026-09-14T00:00:00.000Z", 100), true);
+  assert.deepEqual(signals, ["SIGTERM"]);
+});
+
+test("Windows child reclaim force-kills the process tree after the SIGTERM grace period", async () => {
+  const signals = [];
+  const trees = [];
+  let clock = 0;
+  let alive = true;
+  const identities = [true, true];
+  const reclaim = createChildProcessReclaimer({
+    platform: "win32",
+    processAlive: () => alive,
+    processMatchesExactStart: async () => identities.shift() ?? true,
+    signalProcess: (_pid, signal) => { signals.push(signal); },
+    terminatePidTree: (pid, force) => {
+      trees.push({ pid, force });
+      alive = false;
+    },
+    pause: async (milliseconds) => { clock += milliseconds; },
+    now: () => clock,
+  });
+  assert.equal(await reclaim(4242, "2026-09-14T00:00:00.000Z", 100), true);
+  assert.deepEqual(signals, ["SIGTERM"]);
+  assert.deepEqual(trees, [{ pid: 4242, force: true }]);
 });
 
 function processIsAlive(pid) {
