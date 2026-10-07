@@ -14,6 +14,7 @@ Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/
 
 ### Technical notes
 
+- Fix Windows `.cmd` launcher quoting so CLI version checks succeed, including paths with spaces and special characters.
 - Update vulnerable dependencies and refresh the Canvas API catalog from its current authoritative input. Include the refreshed catalog in Morrow Bridge 1.0.137.
 - Add a signed release path that checks the final package before native installation tests.
 

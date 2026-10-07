@@ -73,7 +73,7 @@ test("signed packaging refuses missing credentials before any build or network r
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Signed release inputs are incomplete/);
   assert.equal(existsSync(output), false);
-  const conflicting = spawnSync(process.execPath, [script, "--signed-release", "--unsigned-release", "--output", output], { env: {}, encoding: "utf8", timeout: 10000 });
+  const conflicting = spawnSync(process.execPath, [script, "--target", "darwin-arm64", "--signed-release", "--unsigned-release", "--output", output], { env: {}, encoding: "utf8", timeout: 10000 });
   assert.equal(conflicting.status, 2);
   assert.match(conflicting.stderr, /Choose one distribution mode/);
 });

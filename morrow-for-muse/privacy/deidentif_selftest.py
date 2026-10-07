@@ -378,34 +378,54 @@ def test_purge_tenant():
 
 
 def test_purge_and_wipe_clear_browser_transient_state():
-    # W4-P0-4/W4-P0-5: pending envelopes (raw payloads) and briefs are
-    # purged on EVERY purge/wipe path, including orphan briefs.
-    # W5-P1-2: in-flight envelopes (younger than the TTL) are never
-    # silently destroyed, so the planted envelope is aged past the TTL.
-    import time as _t
-    from datetime import datetime, timezone
+    """Purge and wipe clear settled recovery files, preserving unknown writes."""
+    import uuid
+    from datetime import datetime, timezone, timedelta
+    from dispatch import executor as ex
+
     def plant():
-        env = os.path.join(_bb.PENDING_DIR, "op-x.json")
-        brf = os.path.join(_bb.BRIEF_DIR, "orphan-x-request.txt")
-        _old = _t.time() - 8 * 86400
-        _old_iso = datetime.fromtimestamp(
-            _old, tz=timezone.utc).isoformat()
-        with open(env, "w", encoding="utf-8") as fh:
-            fh.write('{"user": {"name": "Zeldana Fakeington"}, '
-                     '"op_id": "op-x", "created_at": "%s"}' % _old_iso)
-        with open(brf, "w", encoding="utf-8") as fh:
-            fh.write("brief: comment on Zeldana Fakeington's submission")
-        os.utime(env, (_old, _old))
-        return env, brf
-    env, brf = plant()
-    d = fresh_deidentifier()
-    d.purge_tenant(TENANT)
-    assert not os.path.exists(env) and not os.path.exists(brf), \
-        "purge_tenant must clear envelopes and orphan briefs"
-    env, brf = plant()
-    d.wipe()
-    assert not os.path.exists(env) and not os.path.exists(brf), \
-        "wipe must clear envelopes and orphan briefs"
+        settled_op, orphan_op, unknown_op = (str(uuid.uuid4()) for _ in range(3))
+        for op in (settled_op, orphan_op, unknown_op):
+            token = ex.claim_op_id(op, "dispatch", "synthetic.purge", "write", "digest")
+            if op != unknown_op:
+                ex.journal_claimed_outcome(op, {
+                    "op_id": op, "effect": "write", "verification": "verified",
+                    "uncertain": False}, token)
+        old = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+        env = os.path.join(_bb.PENDING_DIR, settled_op + ".json")
+        brf = os.path.join(_bb.BRIEF_DIR, orphan_op + "-request.txt")
+        unknown_env = os.path.join(_bb.PENDING_DIR, unknown_op + ".json")
+        unknown_brf = os.path.join(_bb.BRIEF_DIR, unknown_op + "-request.txt")
+        for op, path in ((settled_op, env), (unknown_op, unknown_env)):
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"op_id": op, "created_at": old,
+                           "user": {"name": "Zeldana Fakeington"}}, fh)
+        for path in (brf, unknown_brf):
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("synthetic learner-bearing recovery brief")
+        return env, brf, unknown_env, unknown_brf, unknown_op
+
+    def check(files):
+        env, brf, unknown_env, unknown_brf, unknown_op = files
+        assert not os.path.exists(env) and not os.path.exists(brf), \
+            "settled envelopes and orphan briefs must be removed"
+        assert os.path.exists(unknown_env) and os.path.exists(unknown_brf), \
+            "old unknown write evidence must remain"
+        assert ex.claim_is_live(unknown_op), "purge released an unknown write"
+        try:
+            ex.claim_op_id(unknown_op, "dispatch", "synthetic.purge", "write", "digest")
+        except ex.DuplicateOpId:
+            pass
+        else:
+            raise AssertionError("purge allowed an unknown write to run again")
+
+    files = plant()
+    handle = fresh_deidentifier()
+    handle.purge_tenant(TENANT)
+    check(files)
+    files = plant()
+    handle.wipe()
+    check(files)
 
 
 def test_splice_termination_when_key_inside_pseudo():

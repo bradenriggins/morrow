@@ -62,6 +62,17 @@ def check(name, value):
     report["checks"][name] = bool(value)
     assert value, name
 
+def navigate_ready(cdp, tab, url):
+    result = cdp.navigate(tab, url, timeout=10)
+    deadline = time.monotonic() + 10
+    expression = 'location.href === %s && document.readyState === "complete"' % json.dumps(url)
+    while time.monotonic() < deadline:
+        if cdp.evaluate(tab, expression):
+            return result
+        time.sleep(.05)
+    state = cdp.evaluate(tab, '({origin: location.origin, readyState: document.readyState, title: document.title})')
+    raise AssertionError('fixture navigation did not reach the expected complete document: %r' % state)
+
 class Fixture(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -323,7 +334,8 @@ try:
     server = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(server)
     browser = server.HelperBrowser()
-    browser.launcher.extra_args.extend(['--ignore-certificate-errors', '--disable-features=LocalNetworkAccessChecks'])
+    # The private fixture and rendered helper use disposable loopback servers.
+    browser.launcher.extra_args.extend(['--ignore-certificate-errors', '--ip-address-space-overrides=127.0.0.1:0=public'])
     if HELPER_PROVIDER_PROOF:
         if not SITE_NORMALIZATION_PROOF:
             check('moodle_helper_configuration_selected', server.DEFAULT_BASE.rstrip('/') == base)
@@ -336,7 +348,7 @@ try:
         browser.tab = browser.cdp.new_tab('about:blank')
     browser.cdp.call(browser.tab, 'Network.enable', {})
     try:
-        report['fixture_navigation'] = browser.cdp.navigate(browser.tab, base + '/', timeout=10)
+        report['fixture_navigation'] = navigate_ready(browser.cdp, browser.tab, base + '/')
     except Exception:
         report['navigation_events'] = [{'method': e.get('method'), 'error': (e.get('params') or {}).get('errorText')} for e in browser.cdp.poll_session_events(browser.cdp.tab_session(browser.tab), timeout=1) if e.get('method') in ('Network.loadingFailed', 'Page.loadEventFired')]
         raise
@@ -400,10 +412,6 @@ try:
     from transport.local_chromium import ProxyCDP
     proxy = ProxyCDP(browser.launcher.cdp_port, owner=browser.launcher, server_port=helper.server_port)
     tab = next(t for t in proxy.tabs() if t['id'] == browser.tab['id'])
-    for _ in range(100):
-        if proxy.evaluate(tab, 'location.href') == base + '/':
-            break
-        time.sleep(.05)
     check('real_authenticated_helper_proxy', proxy.evaluate(tab, '1 + 1') == 2)
     if HELPER_PROVIDER_PROOF:
         for target in (base.replace('/lms', '/other'), base + '/../outside', base + '/%2e%2e/outside'):
@@ -424,17 +432,9 @@ try:
         check('moodle_helper_site_identity', status.get('lms_base') == base)
         check('moodle_helper_authenticated_fixture_ready', status.get('logged_in') is True)
         check('moodle_helper_session_verified', status.get('session_verified') is True)
-        proxy.navigate(tab, base + '/login/index.php', timeout=10)
-        for _ in range(100):
-            if proxy.evaluate(tab, 'location.href') == base + '/login/index.php':
-                break
-            time.sleep(.05)
+        navigate_ready(proxy, tab, base + '/login/index.php')
         check('moodle_helper_subpath_login_not_signed_in', browser.status().get('logged_in') is False)
-        proxy.navigate(tab, base + '/', timeout=10)
-        for _ in range(100):
-            if proxy.evaluate(tab, 'location.href') == base + '/':
-                break
-            time.sleep(.05)
+        navigate_ready(proxy, tab, base + '/')
         for _ in range(100):
             status = browser.status()
             if status.get('session_verified') is True:
@@ -443,7 +443,7 @@ try:
         check('moodle_helper_returned_site_ready', status.get('logged_in') is True and status.get('session_verified') is True)
         for mode, expected in (('legacy41', 'verified'), ('guest', 'signed_out')):
             fixture_mode = mode
-            proxy.navigate(tab, base + '/?probe=' + mode, timeout=10)
+            navigate_ready(proxy, tab, base + '/?probe=' + mode)
             for _ in range(100):
                 status = browser.status()
                 if status.get('session_state') == expected:
@@ -452,7 +452,7 @@ try:
             check('moodle_helper_' + mode + '_session_state', status.get('session_state') == expected)
             check('moodle_helper_' + mode + '_login_state', status.get('logged_in') is (mode == 'legacy41'))
         fixture_mode = 'modern'
-        proxy.navigate(tab, base + '/', timeout=10)
+        navigate_ready(proxy, tab, base + '/')
         ui_helper = server.BoundedThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
         ui_helper.socket = tls.wrap_socket(ui_helper.socket, server_side=True)
         threading.Thread(target=ui_helper.serve_forever, daemon=True).start()
@@ -820,7 +820,7 @@ print(json.dumps(checks))
     module.unlink()
     module.symlink_to(ASSETS / 'moodle-executor.js')
     refuse('symlink_module_refused', lambda: MoodleAdapterLoader(altered, registry_sha256=digest).stage(proxy, tab, context, key_name, request, base_url=base))
-    proxy.navigate(tab, base + '/?sesskey=DUMMY_URL_SECRET')
+    navigate_ready(proxy, tab, base + '/?sesskey=DUMMY_URL_SECRET')
     context = proxy.create_isolated_world(tab, 'morrow_adapter_loader_url_privacy')
     class RecordedProxy(ProxyCDP):
         def evaluate(self, *args, **kwargs):
@@ -852,7 +852,7 @@ print(json.dumps(checks))
     staged_count = proxy.evaluate(tab, count_expression, context_id=context)
     refuse('partial_ack_refused', lambda: loader.stage(partial, tab, context, key_name, request, base_url=base))
     check('partial_load_removed', proxy.evaluate(tab, count_expression, context_id=context) == staged_count)
-    proxy.navigate(tab, base + ('/login/index.php' if PUBLIC_STAGING else '/other'))
+    navigate_ready(proxy, tab, base + ('/login/index.php' if PUBLIC_STAGING else '/other'))
     refuse('replaced_execution_context_refused', lambda: loader.stage(proxy, tab, context, key_name, request, base_url=base))
     if not PUBLIC_STAGING:
         from moodle.browser_transport import MoodleBrowserTransport
