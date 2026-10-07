@@ -849,8 +849,11 @@ sys.exit(0 if d.get("lms_provider") == "moodle" and d.get("lms_base") == sys.arg
       starting=*) starting="${kv#*=}" ;;
     esac
   done
-  if [ "${logged_in}" = "true" ]; then
-    # W2-P1-16: version-skew detection. A healthy /status from a server
+  if [ "${logged_in}" = "true" ] || [ "$(genuine_signout "${status_body}")" = "true" ]; then
+    # Version checks apply to conclusive healthy and signed-out statuses.
+    # An old signed-out helper must be recycled before the installer can
+    # accept this release. Indeterminate and starting statuses stay below.
+    # W2-P1-16: version-skew detection. A conclusive /status from a server
     # whose helper_version differs from this tree's VERSION is a stale
     # pre-upgrade server squatting the port: recycle it (tree-gated)
     # instead of adopting it. "unknown" on either side (legacy server,
@@ -864,6 +867,8 @@ sys.exit(0 if d.get("lms_provider") == "moodle" and d.get("lms_base") == sys.arg
       circuit_guard_recover
       exit $?
     fi
+  fi
+  if [ "${logged_in}" = "true" ]; then
     log "helper healthy: logged_in=true"
     # W5-P2-7: a genuinely healthy helper resets the relaunch circuit
     # breaker (whatever was failing recoveries is no longer the state
