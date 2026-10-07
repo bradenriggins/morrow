@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "1316189efcb721fb83fec94eebd260e8d92d472d",
+  "candidateCommit": "e15f9c6a451596f43e94a5f1a10564dd8c546979",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -71,14 +71,14 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sourceCommit": "7fd31e57fb9e0b46c41c632bc87546ab10bb7ae2",
+      "sourceCommit": "e15f9c6a451596f43e94a5f1a10564dd8c546979",
       "originalPath": "CHANGELOG.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "23c1dc67a647fd8cb0723612b16b5bc2a6bc9da488171f707729e1d6dba50f8a",
-      "afterDigest": "7a64bdb16b23e37d7b9ff73e72958ea5293b8b9f0192b100f1c80c82f7bd6541"
+      "beforeDigest": "7a64bdb16b23e37d7b9ff73e72958ea5293b8b9f0192b100f1c80c82f7bd6541",
+      "afterDigest": "7c50bc3abf810e4de395a8cdf2b8e1dc541a735db04e85c49643a4f49ec84a41"
     },
     {
       "path": "LICENSE",
@@ -9666,14 +9666,14 @@
     },
     {
       "path": "scripts/test/desktop-doc-claims.test.mjs",
-      "sourceCommit": "b7d4b734a37a53afd9446f2aad845917c1cd5d1d",
+      "sourceCommit": "e15f9c6a451596f43e94a5f1a10564dd8c546979",
       "originalPath": "scripts/test/desktop-doc-claims.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2321651e542535e561162a25cc85af435306629e5bd959d6961dbecbd1620a86",
-      "afterDigest": "23953b0842b954d7d2b4a8c539296f68a5fe14112918a3191aac91cb9128ef7f"
+      "beforeDigest": "23953b0842b954d7d2b4a8c539296f68a5fe14112918a3191aac91cb9128ef7f",
+      "afterDigest": "43122a3d9ffaa5dda72e8b87b79932b46a26937fbe819ca5f898b78333c52b37"
     },
     {
       "path": "scripts/test/desktop-entrypoint-uniqueness.test.mjs",
@@ -10843,14 +10843,14 @@
     },
     {
       "path": "scripts/test/signed-desktop-signing.test.mjs",
-      "sourceCommit": "7fd31e57fb9e0b46c41c632bc87546ab10bb7ae2",
+      "sourceCommit": "e15f9c6a451596f43e94a5f1a10564dd8c546979",
       "originalPath": "scripts/test/signed-desktop-signing.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "b64307569d5415b64665d929e9917689e8a2ec0eed57b2aecfedca10caabe3ff"
+      "beforeDigest": "b64307569d5415b64665d929e9917689e8a2ec0eed57b2aecfedca10caabe3ff",
+      "afterDigest": "39f7aa13207a84bc529d32c64d870e3efee49eee992ade160abd512defb79194"
     },
     {
       "path": "scripts/test/source-bridge-folder.test.mjs",
