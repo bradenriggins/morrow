@@ -31,8 +31,8 @@ End to end: the real install.sh from a carved tree (F5-F9) and the real
 keepalive-canvas.sh against stub CDP/state-machine modules (F12), in
 scratch under .selftest-work/ and dist/ (never /tmp). The F5 runs fail
 fast at the step-8 secrets gate (a planted content-pattern line in
-helper/env, which the gate still checks); only the F8 run needs the
-full suite pass to reach the install-record step.
+helper/env, which the gate still checks). The install-record and
+exported-tenant checks run all shipped selftest suites.
 """
 
 import hashlib
@@ -171,6 +171,35 @@ def _base_env(bindir, home):
             "MORROW_HOME": os.path.join(home, ".morrow"),
             "LANG": "C.UTF-8",
             "https_proxy": "http://muse:proxy@127.0.0.1:9"}
+
+
+def test_exported_tenant_reaches_tenant_probe_after_selftests(carved_base,
+                                                            lane_work):
+    tree = _fresh_tree(carved_base, lane_work, "exported-tenant-tree")
+    work = os.path.join(lane_work, "exported-tenant")
+    bindir = os.path.join(work, "bin")
+    _link_all(bindir)
+    for tool in ("ss", "flock"):
+        if not os.path.lexists(os.path.join(bindir, tool)):
+            _write_exe(os.path.join(bindir, tool), "#!/bin/sh\nexit 0\n")
+    chrome = os.path.join(bindir, "fake-chromium")
+    _write_exe(chrome, FAKE_CHROMIUM)
+    # Refuse the tenant probe without opening any network connection.
+    _write_exe(os.path.join(bindir, "curl"), "#!/bin/sh\nexit 7\n")
+    home = os.path.join(work, "home")
+    os.makedirs(home, exist_ok=True)
+    tenant = "https://chcp.instructure.com"
+    with open(os.path.join(tree, "helper", "env"), "w") as fh:
+        fh.write("CANVAS_BASE=%s\n" % tenant)
+    env = _base_env(bindir, home)
+    env.update(CHROMIUM_BIN=chrome, MORROW_CRON="0", CANVAS_BASE=tenant,
+               MORROW_LMS_PROVIDER="canvas",
+               MORROW_INSTALL_TEST_SHOW_SELFTEST_FAILURES="1")
+    rc, text = _install(tree, env)
+    assert rc != 0, text[-3000:]
+    assert "ok: 23/23 selftest suites pass" in text, text[-6000:]
+    assert "INSTALL FAIL [tenant]" in text, text[-3000:]
+    assert "INSTALL FAIL [selftest]" not in text, text[-6000:]
 
 
 # ------------------------------------------------------- F12: canvas rig

@@ -42,7 +42,7 @@ export const BROWSER_HARNESS_IDS = Object.freeze([
  * The harnesses a release candidate cannot be promoted without. `desktop_windows_smoke` is not one
  * of them: it runs separately on a native Windows host with the exact installer and package
  * receipt. This receipt records what happened on the current host. It still blocks if it is
- * recorded as run and did not pass. GitHub Actions is disabled for this repository.
+ * recorded as run and did not pass. The desktop installer QA workflow runs it on native Windows.
  */
 export const REQUIRED_BROWSER_HARNESS_PASSES = Object.freeze([
   "canvas_connector_browser",

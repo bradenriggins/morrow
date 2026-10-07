@@ -88,6 +88,16 @@ jobs:
       # pnpm check already runs the desktop installer suites (pnpm test ends with pnpm test:desktop).
       - name: Browser integration harnesses
         run: xvfb-run -a node scripts/run-browser-harnesses.mjs
+      - name: Retain browser integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-harness-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            desktop/output/browser-harness/receipt.json
+            desktop/output/browser-harness/*.log
+          retention-days: 14
+          if-no-files-found: warn
 
   # Morrow Desktop ships for Windows and for macOS on Apple silicon, never
   # Linux. These jobs run the installer contracts, and every desktop test that

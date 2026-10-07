@@ -1,0 +1,244 @@
+{
+  "schema": "morrow.desktop-installer.v1",
+  "version": "1.0.14",
+  "target": "darwin-arm64",
+  "artifacts": [
+    {
+      "name": "Morrow-1.0.14-mac-arm64.dmg",
+      "sha256": "a98b3931edc3592b820fd3498bd2f16f75957a1439e83f7322470493857c8dae"
+    },
+    {
+      "name": "Morrow-1.0.14-mac-arm64.zip",
+      "sha256": "791f5d7de1ea8038eefbf831242aa40d36248610fe11dc25f9a9854ecbea8579"
+    }
+  ],
+  "payload": {
+    "node": {
+      "version": "22.23.2",
+      "archive": "node-v22.23.2-darwin-arm64.tar.xz",
+      "sha256": "5eff7a9011895aae3f29d06f167b84a62b028a591370c7cafb59103559fd26e1",
+      "binarySha256": "18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572"
+    },
+    "workspaceModulesMaterialized": true,
+    "containsMutableState": false,
+    "releaseGraph": {
+      "schema": "morrow.desktop-packager-admission.v1",
+      "sha256": "0fdf40e33d81d044c2b0595dddf81edd9f093ea1ea8d748e5c7d7d299285580a"
+    }
+  },
+  "source": {
+    "head": "1ed0c70c82dc74b2a506e6ac0004bad29fbfa43a",
+    "dirty": false,
+    "statusSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "inputManifestSha256": "1c8abaa8c929276d310df42a1b370c2b706c7e147ba9a4d0ed859b7cb8e4036a",
+    "inputManifestFileCount": 2704,
+    "mcpRuntimeManifestSha256": "67bb9ae76e0b5d68b4e7e2ed3913d522c90937a3aea64a4f4152a6e8a1e9acb0",
+    "dependencyMaterialization": {
+      "schema": "morrow.runtime-dependency-materialization.v1",
+      "packageManager": {
+        "declared": "pnpm@12.6.0",
+        "observed": "12.6.0"
+      },
+      "lockfile": {
+        "path": "pnpm-lock.yaml",
+        "sha256": "b7db5e88aaca459a0784268cb2bb9c96643b877095f42cff28109366e92548f6",
+        "integritySource": "pnpm-lock.yaml packages resolution.integrity"
+      },
+      "install": {
+        "mode": "isolated_frozen_install",
+        "network": "offline",
+        "scripts": "disabled",
+        "flags": [
+          "--prod",
+          "--frozen-lockfile",
+          "--offline",
+          "--ignore-scripts",
+          "--verify-store-integrity"
+        ]
+      },
+      "dependencies": [
+        {
+          "name": "@modelcontextprotocol/client",
+          "version": "2.2.0",
+          "integrity": "sha512-LxCou/CSYQ6dwEnjhLZY0KnEuc8V4UJ3IEQCl/uR2yHobSQIEdJKUlKLRYRF5i5FqRGHy1eK7une3aAWDHLtig=="
+        },
+        {
+          "name": "@modelcontextprotocol/core",
+          "version": "2.2.0",
+          "integrity": "sha512-iLhmprRmWI8EcosOA3wVvww22z02NkgqhV4fBH6f/odQBsi7xnJc0HGmi21yWO+/iKw2yzqVE127Zhna5/+JXw=="
+        },
+        {
+          "name": "@modelcontextprotocol/server",
+          "version": "2.2.0",
+          "integrity": "sha512-qFnltjus6Gk8Lx6J1w2RXmr3YPN22MNT6qD6zjAkaiWIlFIFxWClz0rXHNuJF/KSUyn5YGhkSvXkWDbQHVLFEQ=="
+        },
+        {
+          "name": "cross-spawn",
+          "version": "7.0.6",
+          "integrity": "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="
+        },
+        {
+          "name": "dayjs",
+          "version": "1.11.23",
+          "integrity": "sha512-QDTCU0M0MxR3hQfnlDJfwekQiaanm1ubOD231u73WBckQ/fsamwRLiE2GBz6D3a/xF1NgfiDLJjXBa1hYOYTtQ=="
+        },
+        {
+          "name": "deepmerge",
+          "version": "4.3.1",
+          "integrity": "sha512-3sUqbMEc77XqpdNO7FRyRog+eW3ph+GYCbj+rK+uYyRMuwsVy0rMiVtPn+QJlKFvWP/1PYpapqYn0Me2knFn+A=="
+        },
+        {
+          "name": "dom-serializer",
+          "version": "3.1.1",
+          "integrity": "sha512-4MEa38/QexBob6gFNwu+EGdWvhJ1OKuNwdYY3Y3NyeWDQfnGeDYQUDfIRzWu5B5gsv03so2Uxd28YC6zrsx3Lw=="
+        },
+        {
+          "name": "domelementtype",
+          "version": "3.0.0",
+          "integrity": "sha512-umCQid3jKbDmVjx8jGaW7uUykm4DEUeyV21hPxNMo2nV955DhUThwqyOIDtreepP31hl84X7G5U9ZfsWvIB3Pg=="
+        },
+        {
+          "name": "domhandler",
+          "version": "6.0.1",
+          "integrity": "sha512-gYzvtM72ZtxQO0T048kd6HWSbbGCNOUwcnfQ01cqIJ4X2IYKFFHZ5mKvrQETcFXxsRObZulDaKmy//R7TPtsBg=="
+        },
+        {
+          "name": "domutils",
+          "version": "4.0.2",
+          "integrity": "sha512-qI4JLRKnSzqFqr7hAlS5xQDusBCjKSEG4t4+7aNrIQMHBcsC2TGEhuyABJdYkgSewL57PNLYEiibY2iPKhKpaA=="
+        },
+        {
+          "name": "entities",
+          "version": "8.1.0",
+          "integrity": "sha512-kxL7msIffSuh9aaFAMD7rxAIuTRMAHMeBtgHW2yUdWw732ZNh4MehkF2gdjvtdmikkaIP9bFDDJOPlsvm7avrA=="
+        },
+        {
+          "name": "escape-string-regexp",
+          "version": "4.0.0",
+          "integrity": "sha512-TtpcNJ3XAzx3Gq8sWRzJaVajRs0uVxA2YAkdb1jm2YkPz4G6egUFAyA3n5vtEIZefPk5Wa4UXbKuS5fKkJWdgA=="
+        },
+        {
+          "name": "eventsource",
+          "version": "3.0.7",
+          "integrity": "sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA=="
+        },
+        {
+          "name": "eventsource-parser",
+          "version": "3.1.1",
+          "integrity": "sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ=="
+        },
+        {
+          "name": "htmlparser2",
+          "version": "12.0.0",
+          "integrity": "sha512-Tz7u1i95/g2x2jz81+x0FBVhBhY5aRTvD3tXXdFaljuNdzDLJ8UGNRrTcj2cgQvAg3iW/h77Fz15nLW0L0CrZw=="
+        },
+        {
+          "name": "is-plain-object",
+          "version": "5.1.0",
+          "integrity": "sha512-bUi/yjmtKYcRVUtWRGr0UA6xEFh2I6zWUwMrUXB3s7bmYCaZ8a+0ZsTRkrawh/mzlSD1Y0Ph8bp/U+TvBpWDNw=="
+        },
+        {
+          "name": "isexe",
+          "version": "2.0.0",
+          "integrity": "sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw=="
+        },
+        {
+          "name": "jose",
+          "version": "6.2.12",
+          "integrity": "sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw=="
+        },
+        {
+          "name": "launder",
+          "version": "1.7.1",
+          "integrity": "sha512-mU6WRz5EusL9ZZuiZ5SO4Y6C0P9PAUR9iwdb6bzj4KDihm28DiHFw+/yk9DBH4f+Pv1wuzQ4e2jV3oQ7mkIqvw=="
+        },
+        {
+          "name": "nanoid",
+          "version": "3.3.18",
+          "integrity": "sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w=="
+        },
+        {
+          "name": "parse-srcset",
+          "version": "1.0.2",
+          "integrity": "sha512-/2qh0lav6CmI15FzA3i/2Bzk2zCgQhGMkvhOhKNcBVQ1ldgpbfiNTVslmooUmWJcADi1f1kIeynbDRVzNlfR6Q=="
+        },
+        {
+          "name": "path-key",
+          "version": "3.1.1",
+          "integrity": "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q=="
+        },
+        {
+          "name": "picocolors",
+          "version": "1.1.1",
+          "integrity": "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="
+        },
+        {
+          "name": "pkce-challenge",
+          "version": "5.0.1",
+          "integrity": "sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ=="
+        },
+        {
+          "name": "postcss",
+          "version": "8.5.28",
+          "integrity": "sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A=="
+        },
+        {
+          "name": "sanitize-html",
+          "version": "2.17.7",
+          "integrity": "sha512-PGtEkc9cbnedU3s9TmzDbpsZ8w086g/0Q8k8/oIO1NLNU3i5k9yn835CrjJSajp1KMmkisbO1qPXxNKO3welAg=="
+        },
+        {
+          "name": "shebang-command",
+          "version": "2.0.0",
+          "integrity": "sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA=="
+        },
+        {
+          "name": "shebang-regex",
+          "version": "3.0.0",
+          "integrity": "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A=="
+        },
+        {
+          "name": "smol-toml",
+          "version": "1.9.0",
+          "integrity": "sha512-hpd+HLON7HdZXqYchMM/+LaTTbdK0AU3NngIJ4KVyWbY9bfQqdL9cD+4yf6dUoU2Ap4VsU0JkQi6FxAI1B2mXQ=="
+        },
+        {
+          "name": "source-map-js",
+          "version": "1.2.2",
+          "integrity": "sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw=="
+        },
+        {
+          "name": "which",
+          "version": "2.0.2",
+          "integrity": "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA=="
+        },
+        {
+          "name": "ws",
+          "version": "8.21.3",
+          "integrity": "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw=="
+        },
+        {
+          "name": "zod",
+          "version": "4.6.5",
+          "integrity": "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q=="
+        }
+      ]
+    },
+    "reproducibleFrom": "app/package-input-manifest.json",
+    "note": "When dirty is true, the commit in head does not identify the delivered source by itself, and inputManifestSha256 is the binding record of every file sealed into this payload."
+  },
+  "signing": {
+    "mode": "unsigned_public_release",
+    "target": "darwin-arm64",
+    "publicRelease": true,
+    "automaticUpdates": false
+  },
+  "bridgeDelivery": "developer_temporary",
+  "verification": {
+    "payloadStatic": true,
+    "packagerAdmission": true,
+    "installerLaunch": "not_run",
+    "electronAsarAndBridge": true,
+    "electronAsarAndMcp": true
+  }
+}
