@@ -161,8 +161,11 @@ it does, in order:
    naming what it tried.
 4. **Egress probe.** Runs the egress probe: an authenticated proxy from
    the environment, else a bare proxy, else one quick direct TLS
-   handshake to your tenant host (or `example.com` when `CANVAS_BASE`
-   is not set yet). Prints the detected mode with credentials redacted.
+   handshake to the selected Canvas or Moodle tenant host. Without a valid
+   LMS address, direct mode stops without a network request. Configure
+   `CANVAS_BASE` or `MOODLE_BASE` in the environment or `helper/env` before
+   this step. If both addresses are set, select `MORROW_LMS_PROVIDER`.
+   Prints the detected mode with credentials redacted.
    Both proxy modes use the protected local forwarder. Direct Chromium
    connections to a Muse egress proxy can be refused even without proxy
    authentication.

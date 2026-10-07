@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The egress probe handshakes with the educator's Canvas host.
+"""The egress probe uses only the selected, validated LMS host.
 
 Failure mode pinned down (written before the fix; final sweep
 2026-09-23, item probe-ignores-helper-env-tenant): INSTALL.md step 4
@@ -34,7 +34,11 @@ def config(tmp_path, monkeypatch):
     env_file = tmp_path / "helper-env"
     monkeypatch.setenv("MORROW_HELPER_ENV_FILE", str(env_file))
     monkeypatch.setenv("MORROW_HOME", str(tmp_path / "morrow"))
-    monkeypatch.delenv("CANVAS_BASE", raising=False)
+    for name in ("CANVAS_BASE", "MOODLE_BASE", "MORROW_LMS_PROVIDER",
+                 "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", "https_proxy", "HTTPS_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(egress.socket, "create_connection",
+                        lambda *a, **kw: pytest.fail("unexpected network request"))
     (tmp_path / "morrow").mkdir()
     return env_file, tmp_path / "morrow" / "env"
 
@@ -47,21 +51,24 @@ def test_the_probe_uses_the_tenant_in_helper_env(config):
 
 def test_the_probe_uses_the_legacy_global_env(config):
     _env_file, legacy = config
-    legacy.write_text("export CANVAS_BASE='https://legacy.example.edu'\n")
-    assert egress.default_test_host() == "legacy.example.edu"
+    legacy.write_text("export CANVAS_BASE='https://legacy.instructure.com'\n")
+    assert egress.default_test_host() == "legacy.instructure.com"
 
 
 def test_the_environment_wins(config, monkeypatch):
     env_file, _legacy = config
     env_file.write_text("CANVAS_BASE=https://school.instructure.com\n")
-    monkeypatch.setenv("CANVAS_BASE", "https://shell.example.edu")
-    assert egress.default_test_host() == "shell.example.edu"
+    monkeypatch.setenv("CANVAS_BASE", "https://shell.instructure.com")
+    assert egress.default_test_host() == "shell.instructure.com"
 
 
-def test_no_tenant_yet_probes_example_com(config):
+def test_no_tenant_blocks_without_network(config):
     env_file, _legacy = config
     env_file.write_text("# CANVAS_BASE=https://myschool.instructure.com\n")
-    assert egress.default_test_host() == "example.com"
+    assert egress.default_test_host() is None
+    result = egress.probe_egress()
+    assert result["mode"] == "blocked"
+    assert "no network request was made" in result["detail"]
 
 
 def test_install_step_4_reads_the_tree_env(tmp_path):
@@ -83,3 +90,101 @@ def test_install_step_4_reads_the_tree_env(tmp_path):
                           timeout=60)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "school.instructure.com"
+
+
+@pytest.mark.parametrize("settings,host", [
+    ("CANVAS_BASE=https://school.instructure.com\n", "school.instructure.com"),
+    ("CANVAS_BASE=https://canvas.school.edu\n", "canvas.school.edu"),
+    ("MOODLE_BASE=https://school.example.edu/moodle\n", "school.example.edu"),
+    ("CANVAS_BASE=https://school.instructure.com\nMOODLE_BASE=https://moodle.example.edu/moodle\nMORROW_LMS_PROVIDER=moodle\n", "moodle.example.edu"),
+    ("CANVAS_BASE=https://school.instructure.com\nMOODLE_BASE=https://moodle.example.edu/moodle\nMORROW_LMS_PROVIDER=canvas\n", "school.instructure.com"),
+])
+def test_selected_tenant_is_the_only_direct_probe(config, monkeypatch, settings, host):
+    config[0].write_text(settings)
+    if host == "canvas.school.edu":
+        monkeypatch.setenv("CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", host)
+    calls = []
+    monkeypatch.setattr(egress, "direct_egress_ok",
+                        lambda target, timeout: (calls.append(target) or True, "ok"))
+    assert egress.probe_egress()["mode"] == "direct"
+    assert calls == [host]
+
+
+@pytest.mark.parametrize("settings", [
+    "CANVAS_BASE=https://example.com\n",
+    "CANVAS_BASE=http://school.instructure.com\n",
+    "CANVAS_BASE=https://secret:password@school.instructure.com\n",
+    "CANVAS_BASE=https://127.0.0.1\n",
+    "MOODLE_BASE=http://school.example.edu/moodle\n",
+    "CANVAS_BASE=https://school.instructure.com\nMOODLE_BASE=https://moodle.example.edu\n",
+    "MORROW_LMS_PROVIDER=invalid\n",
+])
+def test_invalid_or_ambiguous_tenant_blocks_without_network(config, settings):
+    config[0].write_text(settings)
+    result = egress.probe_egress()
+    assert result["mode"] == "blocked"
+    assert "secret" not in result["detail"]
+    assert "password" not in result["detail"]
+
+
+def test_explicit_probe_host_remains_supported(config, monkeypatch):
+    calls = []
+    monkeypatch.setattr(egress, "direct_egress_ok",
+                        lambda host, timeout: (calls.append(host) or True, "ok"))
+    assert egress.probe_egress(test_host="school.instructure.com")["mode"] == "direct"
+    assert calls == ["school.instructure.com"]
+
+
+def test_proxy_selection_needs_no_network_or_tenant(config):
+    result = egress.probe_egress(proxy_url="http://user:password@proxy.example.edu:3128")
+    assert result["mode"] == "proxy_auth"
+    assert "password" not in result["detail"]
+
+
+@pytest.mark.parametrize("pin_matches", [True, False])
+def test_direct_probe_preserves_tls_hostname_and_certificate_pin(config, monkeypatch,
+                                                                 pin_matches):
+    import base64
+    import hashlib
+    import ssl
+
+    cert = b"synthetic-leaf-certificate"
+    digest = hashlib.sha256(cert if pin_matches else b"other-cert").digest()
+    monkeypatch.setenv("MORROW_EGRESS_PIN", base64.b64encode(digest).decode())
+    context = ssl.create_default_context()
+    assert context.check_hostname is True
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    calls = []
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def getpeercert(self, binary_form):
+            assert binary_form is True
+            return cert
+
+    def connect(address, timeout):
+        calls.append(address)
+        return FakeSocket()
+
+    class FakeContext:
+        def wrap_socket(self, sock, server_hostname):
+            assert server_hostname == "school.instructure.com"
+            return sock
+
+    monkeypatch.setattr(egress.socket, "create_connection", connect)
+    monkeypatch.setattr(egress.ssl, "create_default_context", lambda: FakeContext())
+    ok, detail = egress.direct_egress_ok("school.instructure.com")
+    assert ok is pin_matches
+    assert calls == [("school.instructure.com", 443)]
+    if not pin_matches:
+        assert "CertPinMismatch" in detail
+
+
+def test_malformed_certificate_pin_blocks_before_connection(config, monkeypatch):
+    monkeypatch.setenv("MORROW_EGRESS_PIN", "invalid")
+    assert egress.direct_egress_ok("school.instructure.com")[0] is False

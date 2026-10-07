@@ -2,8 +2,8 @@
 """Selftest for the egress/cert probe module, the proxy forwarder's graceful
 degradation, and the launcher's single-profile attach story.
 
-No real Canvas traffic. The only real network allowed is one optional
-direct-egress TLS check (3s timeout) inside the forwarder subprocess test.
+No external LMS traffic. Direct-egress checks use mocks or stop before
+network access when no LMS host is configured.
 Cert fixtures are generated under transport/.selftest-work/ (never /tmp).
 
 Run: python3 transport/egress_selftest.py
@@ -128,13 +128,16 @@ def make_throwaway_ca():
 
 def main():
     # ---- 0. default test host (P0-11) ----------------------------------
-    with fake_env(CANVAS_BASE=None):
-        check("default_test_host falls back to example.com",
-              egress.default_test_host() == "example.com",
+    with fake_env(CANVAS_BASE=None, MOODLE_BASE=None, MORROW_LMS_PROVIDER=None,
+                  MORROW_HELPER_ENV_FILE=os.path.join(WORK, "absent-env"),
+                  MORROW_HOME=WORK):
+        check("default_test_host has no public fallback",
+              egress.default_test_host() is None,
               egress.default_test_host())
-    with fake_env(CANVAS_BASE="https://myschool.instructure.com"):
+    with fake_env(CANVAS_BASE="https://school.instructure.com", MOODLE_BASE=None,
+                  MORROW_LMS_PROVIDER="canvas"):
         check("default_test_host prefers configured CANVAS_BASE",
-              egress.default_test_host() == "myschool.instructure.com",
+              egress.default_test_host() == "school.instructure.com",
               egress.default_test_host())
 
     # ---- 1. proxy URL redaction --------------------------------------
@@ -168,7 +171,7 @@ def main():
     try:
         with no_proxy_env():
             egress.direct_egress_ok = lambda host, timeout=3: (True, "ok")
-            p = egress.probe_egress()
+            p = egress.probe_egress(test_host="school.instructure.com")
         check("probe direct mode", p["mode"] == "direct", p["mode"])
         check("probe direct needs no forwarder",
               p["needs_forwarder"] is False)
@@ -177,7 +180,7 @@ def main():
         with no_proxy_env():
             egress.direct_egress_ok = (
                 lambda host, timeout=3: (False, "boom"))
-            p = egress.probe_egress()
+            p = egress.probe_egress(test_host="school.instructure.com")
         check("probe blocked mode", p["mode"] == "blocked", p["mode"])
         check("probe blocked names proxy try",
               "https_proxy" in p["detail"], p["detail"][:120])
@@ -349,21 +352,19 @@ def main():
           "Tried:" in diag and "https_proxy" in diag, diag[:200])
     check("forwarder blocked has no @-leak", "@" not in diag, diag[:200])
 
-    # (a) no proxy env: one real 3s direct-egress check inside the child.
-    # Either outcome is graceful: exit 0 with the direct message, or
-    # non-zero with a diagnostic naming what was tried.
+    # (a) no proxy or tenant: the child must refuse before any network probe.
     env = {k: v for k, v in os.environ.items()
            if k not in ("https_proxy", "HTTPS_PROXY",
                         "http_proxy", "HTTP_PROXY")}
+    for name in ("CANVAS_BASE", "MOODLE_BASE", "MORROW_LMS_PROVIDER"):
+        env.pop(name, None)
+    env["MORROW_HELPER_ENV_FILE"] = os.path.join(WORK, "absent-env")
+    env["MORROW_HOME"] = WORK
     r = subprocess.run([sys.executable, fw, "0"],
                        capture_output=True, text=True, timeout=30, env=env)
     out = (r.stdout or "") + (r.stderr or "")
-    if r.returncode == 0:
-        check("forwarder no-proxy exits 0",
-              "direct egress, no forwarder needed" in r.stdout, r.stdout[:200])
-    else:
-        check("forwarder no-proxy exits non-zero with diagnostic",
-              r.returncode != 0 and "Tried:" in out, out[:300])
+    check("forwarder without tenant stops before network",
+          r.returncode != 0 and "no network request was made" in out, out[:300])
     check("forwarder no-proxy output has no @-leak", "@" not in out, out[:200])
 
     # (b) authenticated proxy env: serves on a scratch port, redacted logs.

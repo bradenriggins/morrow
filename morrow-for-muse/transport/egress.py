@@ -249,29 +249,27 @@ def ca_found():
 # Egress probing
 # ---------------------------------------------------------------------------
 
-def _configured_canvas_base():
-    """CANVAS_BASE resolved the way every agent-side reader resolves it
+def _configured_lms_base():
+    """Selected LMS resolved the way every agent-side reader resolves it
     (config/tree_config: the environment, then this tree's helper/env,
     then the legacy global env), or ""."""
     tree = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if tree not in sys.path:
         sys.path.insert(0, tree)
     from config import tree_config
-    return tree_config.canvas_base()
+    base = tree_config.lms_base()
+    return tree_config.normalize_lms_base(base) if base else ""
 
 
 def default_test_host():
-    # P0-11: the tenant base wins when set; otherwise a neutral public
-    # host. Never an operator-specific tenant: the egress probe must not
-    # depend on (or leak) one educator's account.
-    base = _configured_canvas_base() or "https://example.com"
-    try:
-        host = urlparse(base).hostname
-        if host:
-            return host
-    except Exception:
-        pass
-    return "example.com"
+    """The validated selected LMS host, or None before configuration.
+
+    Invalid configuration raises ValueError. There is no public fallback:
+    probing an unrelated site neither proves tenant access nor has a
+    configured destination to authorize the request.
+    """
+    base = _configured_lms_base()
+    return urlparse(base).hostname if base else None
 
 
 def direct_egress_ok(host, timeout=DIRECT_PROBE_TIMEOUT):
@@ -338,7 +336,20 @@ def probe_egress(proxy_url=None, test_host=None, timeout=DIRECT_PROBE_TIMEOUT):
             "detail": ("unauthenticated egress proxy at %s; Chromium uses "
                        "the protected loopback forwarder" % redacted),
         }
-    host = test_host or default_test_host()
+    try:
+        host = test_host or default_test_host()
+    except ValueError:
+        host = None
+    if not host:
+        return {
+            "mode": "blocked",
+            "proxy": None,
+            "needs_forwarder": False,
+            "upstream": None,
+            "detail": ("direct egress probe requires a valid configured LMS "
+                       "address (CANVAS_BASE or MOODLE_BASE); no network "
+                       "request was made"),
+        }
     ok, why = direct_egress_ok(host, timeout=timeout)
     if ok:
         return {
