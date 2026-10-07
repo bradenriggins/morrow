@@ -2013,8 +2013,8 @@ def _claim_token_hash(token):
     neither adopt nor free a foreign claim. W5-P0-1: the pending
     envelope no longer stores the raw token either (only its hash, for
     forensics); the orchestrator threads the token to the verify phase
-    through its own memory, and the TTL sweeper frees orphans via
-    release_op_id_forced. Documented non-boundary: a process that can
+    through its own memory. Expiry revokes token authority but preserves
+    unresolved write reservations. Documented non-boundary: a process that can
     read the claimant's memory (ptrace, same-uid) recovers the raw
     token; same-uid memory is not a security boundary on this box."""
     return "sha256:" + sha256_hex(str(token).encode("utf-8"))
@@ -2039,8 +2039,8 @@ def _claim_token_matches(stored_hash, claim_token):
 # browser-lane "pending" (write) claims live 7 days (matching the
 # browser orphan sweeper's PENDING_TTL_DAYS); raw-lane "claimed" (read)
 # claims live 24h. recheck_claim and journal_claimed_outcome fail closed
-# on an expired claim; sweep_expired_claims force-releases expired
-# claims so nothing persists indefinitely.
+# on an expired claim. Expired read claims can be released; unknown
+# writes retain replay protection until their outcome is settled.
 CLAIM_TTL_SECONDS = {
     "pending": 7 * 86400,
     "claimed": 24 * 3600,
@@ -2082,23 +2082,15 @@ def _refuse_expired_claim(op_id, rec):
 
 
 def sweep_expired_claims():
-    """W6-P2-5: force-release every journal claim past its TTL.
+    """Release expired read claims; retain unresolved write reservations.
 
-    Closes the "raw-lane crashed claims persist indefinitely" gap: an
-    expired claim's op_id is freed via release_op_id_forced (journaled
-    with forced=true and the reason), so a captured claim token can
-    never be honored after its TTL. Terminal ops are untouched; the
-    release is a no-op for ops that completed between the scan and the
-    release. Returns {"swept": [op_ids], "count": n}.
-
-    W6-P2-5 (archives): rotation renames the whole live journal into
-    archive/ regardless of claim state, so an in-flight claim's latest
-    record can sit in an archive. The scan therefore covers archives
-    (chronological) plus the live journal; the newest record per op_id
-    decides. release_op_id_forced already resolves archive-located
-    claims via the locations index.
+    Claim-token authority expires independently of replay protection.
+    A pending write may already have applied, so its reservation remains
+    until provider reconciliation or person settlement. The scan and read
+    releases share one lock so a new claim cannot replace a scanned one.
     """
-    expired = []
+    swept = []
+    retained = []
     with _journal_locked():
         latest_by_op = {}
         try:
@@ -2116,25 +2108,19 @@ def sweep_expired_claims():
                 continue
             latest_by_op[str(rec.get("op_id"))] = rec
         for op_id, rec in latest_by_op.items():
-            if rec.get("wal") in ("pending", "claimed") \
-                    and _claim_expired(rec):
-                expired.append(op_id)
-    # Two phases: _journal_locked is not reentrant (a second flock on a
-    # fresh fd would self-deadlock), and release_op_id_forced takes the
-    # lock itself.
-    swept = []
-    for op_id in expired:
-        try:
-            result = release_op_id_forced(
-                op_id,
-                "W6-P2-5: claim TTL expired (wal=%s, claimed at %s); "
-                "outcome unknown" % (latest_by_op[op_id].get("wal"),
-                                     latest_by_op[op_id].get("ts")))
-            if result.get("released"):
+            if not _claim_expired(rec):
+                continue
+            if rec.get("wal") == "pending" or rec.get("effect") == "write":
+                retained.append(op_id)
+            elif rec.get("wal") == "claimed" and rec.get("effect") == "read":
+                _append_record_locked({
+                    "op_id": op_id, "kind": "release", "wal": "released",
+                    "forced": True, "release_reason": "read claim TTL expired",
+                    "ts": utc_now_iso(),
+                })
                 swept.append(op_id)
-        except DuplicateOpId:
-            pass
-    return {"swept": swept, "count": len(swept)}
+    return {"swept": swept, "count": len(swept),
+            "retained_unresolved_writes": retained}
 
 
 def ensure_journal_dir():
@@ -3531,6 +3517,44 @@ def claim_is_live(op_id: str) -> bool:
             latest.get("wal") in ("claimed", "pending")
 
 
+def _journal_recovery_settled_locked(op_id):
+    state = _journal_state_locked()
+    loc = state["locations"].get(op_id)
+    paths = [JOURNAL_PATH] if loc in (None, "live") else [
+        os.path.join(_journal_archive_dir(), loc)]
+    latest = None
+    for path in paths:
+        for rec in _scan_journal_file(path):
+            if str(rec.get("op_id")) == op_id and rec.get("wal") != "audit":
+                latest = rec
+    if latest is None:
+        return False
+    if latest.get("wal") == "released":
+        return latest.get("forced") is not True
+    return latest.get("uncertain") is not True and latest.get("verification") in (
+        "pass", "verified", "closed_by_person")
+
+
+@contextmanager
+def journal_recovery_cleanup(op_id):
+    """Hold the claim lifecycle lock through settled recovery deletion.
+
+    Reclaiming a pre-send released UUID can replace its recovery files.
+    Keep settlement verification and deletion in one journal transaction.
+    Callers must not acquire conflict locks inside this guard: nested
+    locking uses conflict lock then journal lock, never the reverse.
+    """
+    op_id = _checked_op_id(op_id)
+    with _journal_locked():
+        yield _journal_recovery_settled_locked(op_id)
+
+
+def journal_recovery_settled(op_id: str) -> bool:
+    """Read authenticated settlement state without authorizing later cleanup."""
+    with journal_recovery_cleanup(op_id) as settled:
+        return settled
+
+
 def release_op_id(op_id: str, claim_token: str, reason: str) -> None:
     """Release a claim, making the op_id reusable.
 
@@ -3582,12 +3606,9 @@ def release_op_id_forced(op_id: str, reason: str) -> dict:
     """W5-P0-1 / W5-P1-3: release a journal claim WITHOUT the raw claim
     token. System/operator use only, never a normal dispatch path.
 
-    Two callers: (1) sweep_stale_pending, retiring TTL-expired
-    browser-lane orphans whose pending envelope (and therefore the raw
-    token) is gone; the envelope no longer stores the raw token at all,
-    so the sweep cannot present one. (2) the `claim-release` operator
-    CLI, freeing an op_id bricked by a crashed raw-lane dispatch whose
-    in-memory token died with the process (W5-P1-3).
+    Used by the `claim-release` operator CLI and explicit state purges.
+    Automatic expiry must never use this to free an unresolved write:
+    a dead claimant does not prove that the provider applied nothing.
 
     Threat model: release_op_id still requires the token, so a file-read
     attacker (journal, envelope) can neither free nor adopt a live
@@ -11365,10 +11386,9 @@ def build_parser():
                           help="retired key id to drop (e.g. v1)")
     sub.add_parser(
         "sweep-expired-claims",
-        help="W6-P2-5: release journal claims older than their TTL "
-             "(pending/browser writes: 7 days; claimed/reads: 24h) via "
-             "the forced-release path. Raw-lane crashed claims no longer "
-             "persist indefinitely.")
+        help="Release expired read claims (24h). Preserve unresolved write "
+             "reservations for provider reconciliation or person settlement; "
+             "write claim-token authority expires after 7 days.")
     add_dry_run(p_undo)
     add_channel_gate(p_undo)
     return parser

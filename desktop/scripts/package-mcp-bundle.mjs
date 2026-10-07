@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pnpmCommand } from "./lib/pnpm-command.mjs";
+import { signedSigningState, verifySignedMacArtifacts, verifySignedWindowsArtifact } from "./lib/signed-desktop-signing.mjs";
 import { unsignedSigningState } from "./lib/unsigned-desktop-signing.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,6 +38,7 @@ const {
   verifyPackagerAdmission,
   writePackagerAdmission,
 } = requireInstaller(resolve(INSTALLER, "shared", "packager-admission.cjs"));
+const { signedReleasePreflight } = requireInstaller(resolve(INSTALLER, "signed-release-preflight.cjs"));
 const PACKAGE = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
 const VERSION = String(PACKAGE.version);
 const NODE_VERSION = "22.23.2";
@@ -120,6 +122,7 @@ function parse(args) {
   let replace = false;
   let unsignedQa = false;
   let unsignedRelease = false;
+  let signedRelease = false;
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
     if (flag === "--target") {
@@ -137,6 +140,8 @@ function parse(args) {
     } else if (flag === "--replace") {
       if (replace) throw new Error("--replace can be used once");
       replace = true;
+    } else if (flag === "--signed-release") {
+      signedRelease = true;
     } else if (flag === "--unsigned-qa") {
       unsignedQa = true;
     } else if (flag === "--unsigned-release") {
@@ -145,9 +150,10 @@ function parse(args) {
   }
   if (!Object.hasOwn(TARGETS, target)) throw new Error(`No desktop target is configured for ${target}`);
   if (payload && output) throw new Error("Choose --prepare-desktop-payload or --output, not both");
-  if (unsignedQa && unsignedRelease) throw new Error("Choose one unsigned distribution mode");
+  if ([unsignedQa, unsignedRelease, signedRelease].filter(Boolean).length > 1) throw new Error("Choose one distribution mode");
+  if (payload && signedRelease) throw new Error("--signed-release requires --output");
   if (!payload && !output) throw new Error("Provide --prepare-desktop-payload or --output");
-  return { kind: payload ? "prepare" : "package", target, payload, output, replace, unsignedQa, unsignedRelease };
+  return { kind: payload ? "prepare" : "package", target, payload, output, replace, unsignedQa, unsignedRelease, signedRelease };
 }
 
 function digest(path) { return createHash("sha256").update(readFileSync(path)).digest("hex"); }
@@ -980,14 +986,14 @@ function assertUnsignedWindowsExecutable(file) {
   return "authenticode_absent";
 }
 
-function installerArtifacts(output, target) {
+function installerArtifacts(output, target, signedRelease = false) {
   const files = readdirSync(output).filter((name) => statSync(resolve(output, name)).isFile());
   if (target === "darwin-arm64") {
     const dmg = files.filter((name) => name.startsWith("Morrow-") && name.endsWith("-mac-arm64.dmg"));
     const zip = files.filter((name) => name.startsWith("Morrow-") && name.endsWith("-mac-arm64.zip"));
     const metadata = files.filter((name) => name === "latest-mac.yml");
-    if (dmg.length !== 1 || zip.length !== 1 || metadata.length !== 0) {
-      throw new Error("Unsigned Electron builder output must contain exactly one Morrow DMG and ZIP and no production update metadata.");
+    if (dmg.length !== 1 || zip.length !== 1 || metadata.length !== (signedRelease ? 1 : 0)) {
+      throw new Error("Electron builder output must contain one DMG and ZIP, with update metadata only for a signed release.");
     }
     return [...dmg, ...zip];
   }
@@ -1081,13 +1087,18 @@ async function packageDesktop(request) {
   const payload = resolve(staging, "MorrowPayload");
   try {
     mkdirSync(staging, { recursive: false, mode: 0o700 });
+    if (request.signedRelease) {
+      const preflight = signedReleasePreflight({ target: request.target, version: VERSION });
+      if (preflight.status !== "ready") throw new Error(`Signed release inputs are incomplete: ${preflight.missing.join("; ")}`);
+      if (sourceCheckpoint().dirty) throw new Error("Signed public packaging requires a clean source checkout.");
+    }
     const payloadReceipt = await preparePayload(request.target, payload, false);
     const releaseGraph = createPackagerAdmission({ payload, target: request.target });
     writePackagerAdmission(admissionPath, releaseGraph);
-    const requestedSigning = signingState(request.target, request.unsignedQa, request.unsignedRelease);
+    const requestedSigning = request.signedRelease ? signedSigningState(request.target) : signingState(request.target, request.unsignedQa, request.unsignedRelease);
     const electronOutput = resolve(staging, "electron-output");
     run("pnpm", ["--dir", INSTALLER, "--ignore-workspace", `run`, TARGETS[request.target].electron[0]], {
-      env: unsignedBuilderEnvironment({
+      env: (request.signedRelease ? (env) => ({ ...env, MORROW_SIGNED_RELEASE: "1", CSC_IDENTITY_AUTO_DISCOVERY: "true" }) : unsignedBuilderEnvironment)({
         ...process.env,
         ...desktopTargetEnvironment(request.target),
         MORROW_INSTALLER_PAYLOAD: payload,
@@ -1097,8 +1108,12 @@ async function packageDesktop(request) {
       })
     });
     assertFinalElectronPayload(electronOutput, request.target, payloadReceipt, releaseGraph);
-    const artifacts = installerArtifacts(electronOutput, request.target);
-    const signing = request.target === "win32-x64"
+    const artifacts = installerArtifacts(electronOutput, request.target, request.signedRelease);
+    if (request.signedRelease) {
+      if (request.target === "darwin-arm64") verifySignedMacArtifacts({ diskImage: resolve(electronOutput, artifacts[0]), archive: resolve(electronOutput, artifacts[1]) });
+      else verifySignedWindowsArtifact(resolve(electronOutput, artifacts[0]));
+    }
+    const signing = !request.signedRelease && request.target === "win32-x64"
       ? { ...requestedSigning, artifactSignature: assertUnsignedWindowsExecutable(resolve(electronOutput, artifacts[0])) }
       : requestedSigning;
     const receipt = desktopInstallerReceipt({
@@ -1108,6 +1123,13 @@ async function packageDesktop(request) {
       signing,
       releaseGraph,
     });
+    if (request.signedRelease) {
+      const metadata = request.target === "darwin-arm64" ? "latest-mac.yml" : "latest.yml";
+      if (!existsSync(resolve(electronOutput, metadata))) throw new Error("Signed output is missing its generated update metadata.");
+      const updates = readdirSync(electronOutput).filter((name) => name === metadata || (artifacts.some((artifact) => name === `${artifact}.blockmap`)));
+      receipt.updateArtifacts = updates.map((name) => ({ name, sha256: digest(resolve(electronOutput, name)) }));
+      for (const name of updates) copy(resolve(electronOutput, name), resolve(staging, name));
+    }
     for (const artifact of artifacts) copy(resolve(electronOutput, artifact), resolve(staging, artifact));
     writeFileSync(resolve(staging, "receipt.json"), json(receipt), { mode: 0o600 });
     rmSync(payload, { recursive: true, force: true });

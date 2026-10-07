@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.1.0",
+    "@modelcontextprotocol/server": "2.2.0",
     "@morrow/bridge-loopback": "workspace:*",
     "@morrow/bridge-protocol": "workspace:*",
     "@morrow/canvas-api-catalog": "workspace:*",

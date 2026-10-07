@@ -462,7 +462,11 @@ describe("Blackboard multi-course and concurrent-assistant runtime proof", () =>
       clientB().callTool({ name: "morrow_batch_run", arguments: input }),
     ])).map(structured);
     expect(windows.map((window) => Number(window.processed || 0))).toEqual([6, 6]);
-    expect(runtime.batchGet({ batchId, limit: 12 }).batch).toMatchObject({
+    const completed = runtime.batchGet({ batchId, limit: 12 });
+    const failures = (completed.children as JsonObject[])
+      .filter((child) => child.state !== "succeeded")
+      .map((child) => ({ child, result: runtime.batches.readResult(batchId, String(child.childId)) }));
+    expect(completed.batch, JSON.stringify(failures)).toMatchObject({
       state: "completed",
       totalChildren: 12,
       succeededChildren: 12,

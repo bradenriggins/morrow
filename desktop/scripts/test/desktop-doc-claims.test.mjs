@@ -322,11 +322,11 @@ test("the README names the desktop artifacts the build configuration actually pr
   assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
 });
 
-test("the published 1.0.13 release is the Mac and Windows download", () => {
-  assert.match(flat("README.md"), /Morrow Desktop 1\.0\.13 is for Mac with Apple silicon and Windows x64/);
-  assert.match(flat("LIMITATIONS.md"), /Morrow Desktop `1\.0\.13` runs on Mac with Apple silicon and Windows x64/);
-  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.13 \(2026-10-03\).*## 1\.0\.11 \(2026-10-02\)/);
+test("the published downloads stay separate from the current checkout version", () => {
   const version = JSON.parse(read("package.json")).version;
+  assert.match(flat("README.md"), /Morrow Desktop 1\.0\.13 is for Mac with Apple silicon and Windows x64/);
+  assert.ok(flat("LIMITATIONS.md").includes(`Morrow Desktop \`${version}\` runs on Mac with Apple silicon and Windows x64`));
+  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.13 \(2026-10-03\).*## 1\.0\.11 \(2026-10-02\)/);
   const bridgeVersion = JSON.parse(read("connector/extension/manifest.json")).version;
   assert.ok(flat("README.md").includes(`This checkout contains Morrow Desktop ${version} with Morrow Bridge ${bridgeVersion}`));
   assert.match(flat("README.md"), /Published downloads are Mac 1\.0\.13 and Windows 1\.0\.13/);

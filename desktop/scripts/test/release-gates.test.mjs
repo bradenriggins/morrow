@@ -319,9 +319,11 @@ test("public package scan checks docs, JSON, and source maps", () => {
   ]);
 });
 
-test("public candidate rights and origin evidence bind the post-transform package bytes", (t) => {
+for (const layout of ["standalone", "monorepo"]) {
+test(`public candidate rights and origin evidence bind the post-transform package bytes in ${layout}`, (t) => {
   useDefaultReceiptPath(t);
-  const root = mkdtempSync(resolve(tmpdir(), "morrow-release-derived-rights-"));
+  const repository = mkdtempSync(resolve(tmpdir(), "morrow-release-derived-rights-"));
+  const root = layout === "monorepo" ? resolve(repository, "desktop") : repository;
   try {
     mkdirSync(resolve(root, "config"), { recursive: true });
     const packageBytes = Buffer.from(`${JSON.stringify({
@@ -332,6 +334,7 @@ test("public candidate rights and origin evidence bind the post-transform packag
     const sourceDigest = sha256(packageBytes);
     writeFileSync(resolve(root, ".gitignore"), "artifacts/\noutput/\n");
     writeFileSync(resolve(root, "package.json"), packageBytes);
+    writeFileSync(resolve(root, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
     writeFileSync(resolve(root, "config/release-profiles.json"), JSON.stringify({
       schema: "morrow.release-profiles.v2",
       profiles: {
@@ -349,7 +352,7 @@ test("public candidate rights and origin evidence bind the post-transform packag
       schema: "morrow.source-rights.v1",
       files: [{ path: "package.json", sha256: sourceDigest, disposition: "direct_owned", review: "release review" }],
     }));
-    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["init", "-q"], { cwd: repository });
     execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
     execFileSync("git", ["config", "user.name", "Morrow Test"], { cwd: root });
     execFileSync("git", ["add", "."], { cwd: root });
@@ -374,7 +377,7 @@ test("public candidate rights and origin evidence bind the post-transform packag
     execFileSync("git", ["add", "config/source-origin-ledger.json"], { cwd: root });
     execFileSync("git", ["commit", "-qm", "rights evidence"], { cwd: root });
 
-    const receipt = stageCandidate({ root, profileName: "public-canvas" });
+    const receipt = stageCandidate({ root, profileName: "public-canvas", verifyRebuild: true });
     const stageRoot = resolve(root, "artifacts/candidates/public-canvas/stage");
     const stagedPackage = readFileSync(resolve(stageRoot, "package.json"));
     const stagedDigest = sha256(stagedPackage);
@@ -398,6 +401,7 @@ test("public candidate rights and origin evidence bind the post-transform packag
     assert.equal(origin.entries[0].afterDigest, stagedDigest);
     assert.deepEqual(origin.entries[0].derivation, expectedDerivation);
     assert.equal(receipt.sourceRights.sourceInput.manifestSha256, sha256(readFileSync(resolve(root, "config/source-rights.manifest.json"))));
+    assert.equal(receipt.deterministicRebuild.verified, true);
     assert.equal(receipt.sourceRights.passed, true);
     assert.equal(receipt.sourceOrigin.passed, true);
     const scan = scanStagedCandidate({ root, profileName: "public-canvas" });
@@ -405,14 +409,25 @@ test("public candidate rights and origin evidence bind the post-transform packag
     assert.equal(scan.sourceOrigin.passed, true);
     assert.equal(scan.passed, true);
 
+    const conformance = conformanceReport({ root, profileName: "public-canvas" });
+    assert.equal(conformance.checks.find((check) => check.id === "frozen_lockfile_tracked").passed, true);
+
     writeFileSync(resolve(stageRoot, "release/source-rights.manifest.json"), readFileSync(resolve(root, "config/source-rights.manifest.json")));
     const rejected = scanStagedCandidate({ root, profileName: "public-canvas" });
     assert.equal(rejected.sourceRights.passed, false);
     assert.equal(rejected.passed, false);
+    writeFileSync(resolve(root, "package.json"), `${JSON.stringify({ name: "morrow-test", version: "1.0.1" })}\n`);
+    execFileSync("git", ["add", "package.json"], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "changed selected source"], { cwd: root });
+    const changedCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    const staleOrigin = validateSourceOriginLedger({ root, files: [{ path: "package.json", sha256: sourceDigest }], commit: changedCommit });
+    assert.equal(staleOrigin.candidateCommitMatches, false);
+    assert.equal(staleOrigin.passed, false);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(repository, { recursive: true, force: true });
   }
 });
+}
 
 test("a public package is not reported built while its source rights are missing", (t) => {
   useDefaultReceiptPath(t);

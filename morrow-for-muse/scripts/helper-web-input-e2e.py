@@ -104,10 +104,11 @@ try:
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             port = probe.getsockname()[1]
-        launcher = ChromiumLauncher(BINARY, scratch + '/profile', cdp_port=port, forwarder_port=22670, extra_args=['--disable-features=LocalNetworkAccessChecks', '--ignore-certificate-errors'])
+        fixture = ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
+        # The address-space override applies only to this disposable fixture.
+        launcher = ChromiumLauncher(BINARY, scratch + '/profile', cdp_port=port, forwarder_port=22670, extra_args=['--ip-address-space-overrides=127.0.0.1:%d=public' % fixture.server_port, '--ignore-certificate-errors'])
         launcher.start()
         cdp = launcher.cdp
-        fixture = ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
         cert, keyfile = scratch + '/cert.pem', scratch + '/key.pem'
         subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyfile, '-out', cert, '-days', '1', '-subj', '/CN=localhost'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -124,8 +125,9 @@ try:
                 if evaluate(expression):
                     return True
                 time.sleep(.05)
-            return False
-        check('first_frame_rendered', wait_for('document.getElementById("screen").naturalWidth === 1200'))
+            state = evaluate('({origin: location.origin, readyState: document.readyState, title: document.title})')
+            raise AssertionError('helper fixture condition did not become ready: %r' % state)
+        check('first_frame_rendered', wait_for('document.readyState === "complete" && !!document.getElementById("screen") && document.getElementById("screen").naturalWidth === 1200'))
         check('ordered_input_controls_present', evaluate('!!document.getElementById("resume") && !!document.getElementById("fit") && !!document.getElementById("zoom-in")'))
         def focus():
             evaluate('document.getElementById("capture").click()')

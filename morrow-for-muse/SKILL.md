@@ -1,6 +1,6 @@
 # Morrow for Muse: Canvas connector and Moodle module (skill bundle)
 
-You are operating the Morrow for Muse connector, v0.4.11. Canvas and Moodle operations use
+You are operating the Morrow for Muse connector, v0.4.12. Canvas and Moodle operations use
 the VM's installed Chromium and the educator's browser-owned session.
 The private native helper is the sign-in surface. Never ask for, print,
 log, or store a password, cookie, sesskey, or token.
@@ -875,15 +875,21 @@ student they have in mind and run `students find` with that name: the
 label that comes back tells them whether it is the same student. Never
 call `vault.lookup()` or `Deidentifier.lookup()` from an agent path.
 
-Deletion is the educator's, and it is complete: `python3 -c "from
+Deletion is the educator's: `python3 -c "from
 privacy import executor_wire; print(executor_wire.purge_tenant('<tenant
 base>'))"` drops one tenant's vault records and name-echo records
 (issued labels for that tenant stop resolving; other tenants
 untouched), and `purge_all()` additionally deletes the vault file,
-its `.key`, and the name-echo file. Every purge/wipe path also purges
-the browser transient state: `~/.morrow/browser-pending/` envelopes
-(they hold raw provider payloads) and `~/.morrow/browser-briefs/`
-(nothing learner-bearing survives them). The Chromium profile's
+its `.key`, and the name-echo file. Every default purge/wipe path cleans old settled browser transient
+state: `~/.morrow/browser-pending/` envelopes and
+`~/.morrow/browser-briefs/`. Unresolved recovery evidence remains,
+including raw provider payloads that can contain learner data, until
+provider readback or explicit person settlement permits cleanup.
+Missing or invalid journal state also keeps this evidence. Age alone
+never proves that a write did not apply. Check
+`inflight_envelopes_skipped` in the purge report. Vault deletion stops
+label lookup; retained recovery evidence does not restore that mapping.
+Use uninstall for complete local removal, including unresolved files. The Chromium profile's
 learner-data stores (History, Cache, Local/Session Storage, IndexedDB,
 Service Workers, Crash Reports) are wiped by `purge_all()` and the
 legacy `wipe` commands (selective: session cookies are kept so the
@@ -897,9 +903,8 @@ first). The same deletions run from the command line:
 `purge-course --tenant <tenant base> --course-id <id>`, and
 `purge-all` (add `--full` to wipe the whole browser profile). The
 legacy `python3 -m privacy.pseudonym purge|wipe` and
-`python3 -m privacy.learner_vault purge|wipe` commands also ship, but
-they cover only their own older state; use the `executor_wire`
-commands for the educator's deletion. Full policy:
+`python3 -m privacy.learner_vault purge|wipe` commands are source-only;
+use the shipped `executor_wire` commands for the educator's deletion. Full policy:
 `privacy/FERPA_POLICY.md`.
 
 Honest limitations (not defects, but know them):

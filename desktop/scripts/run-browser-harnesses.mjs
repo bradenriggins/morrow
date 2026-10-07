@@ -99,7 +99,7 @@ export const HARNESSES = Object.freeze([
     attendedOnly: false,
     summary: "Installs, starts, damages, repairs and uninstalls the Windows desktop app, then compares retained data.",
     notRunStatus: "not-run-on-this-host",
-    notRunReason: "This harness needs native Windows and a built NSIS installer, which this command does not produce. Run desktop-windows-smoke.mjs on a Windows host with the exact installer and package receipt. GitHub Actions is disabled for this repository.",
+    notRunReason: "This harness needs native Windows and a built NSIS installer, which this command does not produce. The desktop installer QA workflow runs it on native Windows with the exact installer and package receipt.",
   }),
 ]);
 

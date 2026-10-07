@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.12 (2026-10-07)
+
+Install `morrow-muse-connector-0.4.12.zip` from the `muse/v0.4.12`
+release and verify it with `SHA256SUMS` before unzipping, as described
+in `INSTALL.md`.
+
+- Keep recovery records and replay protection for changes with an unknown outcome when their approval expires. Check what the course saved before retrying.
+- Release a Moodle operation that fails before sending. Keep an operation that fails after sending unresolved until its outcome is checked.
+
 ## 0.4.11 (2026-10-03)
 
 Install `morrow-muse-connector-0.4.11.zip` from the `muse/v0.4.11`

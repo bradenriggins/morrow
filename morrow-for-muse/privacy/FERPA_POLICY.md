@@ -262,11 +262,23 @@ desktop boundary has no reveal at all, and neither does this one.
 
   | Operation | Removes | Keeps / leaves behind |
   |---|---|---|
-  | Delete `<MORROW_HOME>/morrow_source_vault.json` (default `~/.morrow`; wired vault, the live read path) | the vault file and its sibling `.key`; previously issued labels can never resolve again (a later run generates a fresh vault) | the transient lock `morrow_source_vault.json.lock` (0600, empty; safe to delete by hand). NOTE: deleting the file by hand does NOT purge browser transient state (next row); use `purge_tenant`/`purge_all` (below) or the uninstall script for the complete deletion |
-  | Shipped per-tenant purge (`privacy/executor_wire.py: purge_tenant`) | every vault record whose scope belongs to that tenant (atomic rewrite; issued labels for that tenant stop resolving) AND all browser transient state: `<MORROW_HOME>/browser-pending/` envelopes (they hold raw provider payloads, un-scopable) and `<MORROW_HOME>/browser-briefs/` | other tenants' vault records; the vault key; the Chromium profile (its stores mix tenants, so a per-tenant profile purge is not feasible; use the profile wipe below or uninstall) |
-  | Shipped full purge (`privacy/executor_wire.py: purge_all`) | the vault file + `.key`, all browser transient state (envelopes, briefs), and the Chromium profile's learner-data-carrying stores (selective mode: History, Top Sites, Visited Links, Sessions, Cache, Code Cache, Service Worker, Local Storage, Session Storage, IndexedDB, Storage, Crash Reports) | session cookies (`Cookies`, `Login Data`) and profile settings (`Preferences`, `Web Data`) so the educator stays signed in; the empty transient lock file. `purge_all(full_profile=True)` removes the whole profile instead (the educator signs in again). Refuses loudly if Chromium is running against the profile (stop the helper first) |
-  | Legacy `python3 -m privacy.pseudonym purge --tenant` / `python3 -m privacy.learner_vault purge --tenant` (source-only, not shipped) | that tenant's legacy map records (atomic rewrite) AND all browser transient state (envelopes, briefs) | legacy salt/secret; other tenants; the Chromium profile (same per-tenant infeasibility as above) |
-  | Legacy `python3 -m privacy.pseudonym wipe` / `python3 -m privacy.learner_vault wipe` (source-only, not shipped) | the legacy salt/secret and whole map, all browser transient state, and the profile's learner-data-carrying stores (same selective list as `purge_all`) | session cookies and profile settings (same rationale); `wipe --full` removes the whole profile instead |
+  | Delete `<MORROW_HOME>/morrow_source_vault.json` (default `~/.morrow`; wired vault, the live read path) | the vault file and its sibling `.key`; previously issued labels can never resolve again (a later run generates a fresh vault) | the transient lock `morrow_source_vault.json.lock` (0600, empty; safe to delete by hand). NOTE: deleting the file by hand does NOT purge browser transient state (next row); use `purge_tenant`/`purge_all` (below) for scoped deletion, or uninstall for complete local removal |
+  | Shipped per-tenant purge (`privacy/executor_wire.py: purge_tenant`) | every vault record whose scope belongs to that tenant (atomic rewrite; issued labels for that tenant stop resolving) AND old settled browser transient state: `<MORROW_HOME>/browser-pending/` envelopes (they hold raw provider payloads, un-scopable) and `<MORROW_HOME>/browser-briefs/` | other tenants' vault records; the vault key; the Chromium profile (its stores mix tenants, so a per-tenant profile purge is not feasible; use the profile wipe below or uninstall) |
+  | Shipped full purge (`privacy/executor_wire.py: purge_all`) | the vault file + `.key`, old settled browser transient state (envelopes, briefs), and the Chromium profile's learner-data-carrying stores (selective mode: History, Top Sites, Visited Links, Sessions, Cache, Code Cache, Service Worker, Local Storage, Session Storage, IndexedDB, Storage, Crash Reports) | session cookies (`Cookies`, `Login Data`) and profile settings (`Preferences`, `Web Data`) so the educator stays signed in; the empty transient lock file. `purge_all(full_profile=True)` removes the whole profile instead (the educator signs in again). Refuses loudly if Chromium is running against the profile (stop the helper first) |
+  | Legacy `python3 -m privacy.pseudonym purge --tenant` / `python3 -m privacy.learner_vault purge --tenant` (source-only, not shipped) | that tenant's legacy map records (atomic rewrite) AND old settled browser transient state (envelopes, briefs) | legacy salt/secret; other tenants; the Chromium profile (same per-tenant infeasibility as above) |
+  | Legacy `python3 -m privacy.pseudonym wipe` / `python3 -m privacy.learner_vault wipe` (source-only, not shipped) | the legacy salt/secret and whole map, old settled browser transient state, and the profile's learner-data-carrying stores (same selective list as `purge_all`) | session cookies and profile settings (same rationale); `wipe --full` removes the whole profile instead |
+
+- Every default purge/wipe preserves unresolved recovery evidence in
+  `browser-pending/` and `browser-briefs/`, including raw provider
+  payloads that can contain learner data. Missing, invalid, or
+  unverified journal state also preserves these files. Age alone cannot
+  establish whether a write applied. Provider readback or explicit
+  person settlement permits later cleanup; uninstall removes the whole
+  local installation and its unresolved state. The purge report's
+  `inflight_envelopes_skipped` count names retained envelopes. Vault
+  deletion stops label lookup; retained recovery evidence does not
+  restore that mapping. Purge commands can therefore leave learner data
+  on disk even after the vault and name echo are removed.
 
 - Full wipe (uninstall path): the uninstall script removes
   `~/.morrow/morrow_source_vault.json` and its `.key` (including a
@@ -299,9 +311,10 @@ the wired vault file above.
   purge --tenant <base>` (per-tenant), `python3 -m privacy.executor_wire
   purge-course --tenant <base> --course-id <id>` (per-course on one
   tenant), `python3 -m privacy.executor_wire purge-all [--full]` (vault
-  file + `.key`, all browser transient state, and the Chromium profile's
+  file + `.key`, old settled browser transient state, and the Chromium profile's
   learner-data-carrying stores; `--full` removes the whole profile). Every
-  command also purges all browser transient state.
+  command keeps unresolved recovery evidence as described above; `--full`
+  changes profile deletion, not unresolved-operation retention.
 
 ## Known limitations (honest scope)
 

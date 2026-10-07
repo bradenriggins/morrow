@@ -370,7 +370,8 @@ async function detectAssistant(assistant) {
     });
   }
   if (process.platform === "win32" && assistant.id === "codex") {
-    return detectWindowsCodexPackage({ assistantId: assistant.id, runPowerShell: runWindowsPowerShell });
+    return await detectWindowsCodexPackage({ assistantId: assistant.id, runPowerShell: runWindowsPowerShell })
+      || commandFound("codex");
   }
   const applicationDirectories = process.platform === "win32"
     ? [process.env.LOCALAPPDATA, process.env.ProgramFiles].filter(Boolean)

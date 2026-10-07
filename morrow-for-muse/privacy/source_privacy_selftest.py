@@ -1501,10 +1501,34 @@ def test_shipped_vault_purge_course():
     assert len(vault2.identities_for_scope(scope102)) == 1
 
 
+def _seed_purge_recovery(pend, brief, raw):
+    """Use sealed outcomes for deletable files and keep one unknown write."""
+    import uuid
+    from datetime import datetime, timezone, timedelta
+    from dispatch import executor as ex
+
+    settled_op, orphan_op, unknown_op = (str(uuid.uuid4()) for _ in range(3))
+    for op in (settled_op, orphan_op, unknown_op):
+        token = ex.claim_op_id(op, "dispatch", "synthetic.purge", "write", "digest")
+        if op != unknown_op:
+            ex.journal_claimed_outcome(op, {
+                "op_id": op, "effect": "write", "verification": "verified",
+                "uncertain": False}, token)
+    old = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    for op in (settled_op, unknown_op):
+        envelope = dict(raw, op_id=op, created_at=old)
+        with open(os.path.join(pend, op + ".json"), "w", encoding="utf-8") as fh:
+            json.dump(envelope, fh)
+    for op in (orphan_op, unknown_op):
+        with open(os.path.join(brief, op + "-request.txt"), "w", encoding="utf-8") as fh:
+            fh.write("synthetic recovery brief with learner data")
+    return unknown_op
+
+
 def test_executor_wire_purge_tenant():
     """W4-P2-10 + W4-P0-4/W4-P0-5: the shipped lane's purge_tenant drops
-    the tenant's vault records AND purges all browser transient state
-    (pending envelope with raw learner payload, orphan brief)."""
+    the tenant's vault records and settled recovery files. Unknown write
+    envelopes and briefs remain even when they are older than the TTL."""
     from privacy import executor_wire as _ew
     from privacy.core import LearnerVault
     from transport import browser_backend as _bb
@@ -1518,22 +1542,7 @@ def test_executor_wire_purge_tenant():
     raw = {"submissions": [{"user": {
         "id": "9001001", "name": "Zeldana Fakeington",
         "email": "zeldana.fakeington@example.test"}, "score": 91.5}]}
-    # W5-P1-2: in-flight envelopes (younger than the TTL) are never
-    # silently destroyed, so the planted envelope is aged past the TTL.
-    # W6-P2-4: purge dates envelopes by internal created_at, not mtime.
-    import time as _t
-    from datetime import datetime, timezone
-    _old = _t.time() - 8 * 86400
-    _old_iso = datetime.fromtimestamp(_old, tz=timezone.utc).isoformat()
-    raw["op_id"] = "op-0001"
-    raw["created_at"] = _old_iso
-    with open(os.path.join(pend, "op-0001.json"), "w",
-              encoding="utf-8") as fh:
-        json.dump(raw, fh)
-    os.utime(os.path.join(pend, "op-0001.json"), (_old, _old))
-    with open(os.path.join(brief, "orphan-op-request.txt"), "w",
-              encoding="utf-8") as fh:
-        fh.write("brief: post comment to submission of Zeldana Fakeington")
+    unknown_op = _seed_purge_recovery(pend, brief, raw)
     old_sv = os.environ.get(_ew.SOURCE_VAULT_ENV_VAR)
     os.environ[_ew.SOURCE_VAULT_ENV_VAR] = svault
     old_pend, old_brief = _bb.PENDING_DIR, _bb.BRIEF_DIR
@@ -1554,7 +1563,17 @@ def test_executor_wire_purge_tenant():
     assert report["vault_records_purged"] == 1, report
     assert report["pending_envelopes_removed"] == 1, report
     assert report["briefs_removed"] == 1, report
-    assert os.listdir(pend) == [] and os.listdir(brief) == []
+    assert report["inflight_envelopes_skipped"] == 1, report
+    assert os.listdir(pend) == [unknown_op + ".json"]
+    assert os.listdir(brief) == [unknown_op + "-request.txt"]
+    from dispatch import executor as ex
+    assert ex.claim_is_live(unknown_op), "purge released an unknown write"
+    try:
+        ex.claim_op_id(unknown_op, "dispatch", "synthetic.purge", "write", "digest")
+    except ex.DuplicateOpId:
+        pass
+    else:
+        raise AssertionError("purge allowed an unresolved write to run again")
     assert LearnerVault(svault).identities_for_scope(scope) == []
 
 
@@ -1613,9 +1632,8 @@ def test_executor_wire_purge_all():
 def test_executor_wire_cli_purge_course():
     """W4-P2-10: the shipped-lane purge CLI exposes --tenant / --course-id
     filters. purge-course drops only that course's vault records on that
-    tenant AND purges all browser transient state (W4-P0-4/W4-P0-5: the
-    pending envelope holding a raw learner payload and the orphan brief
-    go on every purge path, unscopable)."""
+    tenant and cleans settled recovery files while preserving unknown
+    write envelopes and briefs, which cannot be scoped to one tenant."""
     import io
     from contextlib import redirect_stdout
     from privacy import executor_wire as _ew
@@ -1631,22 +1649,7 @@ def test_executor_wire_cli_purge_course():
     raw = {"submissions": [{"user": {
         "id": "9001001", "name": "Zeldana Fakeington",
         "email": "zeldana.fakeington@example.test"}, "score": 91.5}]}
-    # W5-P1-2: in-flight envelopes (younger than the TTL) are never
-    # silently destroyed, so the planted envelope is aged past the TTL.
-    # W6-P2-4: purge dates envelopes by internal created_at, not mtime.
-    import time as _t
-    from datetime import datetime, timezone
-    _old = _t.time() - 8 * 86400
-    _old_iso = datetime.fromtimestamp(_old, tz=timezone.utc).isoformat()
-    raw["op_id"] = "op-0001"
-    raw["created_at"] = _old_iso
-    with open(os.path.join(pend, "op-0001.json"), "w",
-              encoding="utf-8") as fh:
-        json.dump(raw, fh)
-    os.utime(os.path.join(pend, "op-0001.json"), (_old, _old))
-    with open(os.path.join(brief, "orphan-op-request.txt"), "w",
-              encoding="utf-8") as fh:
-        fh.write("brief: post comment to submission of Zeldana Fakeington")
+    unknown_op = _seed_purge_recovery(pend, brief, raw)
     old_sv = os.environ.get(_ew.SOURCE_VAULT_ENV_VAR)
     os.environ[_ew.SOURCE_VAULT_ENV_VAR] = svault
     old_pend, old_brief = _bb.PENDING_DIR, _bb.BRIEF_DIR
@@ -1677,7 +1680,17 @@ def test_executor_wire_cli_purge_course():
     assert report["vault_records_purged"] == 1, report
     assert report["pending_envelopes_removed"] == 1, report
     assert report["briefs_removed"] == 1, report
-    assert os.listdir(pend) == [] and os.listdir(brief) == []
+    assert report["inflight_envelopes_skipped"] == 1, report
+    assert os.listdir(pend) == [unknown_op + ".json"]
+    assert os.listdir(brief) == [unknown_op + "-request.txt"]
+    from dispatch import executor as ex
+    assert ex.claim_is_live(unknown_op), "purge released an unknown write"
+    try:
+        ex.claim_op_id(unknown_op, "dispatch", "synthetic.purge", "write", "digest")
+    except ex.DuplicateOpId:
+        pass
+    else:
+        raise AssertionError("purge allowed an unresolved write to run again")
     reopened = LearnerVault(svault)
     assert reopened.identities_for_scope(scope101) == []
     assert len(reopened.identities_for_scope(scope102)) == 1, \

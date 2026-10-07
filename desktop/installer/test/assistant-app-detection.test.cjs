@@ -190,6 +190,7 @@ test("a stalled Windows command shim probe is bounded and reclaims the complete 
   assert.equal(available, false);
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], String.raw`C:\Windows\System32\cmd.exe`);
+  assert.equal(calls[0][2].windowsVerbatimArguments, true);
   assert.equal(calls[0][1].some((value) => value.includes(shim)), false);
   assert.equal(calls[0][2].env[WINDOWS_COMMAND_SHIM_ENV], shim);
   assert.deepEqual(terminations, [[command, false], [command, true]]);

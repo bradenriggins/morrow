@@ -207,8 +207,8 @@ def normalize_tenant_base(base_url):
         raise ValueError(
             "CANVAS_BASE must not point at a non-routable address "
             "(loopback, link-local, or private)")
-    confirmed = os.environ.get(
-        "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED", "").strip().lower()
+    confirmed = (setting(
+        "CANVAS_BASE_CUSTOM_DOMAIN_CONFIRMED") or "").strip().lower()
     if confirmed and not host.endswith(".instructure.com"):
         confirmation = urllib.parse.urlsplit("https://" + confirmed)
         if (confirmation.netloc != confirmed or confirmation.path

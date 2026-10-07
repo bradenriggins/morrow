@@ -67,6 +67,19 @@ def _flat(rel):
     return " ".join(_read(rel).split())
 
 
+def test_deletion_docs_state_unresolved_recovery_retention():
+    for rel in ("SKILL.md", "privacy/FERPA_POLICY.md"):
+        text = _flat(rel)
+        assert ("Unresolved recovery evidence remains" in text
+                or "preserves unresolved recovery evidence" in text)
+        assert "raw provider payloads" in text
+        assert "inflight_envelopes_skipped" in text
+        assert "Vault deletion stops label lookup" in text
+        assert "uninstall" in text
+        assert "nothing learner-bearing survives them" not in text
+        assert "command also purges all browser transient state" not in text
+
+
 def test_docs_state_the_by_name_limits_honestly():
     """Final muse audit M5: "the agent only ever learns the names you
     type" was not true. A lookup with a guessed name confirms that a

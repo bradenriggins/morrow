@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { readExactTrustFile } from "./exact-trust-file.mjs";
+import { isSignedPackageSigning, verifySignedUpdateArtifacts, verifySignedWindowsArtifact } from "./signed-desktop-signing.mjs";
 import { isUnsignedPackageSigning } from "./unsigned-desktop-signing.mjs";
 
 export const WINDOWS_SMOKE_OBSERVATION_SCHEMA = "morrow.desktop-windows-smoke.v1";
@@ -102,12 +103,12 @@ export function createWindowsSmokeBindingFromPackage({ runId, sourceCommit, pack
     || receipt.source?.dirty !== false
     || receipt.payload?.releaseGraph?.schema !== "morrow.desktop-packager-admission.v1"
     || !SHA256_PATTERN.test(receipt.payload?.releaseGraph?.sha256 || "")
-    || !isUnsignedPackageSigning(receipt.signing, "win32-x64", { artifactSignature: "authenticode_absent" })
+    || (!isUnsignedPackageSigning(receipt.signing, "win32-x64", { artifactSignature: "authenticode_absent" }) && !isSignedPackageSigning(receipt.signing, "win32-x64"))
     || !artifact
     || artifact.name !== expectedName
     || !SHA256_PATTERN.test(artifact.sha256 || "")
     || basename(installer) !== artifact.name) {
-    throw new Error("Windows package receipt is not the expected unsigned release graph.");
+    throw new Error("Windows package receipt is not the expected verified release graph.");
   }
   const installerBytes = readExactTrustFile(installer, {
     label: "Windows installer",
@@ -115,6 +116,10 @@ export function createWindowsSmokeBindingFromPackage({ runId, sourceCommit, pack
   });
   const installerSha256 = sha256(installerBytes);
   if (installerSha256 !== artifact.sha256) throw new Error("Retained Windows installer changed after packaging.");
+  if (isSignedPackageSigning(receipt.signing, "win32-x64")) {
+    verifySignedUpdateArtifacts(receipt, dirname(packageReceipt));
+    verifySignedWindowsArtifact(installer);
+  }
   return createWindowsSmokeBinding({
     runId: requestedRun,
     sourceCommit: requestedSource,

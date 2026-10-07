@@ -204,7 +204,7 @@ check("report contract lines intact",
 # The TTL sweeper is best-effort ("never raises"): a stale envelope
 # carrying a non-UUID op_id (cannot occur in production post-fix, but
 # the sweeper reads op_id from disk) must not raise; the envelope is
-# still removed, its brief files are left for the next pass.
+# preserved because an invalid identity cannot prove settlement.
 weird = os.path.join(PENDING_DIR, "weird-op.json")
 import time as _time
 from datetime import datetime, timezone
@@ -218,7 +218,7 @@ os.utime(weird, (_old, _old))
 try:
     removed = bb.sweep_stale_pending(PENDING_DIR)
     check("sweeper tolerates a non-UUID stale envelope",
-          removed >= 1 and not os.path.exists(weird))
+          removed == 0 and os.path.exists(weird))
 except Exception as e:  # noqa: BLE001
     check("sweeper tolerates a non-UUID stale envelope", False, repr(e))
 

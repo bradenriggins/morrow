@@ -62,15 +62,17 @@ async function main() {
       }
       return rule === path || (rule.endsWith("/") && path.startsWith(rule));
     };
-    const paths = execFileSync("git", ["-C", option.root, "ls-tree", "-r", "--name-only", "HEAD"], { encoding: "utf8" })
+    const gitRoot = execFileSync("git", ["-C", option.root, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    const sourcePrefix = execFileSync("git", ["-C", option.root, "rev-parse", "--show-prefix"], { encoding: "utf8" }).trim();
+    const paths = execFileSync("git", ["-C", gitRoot, "ls-tree", "-r", "--name-only", "HEAD"], { encoding: "utf8" })
       .split("\n")
-      .map((path) => path.trim())
-      .filter(Boolean)
+      .filter((path) => path && (!sourcePrefix || path.startsWith(sourcePrefix)))
+      .map((path) => path.slice(sourcePrefix.length))
       .filter((path) => profile.include.some((rule) => matches(path, rule)))
       .filter((path) => !(profile.exclude || []).some((rule) => matches(path, rule)));
     files = paths.map((path) => ({
       path,
-      bytes: execFileSync("git", ["-C", option.root, "show", `HEAD:${path}`], { maxBuffer: 64 * 1024 * 1024 }),
+      bytes: execFileSync("git", ["-C", gitRoot, "show", `HEAD:${sourcePrefix}${path}`], { maxBuffer: 64 * 1024 * 1024 }),
     }));
   }
   validatePublicAssemblyInputs(manifest, files);

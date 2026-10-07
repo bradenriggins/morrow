@@ -1,5 +1,6 @@
 const { execFileSync } = require("node:child_process");
 const path = require("node:path");
+const { finalizeSignedDmg } = require("./signed-dmg.cjs");
 const { PACKAGED_BRIDGE_DELIVERY } = require("./shared/bridge-delivery.cjs");
 const {
   PACKAGER_ADMISSION_ENV,
@@ -43,6 +44,12 @@ const mac = {
   ]
 };
 if (!signedRelease) mac.identity = null;
+else {
+  mac.hardenedRuntime = true;
+  mac.notarize = true;
+  // Keep the upstream Developer ID signature and reviewed hash of bundled Node.
+  mac.signIgnore = ["/Resources/MorrowPayload/runtime/node/bin/node$"];
+}
 const win = {
   icon: "assets/morrow.ico",
   target: [{ target: "nsis", arch: ["x64"] }]
@@ -98,6 +105,7 @@ async function verifyPayloadAndAdHocSign(context) {
 verifyPayloadAndAdHocSign.darwinSigningHostError = darwinSigningHostError;
 
 module.exports = {
+  artifactBuildCompleted: (event) => finalizeSignedDmg(event, { signedRelease }),
   afterPack: verifyPayloadAndAdHocSign,
   appId: "app.meetmorrow.installer",
   productName: "Morrow Desktop",
@@ -133,6 +141,7 @@ module.exports = {
   publish: signedRelease ? [electronBuilderPublish()] : [],
   mac,
   dmg: {
+    sign: signedRelease,
     title: "Morrow Desktop",
     background: "assets/dmg-background.png",
     icon: "assets/morrow.icns",

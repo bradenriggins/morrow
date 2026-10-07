@@ -133,7 +133,9 @@ test("the hard-coded Windows assistant identity names the inventory workflow tha
 test("the release workflow is dispatch-only and builds both desktop platforms", () => {
   const trigger = /\non:\n((?: {2}.*\n|\n)*)/.exec(release);
   assert.ok(trigger, `${releasePath} must declare its triggers`);
-  assert.equal(trigger[1].trim(), "workflow_dispatch:", "desktop packaging runs when a person asks for it");
+  assert.match(trigger[1], /^ {2}workflow_dispatch:\n/m, "desktop packaging runs when a person asks for it");
+  assert.match(trigger[1], /signed_mac:[\s\S]*default: false/);
+  assert.match(trigger[1], /signed_windows:[\s\S]*default: false/);
   const releaseJobs = jobs(release);
   assert.deepEqual([...releaseJobs.keys()].sort(), ["macos-installer", "windows-installer"]);
   assert.match(releaseJobs.get("windows-installer"), /^ {4}runs-on: windows-2022$/m);
@@ -501,5 +503,21 @@ test("CI and installer QA bootstrap the pinned package manager directly", () => 
     assert.ok(versions.length > 0);
     assert.ok(versions.every((version) => version === pinned), `${path} must bootstrap pnpm ${pinned}`);
     assert.doesNotMatch(workflow, /--ignore-workspace install/);
+  }
+});
+
+
+test("signed packaging is explicit, keeps credentials, and precedes the existing native smoke", () => {
+  const releaseJobs = jobs(release);
+  for (const [id, input, target] of [["macos-installer", "signed_mac", "darwin-arm64"], ["windows-installer", "signed_windows", "win32-x64"]]) {
+    const job = releaseJobs.get(id);
+    assert.ok(job.includes("if: ${{ inputs." + input + " }}"));
+    assert.ok(job.includes("if: ${{ !inputs." + input + " }}"));
+    assert.ok(job.includes(`--target ${target} --signed-release`));
+    const signed = job.split(/^(?= {6}- )/m).find((step) => step.includes(`--target ${target} --signed-release`));
+    assert.match(signed, /secrets\.MORROW_/);
+    assert.doesNotMatch(signed, /unset CSC_LINK|Remove-Item Env:WIN_CSC_LINK/);
+    assert.ok(job.indexOf(`--target ${target} --signed-release`) < job.indexOf(`scripts/test/desktop-${target === "darwin-arm64" ? "mac" : "windows"}-smoke.mjs`));
+    assert.match(signed, /latest(?:-mac)?\.yml/);
   }
 });

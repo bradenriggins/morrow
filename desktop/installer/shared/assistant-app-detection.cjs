@@ -74,6 +74,8 @@ async function probeWindowsCommandShim(candidate, options = {}) {
     spawnProcess: (executable, argumentsValue, spawnOptions) => spawnProcess(executable, argumentsValue, {
       ...spawnOptions,
       env: invocation.environment,
+      // cmd.exe parses this quoted command string; Node must not escape it again.
+      windowsVerbatimArguments: true,
     }),
     ...(typeof options.terminateTree === "function" ? { terminateTree: options.terminateTree } : {}),
   });

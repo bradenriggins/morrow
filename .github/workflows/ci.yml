@@ -88,6 +88,16 @@ jobs:
       # pnpm check already runs the desktop installer suites (pnpm test ends with pnpm test:desktop).
       - name: Browser integration harnesses
         run: xvfb-run -a node scripts/run-browser-harnesses.mjs
+      - name: Retain browser integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-harness-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            desktop/output/browser-harness/receipt.json
+            desktop/output/browser-harness/*.log
+          retention-days: 14
+          if-no-files-found: warn
 
   # Morrow Desktop ships for Windows and for macOS on Apple silicon, never
   # Linux. These jobs run the installer contracts, and every desktop test that
@@ -113,6 +123,17 @@ jobs:
       - name: Install desktop installer dependencies
         run: pnpm --dir installer install --frozen-lockfile
       - run: pnpm build
+      - name: Detect official Codex CLI on Windows without a Store app
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $cliPrefix = Join-Path $env:RUNNER_TEMP 'morrow-codex-cli-only'
+          node scripts/test/windows-codex-cli-native.cjs absent $cliPrefix 0.160.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm install --prefix $cliPrefix --no-save --no-package-lock --ignore-scripts --no-audit --no-fund --registry https://registry.npmjs.org @openai/codex@0.160.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/test/windows-codex-cli-native.cjs installed $cliPrefix 0.160.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Start pnpm with no shell, as the release packager does
         run: node --test scripts/test/pnpm-command.test.mjs
       - name: Check out the committed bytes the release packager seals and reads

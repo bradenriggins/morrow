@@ -8,9 +8,23 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const maxBuffer = 64 * 1024 * 1024;
+const gitRoot = execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], {
+  encoding: "utf8",
+}).trim();
+const sourcePrefix = execFileSync("git", ["-C", root, "rev-parse", "--show-prefix"], {
+  encoding: "utf8",
+}).trim().replace(/\/$/, "");
+const gitPath = (path) => sourcePrefix ? `${sourcePrefix}/${path}` : path;
+
+function sourcePaths() {
+  return git(["ls-tree", "-r", "--name-only", "HEAD"])
+    .split("\n")
+    .filter((path) => path && (!sourcePrefix || path.startsWith(`${sourcePrefix}/`)))
+    .map((path) => sourcePrefix ? path.slice(sourcePrefix.length + 1) : path);
+}
 
 function git(args, encoding = "utf8") {
-  return execFileSync("git", ["-C", root, ...args], {
+  return execFileSync("git", ["-C", gitRoot, ...args], {
     encoding,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -21,7 +35,7 @@ function sha256(bytes) {
 }
 
 function tracked(path) {
-  return execFileSync("git", ["-C", root, "show", `HEAD:${path}`], {
+  return execFileSync("git", ["-C", gitRoot, "show", `HEAD:${gitPath(path)}`], {
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer,
   });
@@ -79,10 +93,7 @@ const profiles = JSON.parse(readFileSync(resolve(root, "config/release-profiles.
 const profile = profiles.profiles?.["public-canvas"];
 if (!profile || profile.visibility !== "public") throw new Error("public-canvas release profile is invalid");
 
-const files = git(["ls-tree", "-r", "--name-only", "HEAD"])
-  .split("\n")
-  .map((path) => path.trim())
-  .filter(Boolean)
+const files = sourcePaths()
   .filter((path) => profile.include.some((rule) => matches(path, rule)))
   .filter((path) => !(profile.exclude || []).some((rule) => matches(path, rule)))
   .sort()

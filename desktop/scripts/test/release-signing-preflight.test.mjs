@@ -392,9 +392,9 @@ test("clearing a signing variable in a shell step is not a repository secret ref
     platform: "darwin",
     identities: { inspected: true, developerIdApplication: 0 },
     environment: {},
-    workflow: releaseWorkflow
+    workflow: releaseWorkflow.replace(/\$\{\{ secrets\.[A-Z0-9_]+ \}\}/g, "")
   });
-  assert.deepEqual(receipt.repository.referencedSecrets, referencedSecretNames(releaseWorkflow));
+  assert.deepEqual(receipt.repository.referencedSecrets, []);
   assert.equal(receipt.repository.referencesSigningSecret, false, `${workflowPath} names signing variables only to clear them, which is not a secret reference`);
   assert.equal(receipt.repository.present, true);
   assert.deepEqual(receipt.missing, [
@@ -464,4 +464,16 @@ test("the command takes no options and says so instead of reporting a partial an
 test("pnpm release:signing:preflight runs this script", () => {
   const scripts = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts;
   assert.equal(scripts["release:signing:preflight"], "node scripts/release-signing-preflight.mjs");
+});
+
+
+test("the explicit signed package graph route has complete workflow signing bindings", () => {
+  const receipt = buildReleaseSigningPreflight({
+    platform: "darwin",
+    identities: { inspected: true, developerIdApplication: 0 },
+    environment: SECRET_ENVIRONMENT,
+    workflow: releaseWorkflow
+  });
+  assert.equal(receipt.publicReleaseBlocked, false);
+  assert.equal(receipt.repository.referencesSigningSecret, true);
 });

@@ -132,9 +132,11 @@ launcher = None
 try:
     with tempfile.TemporaryDirectory(prefix="morrow-moodle-browser-e2e-") as scratch:
         os.environ["MOODLE_BASE_ALLOW_HTTP"] = "1"
+        os.environ["CANVAS_BASE_ALLOW_HTTP"] = "1"
         os.environ["LOGIN_HELPER_OWN_BROWSER"] = "1"
+        # The address-space override applies only to this disposable fixture.
         launcher = ChromiumLauncher(binary, str(Path(scratch) / "profile"), cdp_port=19387,
-                                    extra_args=["--disable-features=LocalNetworkAccessChecks"])
+                                    extra_args=["--ip-address-space-overrides=127.0.0.1:%d=public" % server.server_port])
         launcher.start()
         other = launcher.cdp.new_tab("about:blank")
         launcher.cdp.call(other, "Page.navigate", {"url": base.rsplit('/lms', 1)[0] + "/other/"}, timeout=10)

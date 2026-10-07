@@ -42,7 +42,7 @@ export const BROWSER_HARNESS_IDS = Object.freeze([
  * The harnesses a release candidate cannot be promoted without. `desktop_windows_smoke` is not one
  * of them: it runs separately on a native Windows host with the exact installer and package
  * receipt. This receipt records what happened on the current host. It still blocks if it is
- * recorded as run and did not pass. GitHub Actions is disabled for this repository.
+ * recorded as run and did not pass. The desktop installer QA workflow runs it on native Windows.
  */
 export const REQUIRED_BROWSER_HARNESS_PASSES = Object.freeze([
   "canvas_connector_browser",
@@ -115,16 +115,25 @@ function writeJson(path, value) {
   writeFileSync(path, stableJson(value), { mode: 0o600 });
 }
 
+function sourceGitContext(root) {
+  return {
+    gitRoot: git(root, ["rev-parse", "--show-toplevel"]).trim(),
+    sourcePrefix: git(root, ["rev-parse", "--show-prefix"]).trim(),
+  };
+}
+
 function trackedFiles(root) {
-  return git(root, ["ls-tree", "-r", "--name-only", "HEAD"])
+  const { gitRoot, sourcePrefix } = sourceGitContext(root);
+  return git(gitRoot, ["ls-tree", "-r", "--name-only", "HEAD"])
     .split("\n")
-    .map((value) => value.trim())
-    .filter(Boolean)
+    .filter((path) => path && (!sourcePrefix || path.startsWith(sourcePrefix)))
+    .map((path) => path.slice(sourcePrefix.length))
     .sort();
 }
 
 function trackedBuffer(root, path) {
-  return execFileSync("git", ["-C", root, "show", `HEAD:${path}`], {
+  const { gitRoot, sourcePrefix } = sourceGitContext(root);
+  return execFileSync("git", ["-C", gitRoot, "show", `HEAD:${sourcePrefix}${path}`], {
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -536,7 +545,7 @@ export function validateSourceOriginLedger({
     .filter((path) => !files.some((file) => file.path === path))
     .sort();
   let candidateCommitMatches = ledger.candidateCommit === commit;
-  if (!candidateCommitMatches && existsSync(resolve(root, ".git")) && typeof ledger.candidateCommit === "string" && /^[0-9a-f]{40,64}$/i.test(ledger.candidateCommit)) {
+  if (!candidateCommitMatches && typeof ledger.candidateCommit === "string" && /^[0-9a-f]{40,64}$/i.test(ledger.candidateCommit)) {
     try {
       git(root, ["merge-base", "--is-ancestor", ledger.candidateCommit, commit]);
       const changed = git(root, ["diff", "--name-only", `${ledger.candidateCommit}..${commit}`, "--", ...files.map((file) => file.path)])
@@ -889,15 +898,16 @@ function candidateName(profile, version) {
 function independentCandidateRebuild({ root, profileName, commit, tree, expectedDigest }) {
   const scratch = mkdtempSync(resolve(tmpdir(), "morrow-release-rebuild-"));
   const checkout = resolve(scratch, "source");
+  const { gitRoot, sourcePrefix } = sourceGitContext(root);
   try {
-    execFileSync("git", ["clone", "--quiet", "--no-local", root, checkout], {
+    execFileSync("git", ["clone", "--quiet", "--no-local", gitRoot, checkout], {
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 64 * 1024 * 1024,
     });
     execFileSync("git", ["-C", checkout, "checkout", "--quiet", "--detach", commit], {
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const raw = execFileSync(process.execPath, [resolve(HERE, "../verify-release-rebuild.mjs"), "--root", checkout, "--profile", profileName], {
+    const raw = execFileSync(process.execPath, [resolve(HERE, "../verify-release-rebuild.mjs"), "--root", resolve(checkout, sourcePrefix), "--profile", profileName], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 64 * 1024 * 1024,
@@ -1467,7 +1477,7 @@ export function conformanceReport({ root = DEFAULT_ROOT, profileName = "private-
   const profile = loadProfile(root, profileName);
   const lockTracked = (() => {
     try {
-      git(root, ["cat-file", "-e", "HEAD:pnpm-lock.yaml"]);
+      trackedBuffer(root, "pnpm-lock.yaml");
       return true;
     } catch {
       return false;
