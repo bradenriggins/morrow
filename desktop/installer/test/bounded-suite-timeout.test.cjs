@@ -8,7 +8,7 @@ const test = require("node:test");
 
 const runnerPath = path.join(__dirname, "run-bounded-tests.cjs");
 
-test("the bounded suite runner cancels one file with --test-timeout so it cannot hold the suite budget", () => {
+test("the bounded suite runner applies --test-timeout to each test so a hung test cannot hold the suite budget", () => {
   const runner = fs.readFileSync(runnerPath, "utf8");
   assert.match(runner, /const FILE_TIMEOUT_MS = process\.platform === "win32" \? 600_000 : 60_000;/);
   assert.match(runner, /const SUITE_TIMEOUT_MS = process\.platform === "win32" \? 900_000 : 300_000;/);

@@ -129,6 +129,61 @@ test("Windows child reclaim force-kills the process tree after the SIGTERM grace
   assert.deepEqual(trees, [{ pid: 4242, force: true }]);
 });
 
+for (const platform of ["linux", "win32"]) {
+  test(`child reclaim does not signal a live PID with no recorded start on ${platform}`, async () => {
+    const signals = [];
+    const trees = [];
+    const reclaim = createChildProcessReclaimer({
+      platform,
+      processAlive: () => true,
+      processMatchesExactStart: async () => { throw new Error("must not query identity without a recorded start"); },
+      signalProcess: (_pid, signal) => { signals.push(signal); },
+      terminatePidTree: (pid, force) => { trees.push({ pid, force }); },
+      pause: async () => {},
+      now: () => 0,
+    });
+    assert.equal(await reclaim(4242, undefined, 100), false);
+    assert.deepEqual(signals, []);
+    assert.deepEqual(trees, []);
+  });
+
+  test(`child reclaim does not signal a live PID whose identity is unknown on ${platform}`, async () => {
+    const signals = [];
+    const trees = [];
+    const reclaim = createChildProcessReclaimer({
+      platform,
+      processAlive: () => true,
+      processMatchesExactStart: async () => null,
+      signalProcess: (_pid, signal) => { signals.push(signal); },
+      terminatePidTree: (pid, force) => { trees.push({ pid, force }); },
+      pause: async () => {},
+      now: () => 0,
+    });
+    assert.equal(await reclaim(4242, "2026-09-14T00:00:00.000Z", 100), false);
+    assert.deepEqual(signals, []);
+    assert.deepEqual(trees, []);
+  });
+
+  test(`child reclaim does not force-kill a live PID whose identity is unknown after SIGTERM on ${platform}`, async () => {
+    const signals = [];
+    const trees = [];
+    let clock = 0;
+    const identities = [true, null];
+    const reclaim = createChildProcessReclaimer({
+      platform,
+      processAlive: () => true,
+      processMatchesExactStart: async () => identities.shift() ?? null,
+      signalProcess: (_pid, signal) => { signals.push(signal); },
+      terminatePidTree: (pid, force) => { trees.push({ pid, force }); },
+      pause: async (milliseconds) => { clock += milliseconds; },
+      now: () => clock,
+    });
+    assert.equal(await reclaim(4242, "2026-09-14T00:00:00.000Z", 100), false);
+    assert.deepEqual(signals, ["SIGTERM"]);
+    assert.deepEqual(trees, []);
+  });
+}
+
 function processIsAlive(pid) {
   // Every process these tests spawn runs as this user, so a live pid this
   // user cannot signal belongs to someone else and is never a monitor child.

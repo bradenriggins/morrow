@@ -10,8 +10,8 @@ const path = require("node:path");
 const FILE_TIMEOUT_MS = process.platform === "win32" ? 600_000 : 60_000;
 const SUITE_TIMEOUT_MS = process.platform === "win32" ? 900_000 : 300_000;
 const DEPENDENCY_TIMEOUT_MS = 30_000;
-// Suite mode runs every file in one process tree. Node's --test-timeout
-// cancels one file worker, so a hung test cannot hold the suite bound.
+// Node's --test-timeout applies to each test, so a hung test cannot hold
+// the suite bound.
 
 function usage() {
   return "Usage: node test/run-bounded-tests.cjs --per-file|--suite";

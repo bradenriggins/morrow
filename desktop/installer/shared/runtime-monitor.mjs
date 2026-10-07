@@ -205,16 +205,23 @@ function processAlive(pid) {
 }
 
 /**
- * True when this PID is gone, or when a later process reused it.
- * A failed identity query is not success while the PID still runs, and is
- * success when the PID left during that query.
+ * Identity of one live PID against the recorded start instant.
+ * gone: the PID left, including during the query. reused: a later process
+ * holds the PID. match: the recorded child is still there. unknown: no
+ * recorded start, or the query could not say; fail closed and send no signal.
  */
-async function pidTreeReclaimed(pid, recordedStartedAt, alive, matches) {
-  if (!alive(pid)) return true;
-  if (!recordedStartedAt) return false;
+async function childIdentity(pid, recordedStartedAt, alive, matches) {
+  if (!alive(pid)) return "gone";
+  if (!recordedStartedAt) return "unknown";
   const identity = await matches(pid, recordedStartedAt);
-  if (!alive(pid)) return true;
-  return identity === false;
+  if (!alive(pid)) return "gone";
+  if (identity === true) return "match";
+  if (identity === false) return "reused";
+  return "unknown";
+}
+
+function identityReclaimed(status) {
+  return status === "gone" || status === "reused";
 }
 
 /** Builds the identity-bound child reclaimer. Dependencies are injectable for the PID-reuse regression. */
@@ -228,14 +235,19 @@ export function createChildProcessReclaimer(dependencies = {}) {
   const now = dependencies.now || Date.now;
   return async (pid, recordedStartedAt, timeoutMs) => {
     const deadline = now() + timeoutMs;
-    if (!validPid(pid) || await pidTreeReclaimed(pid, recordedStartedAt, alive, matches)) return true;
+    if (!validPid(pid)) return true;
+    const initial = await childIdentity(pid, recordedStartedAt, alive, matches);
+    if (identityReclaimed(initial)) return true;
+    if (initial !== "match") return false;
     const signalDeadline = Math.min(deadline, now() + Math.floor(timeoutMs / 2));
     try { signal(pid, "SIGTERM"); } catch { if (!alive(pid)) return true; }
     while (now() < signalDeadline) {
       if (!alive(pid)) return true;
       await wait(CHILD_RECLAIM_POLL_MS);
     }
-    if (await pidTreeReclaimed(pid, recordedStartedAt, alive, matches)) return true;
+    const afterTerm = await childIdentity(pid, recordedStartedAt, alive, matches);
+    if (identityReclaimed(afterTerm)) return true;
+    if (afterTerm !== "match") return false;
     try {
       if (platform === "win32") killTree(pid, true);
       else signal(pid, "SIGKILL");
@@ -244,7 +256,7 @@ export function createChildProcessReclaimer(dependencies = {}) {
       if (!alive(pid)) return true;
       await wait(CHILD_RECLAIM_POLL_MS);
     }
-    return await pidTreeReclaimed(pid, recordedStartedAt, alive, matches);
+    return identityReclaimed(await childIdentity(pid, recordedStartedAt, alive, matches));
   };
 }
 

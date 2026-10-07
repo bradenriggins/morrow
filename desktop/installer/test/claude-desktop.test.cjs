@@ -41,17 +41,25 @@ async function fixture(t, options = {}) {
   const beforeRemove = [];
   const serverPidsPath = path.join(root, "server-processes.txt");
   t.after(async () => {
-    for (const stop of beforeRemove) await stop();
+    let stopError;
+    for (const stop of beforeRemove) {
+      try { await stop(); } catch (error) { stopError ??= error; }
+    }
     const serverPids = (await fs.readFile(serverPidsPath, "utf8").catch((error) => {
       if (error.code === "ENOENT") return "";
       throw error;
     })).trim().split(/\s+/u).filter(Boolean).map(Number);
-    await waitFor(() => serverPids.every((pid) => !processAlive(pid)));
+    try {
+      await waitFor(() => serverPids.every((pid) => !processAlive(pid)));
+    } catch (error) { stopError ??= error; }
     // Windows can release an exited image's file handle just after process death.
     // Only after proving every owned server ended, allow a bounded filesystem grace.
     // Persistent cleanup errors still fail the fixture; no live process is ignored.
-    await fs.rm(root, { recursive: true, force: true,
-      maxRetries: process.platform === "win32" ? 5 : 0, retryDelay: 100 });
+    try {
+      await fs.rm(root, { recursive: true, force: true,
+        maxRetries: process.platform === "win32" ? 5 : 0, retryDelay: 100 });
+    } catch (error) { stopError ??= error; }
+    if (stopError) throw stopError;
   });
   const workspace = path.join(root, "Materials with spaces");
   const state = path.join(root, "State");
@@ -163,6 +171,7 @@ async function waitForClose(child, closed, timeoutMs) {
       closed,
       new Promise((resolve) => setTimeout(resolve, LAUNCHER_FORCE_MS)),
     ]);
+    assert.fail(`launcher did not exit within ${timeoutMs} ms after stdin close; force-stopped`);
   }
 }
 
@@ -553,6 +562,20 @@ async function closeLauncher(child) {
   try { child.stdin.end(); } catch {}
   await waitForClose(child, stopped, LAUNCHER_STOP_MS);
 }
+
+test("a launcher that ignores stdin close makes waitForClose reject inside the bound", async (t) => {
+  const child = spawn(process.execPath, ["-e", "process.stdin.resume(); setInterval(() => {}, 1000)"], {
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  const closed = once(child, "close");
+  closed.catch(() => {});
+  t.after(() => { if (!processEnded(child)) forceStopLauncher(child); });
+  try { child.stdin.end(); } catch {}
+  await assert.rejects(
+    () => waitForClose(child, closed, 200),
+    { message: "launcher did not exit within 200 ms after stdin close; force-stopped" },
+  );
+});
 
 test("messages keep flowing while the Claude process proof runs, one proof at a time, and the receipt waits for its answer", async (t) => {
   const input = await fixture(t);
