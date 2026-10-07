@@ -6,6 +6,9 @@ Install `morrow-muse-connector-0.4.12.zip` from the `muse/v0.4.12`
 release and verify it with `SHA256SUMS` before unzipping, as described
 in `INSTALL.md`.
 
+- Upgrade a signed-out installation without signing in first. Restart the old helper while keeping the course address and browser profile.
+- Install with an exported course address without failing the selftests.
+- Check network access through the configured course site; do not contact example.com.
 - Keep recovery records and replay protection for changes with an unknown outcome when their approval expires. Check what the course saved before retrying.
 - Release a Moodle operation that fails before sending. Keep an operation that fails after sending unresolved until its outcome is checked.
 

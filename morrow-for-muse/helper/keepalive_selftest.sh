@@ -92,6 +92,7 @@ test_shipped() {
     # the deploy copy's skew check recycles instead of adopting. The live
     # copy predates the marker, so the extra field is harmless there.
     BODY_HEALTHY_V="{\"logged_in\": true, \"chromium_alive\": true, \"starting\": false, \"helper_version\": \"${TREE_VERSION:-unknown}\"}"
+    BODY_SIGNOUT="$(printf '%s' "${BODY_SIGNOUT}" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["helper_version"]=sys.argv[1]; print(json.dumps(d))' "${TREE_VERSION}")"
     # Runtime logs resolve under the tree state dir, never the tree
     # (install.sh's secrets gate and integrity walk read the tree).
     _ka_log_real="${KEEPALIVE_LOG}"; _srv_log_real="${SERVER_LOG}"
@@ -150,6 +151,34 @@ test_shipped() {
     t "evaluate_status: still starting -> exit 1 (never 2)" "1" "${rc}"
     status_body="${BODY_NO_STARTING}"; ( evaluate_status ); rc=$?
     t "evaluate_status: starting unknown -> exit 1 (never 2)" "1" "${rc}"
+
+    # A conclusive status from the previous release must use guarded recovery.
+    # Stub only this call so the verdict cannot pass because recovery signs out.
+    (
+      circuit_guard_recover() { log "VERSION_RECOVERY_CALLED"; return 42; }
+      for state in signed-out healthy starting unknown malformed; do
+        case "${state}" in
+          signed-out) body="${BODY_SIGNOUT}"; expected=42 ;;
+          healthy) body="${BODY_HEALTHY_V}"; expected=42 ;;
+          starting) body="${BODY_STARTING}"; expected=1 ;;
+          unknown) body="${BODY_LEGACY}"; expected=1 ;;
+          malformed) body="${BODY_MALFORMED}"; expected=1 ;;
+        esac
+        if [ "${state}" != malformed ]; then
+          body="$(printf '%s' "${body}" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["helper_version"]="0.4.11"; print(json.dumps(d))')"
+        fi
+        : > "${CASE_LOG}"
+        status_body="${body}"; ( evaluate_status ); rc=$?
+        t "evaluate_status: stale ${state} -> guarded verdict" "${expected}" "${rc}"
+        if [ "${expected}" = 42 ]; then
+          got="$(grep -c '^VERSION_RECOVERY_CALLED$' "${CASE_LOG}" || true)"
+          t "evaluate_status: stale ${state} calls guarded recovery once" "1" "${got}"
+        else
+          got="$(grep -c '^VERSION_RECOVERY_CALLED$' "${CASE_LOG}" || true)"
+          t "evaluate_status: stale ${state} does not recover on a guess" "0" "${got}"
+        fi
+      done
+    )
 
     # Dead Chromium must take the recovery path (exact log line), not exit 2.
     : > "${CASE_LOG}"

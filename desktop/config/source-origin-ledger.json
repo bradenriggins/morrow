@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "b9d425a172d4057e40422b9e362889db480d898b",
+  "candidateCommit": "c87034464b4376a32944d3a62c832d09561d6047",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -6780,14 +6780,14 @@
     },
     {
       "path": "packages/mcp-server/test/local-owner-exit-cleanup.integration.test.ts",
-      "sourceCommit": "5be753385fb028ae4de46529ac8d0d3090fbf070",
+      "sourceCommit": "c87034464b4376a32944d3a62c832d09561d6047",
       "originalPath": "packages/mcp-server/test/local-owner-exit-cleanup.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "eef6e94a71366bead5815d0802e1577dd0ecc51cc5c71ee829e68d8eb1226089"
+      "beforeDigest": "eef6e94a71366bead5815d0802e1577dd0ecc51cc5c71ee829e68d8eb1226089",
+      "afterDigest": "b4de76340c27a1f5f8d292e882922e8cb9a728f038eb29075205efa8dec1d7c8"
     },
     {
       "path": "packages/mcp-server/test/local-owner-lifecycle.integration.test.ts",
