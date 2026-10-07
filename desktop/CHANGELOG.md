@@ -2,6 +2,21 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
+## 1.0.14 (2026-10-07)
+
+### Connect Codex CLI on Windows
+
+- Setup detects Codex CLI when the Codex desktop app is absent.
+
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+
+### Technical notes
+
+- Update vulnerable dependencies and refresh the Canvas API catalog from its current authoritative input. Include the refreshed catalog in Morrow Bridge 1.0.137.
+- Add a signed release path that checks the final package before native installation tests.
+
 ## 1.0.13 (2026-10-03)
 
 ### Know where to start

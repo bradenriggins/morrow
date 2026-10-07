@@ -13,7 +13,7 @@ Morrow helps instructors, instructional designers, and course reviewers turn les
 
 Morrow Desktop runs on your computer and connects to an assistant through MCP. The app sets up ChatGPT, Claude Desktop, Claude Code, or Gemini CLI, and the source route sets up those four plus Cursor and VS Code, which the app does not set up. A selected Codex update has passed a live test-course check; each other assistant still needs its own complete live checks. See the [test record](docs/implementation/BT2-LIVE-PROOF.md).
 
-Morrow Desktop 1.0.13 includes first-use guidance and Morrow Bridge 1.0.136.
+Morrow Desktop 1.0.14 includes first-use guidance and Morrow Bridge 1.0.137.
 
 ## What a user installs
 
@@ -340,7 +340,7 @@ Client configuration contains only the local Node command, server entry path, wo
 
 ## The Morrow Desktop app
 
-Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout carries Morrow Desktop 1.0.13. Published downloads are Mac 1.0.13 and Windows 1.0.13.
+Morrow Desktop is one desktop application. It carries the Morrow MCP runtime, the Node runtime that runs it, and the Morrow Bridge files Chrome loads. `installer/electron-builder.config.cjs` builds `Morrow-<version>-mac-arm64.dmg`, a matching Mac ZIP, and `Morrow-<version>-win-x64.exe`. This checkout carries Morrow Desktop 1.0.14. Published downloads are Mac 1.0.13 and Windows 1.0.13.
 
 | System | Artifact | What has been checked |
 | --- | --- | --- |
@@ -535,4 +535,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-This checkout contains Morrow Desktop 1.0.13 with Morrow Bridge 1.0.136. Published downloads are Mac 1.0.13 and Windows 1.0.13. The exact published files passed native platform smoke before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+This checkout contains Morrow Desktop 1.0.14 with Morrow Bridge 1.0.137. Published downloads are Mac 1.0.13 and Windows 1.0.13. The exact published files passed native platform smoke before publication. No Windows 1.0.6 or 1.0.7 asset was published. Release notes are in [CHANGELOG.md](CHANGELOG.md). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.

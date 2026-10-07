@@ -10,6 +10,7 @@ import { runOwnedProcess } from "../lib/owned-process.mjs";
 import { assertDesktopRendererSmokeReceipt } from "../lib/desktop-renderer-smoke.mjs";
 import { electronAsarReleaseIdentity, readElectronAsarPackage } from "../lib/electron-asar-package.mjs";
 import { withTemporaryDirectory } from "../lib/temporary-directory.mjs";
+import { isSignedPackageSigning, verifySignedMacArtifacts, verifySignedUpdateArtifacts } from "../lib/signed-desktop-signing.mjs";
 import { isUnsignedPackageSigning } from "../lib/unsigned-desktop-signing.mjs";
 
 const MAX_OUTPUT_BYTES = 128 * 1024;
@@ -82,9 +83,9 @@ async function createMacSmokeBinding({ diskImage, packageReceipt, source, runId 
     || receipt.target !== "darwin-arm64" || receipt.source?.head !== source || receipt.source?.dirty !== false
     || receipt.payload?.releaseGraph?.schema !== "morrow.desktop-packager-admission.v1"
     || !/^[0-9a-f]{64}$/.test(receipt.payload?.releaseGraph?.sha256 || "")
-    || !isUnsignedPackageSigning(receipt.signing, "darwin-arm64")
+    || (!isUnsignedPackageSigning(receipt.signing, "darwin-arm64") && !isSignedPackageSigning(receipt.signing, "darwin-arm64"))
     || !Array.isArray(receipt.artifacts) || receipt.artifacts.length !== 2) {
-    throw new Error("The macOS smoke package receipt is not the expected unsigned release graph.");
+    throw new Error("The macOS smoke package receipt is not the expected verified release graph.");
   }
   const artifactDirectory = dirname(packageReceipt);
   const artifacts = [];
@@ -104,6 +105,10 @@ async function createMacSmokeBinding({ diskImage, packageReceipt, source, runId 
   if (names.length !== 2 || names[0] !== `${expectedBase}.dmg` || names[1] !== `${expectedBase}.zip`
     || resolve(diskImage) !== resolve(artifactDirectory, basename(diskImage))) {
     throw new Error("The macOS smoke package must retain one DMG and ZIP beside its receipt.");
+  }
+  if (isSignedPackageSigning(receipt.signing, "darwin-arm64")) {
+    verifySignedUpdateArtifacts(receipt, artifactDirectory);
+    verifySignedMacArtifacts({ diskImage, archive: join(artifactDirectory, `${expectedBase}.zip`) });
   }
   const image = artifacts.find((entry) => entry.name === basename(diskImage));
   if (!image || !image.name.endsWith(".dmg")) throw new Error("The mounted macOS disk image is not the DMG in the package receipt.");

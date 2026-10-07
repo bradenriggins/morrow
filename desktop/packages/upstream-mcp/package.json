@@ -20,11 +20,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/client": "2.1.0",
+    "@modelcontextprotocol/client": "2.2.0",
     "@morrow/contracts": "workspace:*"
   },
   "devDependencies": {
-    "@modelcontextprotocol/server": "2.1.0",
+    "@modelcontextprotocol/server": "2.2.0",
     "zod": "^4.6.5"
   }
 }

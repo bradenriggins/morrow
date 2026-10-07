@@ -65,8 +65,8 @@ const WINDOWS_SIGNATURE_STRATEGIES = Object.freeze([
 ]);
 
 const WORKFLOW_TARGET_COMMANDS = Object.freeze({
-  macos: /(?:^|\s)(?:package:mac|electron-builder\b[^\r\n]*\s--mac(?:\s|$))/,
-  windows: /(?:^|\s)(?:package:win|electron-builder\b[^\r\n]*\s--win(?:\s|$))/,
+  macos: /(?:^|\s)(?:package:mac|(?:scripts\/)?package-mcp-bundle\.mjs[^\r\n]*\s--target\s+darwin-arm64(?:\s|$)|electron-builder\b[^\r\n]*\s--mac(?:\s|$))/,
+  windows: /(?:^|\s)(?:package:win|(?:scripts\/)?package-mcp-bundle\.mjs[^\r\n]*\s--target\s+win32-x64(?:\s|$)|electron-builder\b[^\r\n]*\s--win(?:\s|$))/,
 });
 
 /** Counts `Developer ID Application` rows in a `security find-identity` listing without reading the identity string. */
@@ -85,7 +85,7 @@ export function referencedSecretNames(workflow) {
 }
 
 export function isSigningSecretName(name) {
-  return SIGNING_SECRET_NAMES.includes(name) || SIGNING_SECRET_SHAPE.test(name);
+  return SIGNING_SECRET_NAMES.some((known) => name === known || name.endsWith(`_${known}`)) || SIGNING_SECRET_SHAPE.test(name);
 }
 
 function workflowSecretBindings(value) {

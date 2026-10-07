@@ -122,16 +122,24 @@ def dispatcher(monkeypatch):
 
     class FakeLoader:
         operations = _operations()
+        definitions = {
+            WRITE_KEY: {'toolName': 'moodle_create_forum_post', 'readOnly': False,
+                        'reviewTool': 'moodle_get_course_state'},
+            READ_KEY: {'key': READ_KEY, 'toolName': 'moodle_get_course_state',
+                       'readOnly': True, 'inputSchema': {
+                           'properties': {'course_id': {}}, 'required': ['course_id']}},
+        }
 
     disp.loader = FakeLoader()
-    monkeypatch.setattr(md, 'moodle_source_history_available', lambda name: True)
+    monkeypatch.setattr(md, 'moodle_source_history_available', lambda name, data_class=None: True)
     monkeypatch.setattr(md.MoodleDispatcher, '_binding',
                         lambda self, course_id: _binding(course_id))
     monkeypatch.setattr(md.MoodleDispatcher, '_boundary',
                         lambda self, binding: PassthroughBoundary())
     monkeypatch.setattr(md.MoodleDispatcher, '_private_read',
                         lambda self, key, args, binding, mode='execute': {
-                            'ok': True, 'data': {'id': 7, 'name': 'Bio 101'}})
+                            'ok': True, 'snapshot_digest': DIGEST,
+                            'data': {'id': 7, 'name': 'Bio 101'}})
     monkeypatch.setattr(md.MoodleDispatcher, '_invoke',
                         lambda self, key, request: {
                             'ok': True, 'data': {'id': 7, 'name': 'Bio 101'}})
@@ -194,6 +202,10 @@ def test_plan_digest_mismatch_refuses_before_send(hermetic, dispatcher,
     plan = _frozen_plan(dispatcher, op_id, _write_args())
     changed = _write_args()
     changed['expected_digest'] = 'b' * 64
+    monkeypatch.setattr(md.MoodleDispatcher, '_private_read',
+                        lambda self, key, args, binding, mode='execute': {
+                            'ok': True, 'snapshot_digest': changed['expected_digest'],
+                            'data': {'id': 7, 'name': 'Bio 101'}})
     with pytest.raises(ex.MissingFrozenPlan, match='plan digest differs'):
         dispatcher.dispatch(WRITE_KEY, changed, op_id=op_id, plan=plan,
                             approval={'digest': 'signed-plan'})
@@ -207,9 +219,10 @@ def test_target_identity_change_refuses_before_send(hermetic, dispatcher,
     _plan_mode_admit(monkeypatch)
     op_id = str(uuid.uuid4())
     plan = _frozen_plan(dispatcher, op_id, _write_args())
-    monkeypatch.setattr(md.MoodleDispatcher, '_invoke',
-                        lambda self, key, request: {
-                            'ok': True, 'data': {'id': 7, 'name': 'Renamed'}})
+    monkeypatch.setattr(md.MoodleDispatcher, '_private_read',
+                        lambda self, key, args, binding, mode='execute': {
+                            'ok': True, 'snapshot_digest': DIGEST,
+                            'data': {'id': 7, 'name': 'Renamed'}})
     with pytest.raises(ex.TargetIdentityMismatch):
         dispatcher.dispatch(WRITE_KEY, _write_args(), op_id=op_id, plan=plan,
                             approval={'digest': 'signed-plan'})
@@ -306,6 +319,44 @@ def test_presend_refusal_releases_claim_for_retry(hermetic, dispatcher,
     out = dispatcher.dispatch(WRITE_KEY, _write_args(), op_id=op_id,
                               plan=plan, approval={'digest': 'signed-plan'})
     assert out.get('ok') is True
+
+
+def test_read_exception_releases_claim_for_retry(hermetic, dispatcher, monkeypatch):
+    _plan_mode_admit(monkeypatch)
+    op_id = str(uuid.uuid4())
+
+    def interrupted(*args, **kwargs):
+        raise RuntimeError('read interrupted after reservation')
+
+    monkeypatch.setattr(dispatcher.transport.cdp, 'evaluate', interrupted)
+    with pytest.raises(RuntimeError, match='read interrupted'):
+        dispatcher.dispatch(READ_KEY, {'course_id': 7}, op_id=op_id)
+    assert _pending(op_id) == []
+    assert ex.find_journal_op(op_id) is None
+    monkeypatch.setattr(dispatcher.transport.cdp, 'evaluate',
+                        lambda *args, **kwargs: json.dumps({'ok': True}))
+    assert dispatcher.dispatch(READ_KEY, {'course_id': 7}, op_id=op_id)['ok'] is True
+
+
+def test_privacy_refusal_after_write_stays_reserved(hermetic, dispatcher, monkeypatch):
+    _plan_mode_admit(monkeypatch)
+    op_id = str(uuid.uuid4())
+    plan = _frozen_plan(dispatcher, op_id, _write_args())
+
+    class RefusingBoundary:
+        def invoke(self, tool_name, args, meta, handler):
+            handler(dict(args))
+            return {'isError': True}
+
+    monkeypatch.setattr(md.MoodleDispatcher, '_boundary',
+                        lambda self, binding: RefusingBoundary())
+    result = dispatcher.dispatch(WRITE_KEY, _write_args(), op_id=op_id,
+                                 plan=plan, approval={'digest': 'signed-plan'})
+    assert result['ok'] is False
+    assert ex.find_journal_op(op_id)['uncertain'] is True
+    with pytest.raises(ex.DuplicateOpId):
+        dispatcher.dispatch(WRITE_KEY, _write_args(), op_id=op_id,
+                            plan=plan, approval={'digest': 'signed-plan'})
 
 
 def test_burn_refusal_releases_claim(hermetic, dispatcher, monkeypatch):

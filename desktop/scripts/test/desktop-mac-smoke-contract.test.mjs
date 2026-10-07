@@ -116,7 +116,7 @@ test("macOS smoke evidence binds the retained package graph, DMG, ZIP, source, a
     packageReceipt,
     source: "d".repeat(40),
     runId: "b".repeat(32),
-  }), /not the expected unsigned release graph/);
+  }), /not the expected verified release graph/);
 });
 
 /**
@@ -167,7 +167,7 @@ test("macOS smoke binds the unsigned release build a maintainer publishes, and n
     { ...release, identity: "Developer ID Application" },
     { mode: "signed_public_release", target: "darwin-arm64", publicRelease: true, automaticUpdates: false },
   ]) {
-    await assert.rejects(bind(signing), /not the expected unsigned release graph/, JSON.stringify(signing));
+    await assert.rejects(bind(signing), /not the expected verified release graph/, JSON.stringify(signing));
   }
 });
 

@@ -194,7 +194,7 @@ test("Windows smoke source identity comes from the retained package receipt", (t
     sourceCommit: "b".repeat(40),
     packageReceipt,
     installer,
-  }), /not the expected unsigned release graph/);
+  }), /not the expected verified release graph/);
 });
 
 // The published Windows installer is built with --unsigned-release. docs/versioning.md runs this
@@ -239,7 +239,7 @@ test("Windows smoke binds the unsigned release installer a maintainer publishes,
     { ...release, target: "darwin-arm64" },
     { mode: "unsigned_public_release", target: "win32-x64", publicRelease: true, automaticUpdates: false },
   ]) {
-    assert.throws(() => bind(signing), /not the expected unsigned release graph/, JSON.stringify(signing));
+    assert.throws(() => bind(signing), /not the expected verified release graph/, JSON.stringify(signing));
   }
 });
 

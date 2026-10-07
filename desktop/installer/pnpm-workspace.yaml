@@ -10,13 +10,15 @@ overrides:
   brace-expansion@>=2.0.0 <2.1.7: 2.1.7
   brace-expansion@>=4.0.0 <5.0.12: 5.0.12
   fast-uri@>=3.0.0 <3.1.8: 3.1.8
+  # get 3 uses only bootstrap(); global-agent 4 removes the vulnerable sprintf-js chain.
+  '@electron/get@3.1.0>global-agent': 4.1.3
 allowBuilds:
   electron: true
   electron-winstaller: false
 # GHSA-86w9-cpqp-85rv (CVE-2026-85393): node-forge signature verification,
 # via @anthropic-ai/mcpb. No patched forge release exists and mcpb 2.1.2 is
-# latest. Morrow calls only mcpb packExtension; forge is reachable solely from
-# mcpb signMcpbFile, which Morrow never calls, and no signature is verified.
+# latest. Morrow calls only mcpb packExtension. Forge signature code lives in
+# mcpb signMcpbFile/verifyMcpbFile; Morrow calls neither function.
 auditConfig:
   ignoreGhsas:
     - GHSA-86w9-cpqp-85rv

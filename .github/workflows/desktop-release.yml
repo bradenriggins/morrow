@@ -2,6 +2,15 @@ name: desktop installer QA
 
 on:
   workflow_dispatch:
+    inputs:
+      signed_mac:
+        description: Build Developer ID signed and notarized Mac artifacts
+        type: boolean
+        default: false
+      signed_windows:
+        description: Build Authenticode signed Windows artifacts
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,6 +75,7 @@ jobs:
           "MORROW_WINDOWS_ARTIFACT_ROOT=$artifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Package unsigned Windows NSIS installer
+        if: ${{ !inputs.signed_windows }}
         shell: pwsh
         run: |
           Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
@@ -82,6 +92,25 @@ jobs:
           Copy-Item -LiteralPath $installers[0].FullName -Destination $artifactInstaller
           Copy-Item -LiteralPath (Join-Path $env:MORROW_WINDOWS_PACKAGE_OUTPUT 'receipt.json') -Destination (Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt.json')
           "MORROW_WINDOWS_INSTALLER=$artifactInstaller" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Package and verify signed Windows NSIS installer
+        if: ${{ inputs.signed_windows }}
+        shell: pwsh
+        env:
+          MORROW_SIGNED_RELEASE: "1"
+          WIN_CSC_LINK: ${{ secrets.MORROW_WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.MORROW_WIN_CSC_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.MORROW_GH_TOKEN }}
+        run: |
+          node scripts/package-mcp-bundle.mjs --target win32-x64 --signed-release --output $env:MORROW_WINDOWS_PACKAGE_OUTPUT
+          if ($LASTEXITCODE -ne 0) { throw 'Signed packaging failed.' }
+          $installers = @(Get-ChildItem $env:MORROW_WINDOWS_PACKAGE_OUTPUT -File | Where-Object { $_.Name -match '^Morrow-.+-win-x64\.exe$' })
+          if ($installers.Count -ne 1) { throw 'Expected exactly one signed installer.' }
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $env:MORROW_WINDOWS_ARTIFACT_ROOT
+          Copy-Item -LiteralPath (Join-Path $env:MORROW_WINDOWS_PACKAGE_OUTPUT 'receipt.json') -Destination (Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt.json')
+          Copy-Item -LiteralPath (Join-Path $env:MORROW_WINDOWS_PACKAGE_OUTPUT 'latest.yml') -Destination $env:MORROW_WINDOWS_ARTIFACT_ROOT
+          Get-ChildItem $env:MORROW_WINDOWS_PACKAGE_OUTPUT -Filter '*.blockmap' | Copy-Item -Destination $env:MORROW_WINDOWS_ARTIFACT_ROOT
+          "MORROW_WINDOWS_INSTALLER=$(Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT $installers[0].Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upgrade the exact published 3720 build and preserve its state
         timeout-minutes: 32
@@ -101,10 +130,12 @@ jobs:
           $installDir = Join-Path $env:RUNNER_TEMP "morrow-upgrade-install-$runId"
           $stateDir = Join-Path $env:LOCALAPPDATA "MorrowUpgradeTest-$runId"
           $receipt = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT 'upgrade.json'
+          $signatureArgs = @{}
+          if ('${{ inputs.signed_windows }}' -eq 'true') { $signatureArgs.RequireSignature = $true }
           & scripts/test/desktop-windows-upgrade.ps1 `
             -OldInstaller $oldInstaller -OldSha256 $oldSha256 -OldSourceHead $oldSourceHead `
             -NewInstaller $env:MORROW_WINDOWS_INSTALLER -NewSha256 $newSha256 -NewSourceHead $newSourceHead -NewVersion $newVersion `
-            -InstallDirectory $installDir -StateDirectory $stateDir -Receipt $receipt
+            -InstallDirectory $installDir -StateDirectory $stateDir -Receipt $receipt @signatureArgs
 
       - name: Install, start, damage and repair the sealed payload, uninstall, and check retained data
         timeout-minutes: 30
@@ -184,6 +215,7 @@ jobs:
         run: pnpm --dir installer --ignore-workspace test
 
       - name: Package the unsigned Apple silicon payload, disk image, and archive
+        if: ${{ !inputs.signed_mac }}
         shell: bash
         env:
           MORROW_SIGNED_RELEASE: "0"
@@ -211,6 +243,47 @@ jobs:
           cp "$packageOutput/receipt.json" "$artifactRoot/package-receipt.json"
           cp "${images[0]}" "$artifactRoot/$(basename "${images[0]}")"
           cp "${archives[0]}" "$artifactRoot/$(basename "${archives[0]}")"
+          runId="$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+          echo "MORROW_MAC_DISK_IMAGE=$artifactRoot/$(basename "${images[0]}")" >> "$GITHUB_ENV"
+          echo "MORROW_MAC_ARTIFACT_ROOT=$artifactRoot" >> "$GITHUB_ENV"
+          echo "MORROW_MAC_RUN_ID=$runId" >> "$GITHUB_ENV"
+
+      - name: Package and verify signed notarized Apple silicon artifacts
+        if: ${{ inputs.signed_mac }}
+        shell: bash
+        env:
+          MORROW_SIGNED_RELEASE: "1"
+          CSC_LINK: ${{ secrets.MORROW_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MORROW_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.MORROW_APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.MORROW_APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.MORROW_APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.MORROW_APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.MORROW_APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.MORROW_APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ secrets.MORROW_GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          keyFile=""
+          if [[ "$APPLE_API_KEY" == "-----BEGIN PRIVATE KEY-----"* ]]; then
+            keyFile="$RUNNER_TEMP/morrow-notary-$(uuidgen).p8"
+            (umask 077; printf '%s' "$APPLE_API_KEY" > "$keyFile")
+            export APPLE_API_KEY="$keyFile"
+          fi
+          trap 'if [ -n "$keyFile" ]; then rm -f "$keyFile"; fi' EXIT
+          artifactRoot="$PWD/artifacts/desktop-macos-private-qa"
+          if [ -e "$artifactRoot" ]; then echo "Artifact directory already exists" >&2; exit 1; fi
+          mkdir -p "$artifactRoot"
+          packageOutput="$RUNNER_TEMP/morrow-desktop-package-$(uuidgen)"
+          node scripts/package-mcp-bundle.mjs --target darwin-arm64 --signed-release --output "$packageOutput"
+          images=("$packageOutput"/Morrow-*-mac-arm64.dmg)
+          archives=("$packageOutput"/Morrow-*-mac-arm64.zip)
+          if [ "${#images[@]}" -ne 1 ] || [ "${#archives[@]}" -ne 1 ]; then echo "Expected one DMG and ZIP" >&2; exit 1; fi
+          cp "$packageOutput/receipt.json" "$artifactRoot/package-receipt.json"
+          cp "${images[0]}" "${archives[0]}" "$packageOutput/latest-mac.yml" "$artifactRoot/"
+          blockmaps=("$packageOutput"/*.blockmap)
+          if [ "${#blockmaps[@]}" -gt 0 ]; then cp "${blockmaps[@]}" "$artifactRoot/"; fi
           runId="$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
           echo "MORROW_MAC_DISK_IMAGE=$artifactRoot/$(basename "${images[0]}")" >> "$GITHUB_ENV"
           echo "MORROW_MAC_ARTIFACT_ROOT=$artifactRoot" >> "$GITHUB_ENV"

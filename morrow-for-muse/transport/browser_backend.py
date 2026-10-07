@@ -90,7 +90,7 @@ import threading
 import time
 import urllib.parse
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1280,8 +1280,7 @@ def _pending_path(pending_dir, op_id):
 # close-out; the lock is what makes "never replay an uncertain write"
 # enforceable at dispatch. A provider refusal (other 4xx) proves nothing
 # was sent, so the lock is released and the op_id stays reusable.
-# Locks are 0600 JSON, keyed by op_id, and go stale after
-# PENDING_TTL_DAYS (the sweeper is the backstop for crashed dispatches).
+# Locks are 0600 JSON, keyed by op_id. Age never settles a write.
 # --------------------------------------------------------------------------
 
 PENDING_TTL_DAYS = 7
@@ -1345,61 +1344,13 @@ def _save_locks(pending_dir, locks):
 
 
 def _lock_held_unlocked(op_id, locks):
-    """Freshness check against an already-loaded locks dict (call with
-    _locks_locked held).
-
-    W6-P2-3: wall-clock jumps must not age out conflict locks. A lock
-    dated in the future (clock rolled back) is treated as fresh. When
-    a monotonic creation mark is available and says the lock is fresh
-    while the wall clock says it is stale, the wall clock jumped
-    forward: trust monotonic and keep the lock (fail-safe for the
-    never-replay guard)."""
-    rec = locks.get(op_id)
-    if not rec:
-        return False
-    now = time.time()
-    try:
-        created = float(rec.get("created_at_ts", 0))
-    except (TypeError, ValueError):
-        return True
-    if created > now:
-        return True
-    try:
-        created_mono = float(rec.get("created_mono", 0) or 0)
-    except (TypeError, ValueError):
-        created_mono = 0
-    if created_mono > 0:
-        mono_age = time.monotonic() - created_mono
-        if 0 <= mono_age < PENDING_TTL_DAYS * 86400:
-            return True
-    return (now - created) < PENDING_TTL_DAYS * 86400
+    """An unresolved write lock remains held until explicit settlement."""
+    return op_id in locks
 
 
 def conflict_lock_held(op_id, pending_dir=None):
-    """True when op_id holds a fresh conflict lock.
-
-    W6-P2-3: same clock-jump guards as _lock_held_unlocked (future-
-    dated or monotonic-fresh locks are held even when the wall clock
-    says otherwise)."""
-    rec = _load_locks(pending_dir).get(op_id)
-    if not rec:
-        return False
-    now = time.time()
-    try:
-        created = float(rec.get("created_at_ts", 0))
-    except (TypeError, ValueError):
-        return True
-    if created > now:
-        return True
-    try:
-        created_mono = float(rec.get("created_mono", 0) or 0)
-    except (TypeError, ValueError):
-        created_mono = 0
-    if created_mono > 0:
-        mono_age = time.monotonic() - created_mono
-        if 0 <= mono_age < PENDING_TTL_DAYS * 86400:
-            return True
-    return (now - created) < PENDING_TTL_DAYS * 86400
+    """True until provider readback or person settlement releases the lock."""
+    return _lock_held_unlocked(op_id, _load_locks(pending_dir))
 
 
 def acquire_conflict_lock(op_id, entry_name, pending_dir=None):
@@ -1440,57 +1391,25 @@ def release_conflict_lock(op_id, pending_dir=None):
         pass
 
 
-# W6-P2-3: sweep circuit breaker. A forward wall-clock jump would
-# otherwise mass-age every envelope/lock into staleness; if one sweep
-# would remove more than this many, it refuses and warns instead of
-# destroying all in-flight state (the operator investigates the clock).
-_SWEEP_CIRCUIT_BREAKER = 10
-
-
 def sweep_stale_locks(pending_dir=None, max_age_days=PENDING_TTL_DAYS):
-    """Drop conflict locks older than max_age_days. Returns the count
-    removed. Best-effort; never raises.
-
-    W6-P2-3: future-dated locks (clock rolled back) are never swept,
-    and the circuit breaker refuses a mass sweep (forward clock jump).
-    """
+    """Clean old locks only after authenticated journal settlement."""
     removed = 0
-    # W5-P1-1: the filter-and-save runs under the locks flock so a
-    # concurrent acquire cannot lose its record to this sweep.
     try:
         with _locks_locked(pending_dir):
-            try:
-                locks = _load_locks(pending_dir)
-            except OSError:
-                return 0
-            now = time.time()
-            cutoff = now - max_age_days * 86400
-            candidates = []
+            locks = _load_locks(pending_dir)
+            cutoff = time.time() - max_age_days * 86400
             for op_id in list(locks):
                 try:
                     created = float(locks[op_id].get("created_at_ts", 0))
-                except (TypeError, ValueError):
+                    if created >= cutoff:
+                        continue
+                    with ex.journal_recovery_cleanup(op_id) as settled:
+                        if settled:
+                            del locks[op_id]
+                            _save_locks(pending_dir, locks)
+                            removed += 1
+                except (ex.ExecutorError, ValueError, TypeError, OSError):
                     continue
-                if created > now:
-                    continue  # clock rolled back; keep
-                if created < cutoff:
-                    candidates.append(op_id)
-            if len(candidates) > _SWEEP_CIRCUIT_BREAKER:
-                sys.stderr.write(
-                    "morrow: WARNING: sweep_stale_locks would remove %d "
-                    "conflict locks (limit %d): refusing; the system "
-                    "clock may have jumped forward. Investigate before "
-                    "sweeping.\n" % (len(candidates),
-                                      _SWEEP_CIRCUIT_BREAKER))
-                return 0
-            for op_id in candidates:
-                del locks[op_id]
-                removed += 1
-            if removed:
-                try:
-                    _save_locks(pending_dir, locks)
-                except OSError:
-                    pass
     except OSError:
         pass
     return removed
@@ -1504,8 +1423,8 @@ def sweep_stale_locks(pending_dir=None, max_age_days=PENDING_TTL_DAYS):
 # re-renders the request brief deterministically, so deleting at terminal
 # never strands a retry. Every terminal path below deletes the envelope
 # via _delete_pending_file and the briefs via _delete_brief_files;
-# sweep_stale_pending is the backstop for orphans left by crashes between
-# phases. Session-dead paths intentionally keep both for the retry.
+# sweep_stale_pending cleans settled residue after interrupted cleanup.
+# Unresolved and session-dead paths keep recovery evidence.
 # Uninstall/support wipe: purge_transient_state().
 
 
@@ -1527,15 +1446,18 @@ def _delete_brief_files(brief_dir, op_id):
     a terminal state. Terminal cleanup must never fail the op it follows;
     deletion failures are swallowed and the TTL sweeper is the backstop.
     Session-dead paths intentionally keep the brief for the retry."""
+    removed = 0
     for phase in ("request", "verify", "dupcheck"):
         try:
             path = _brief_path(brief_dir, op_id, phase)
             if os.path.exists(path):
                 os.remove(path)
+                removed += 1
         except (OSError, ex.ExecutorError):
             # Best-effort: a refused op_id (W5-P2-1: non-UUID ids fail
             # closed in the path builders) must not fail the cleanup.
             pass
+    return removed
 
 
 def _envelope_created_at(path):
@@ -1549,6 +1471,8 @@ def _envelope_created_at(path):
     try:
         with open(path, encoding="utf-8") as fh:
             envelope = json.load(fh)
+        if not isinstance(envelope, dict):
+            return None
         created = envelope.get("created_at")
         if not created:
             return None
@@ -1561,111 +1485,53 @@ def _envelope_created_at(path):
 
 
 def sweep_stale_pending(pending_dir=None, max_age_days=PENDING_TTL_DAYS):
-    """Delete pending envelopes older than max_age_days. Orphans
-    come from crashes between the request and verify phases. Each swept
-    envelope's brief files go with it (the envelope records brief_dir).
-    Best-effort: never raises. Returns the number of envelopes removed.
+    """Clean old settled envelopes; preserve unresolved recovery evidence.
 
-    W6-P2-4: staleness uses the envelope's internal created_at, never
-    the file mtime. W6-P2-3: envelopes dated in the future (clock
-    rolled back) or unparseable are never swept, and the circuit
-    breaker refuses a mass sweep (forward clock jump)."""
+    Expiry cannot establish whether a provider applied a write. Unknown,
+    absent, malformed, or unverifiable journal state keeps the envelope,
+    briefs, and replay protection. Claim-token expiry is enforced by the
+    executor independently of this retention decision.
+    """
     removed = 0
     target = pending_dir or PENDING_DIR
     try:
         names = os.listdir(target)
     except OSError:
         return 0
-    now = time.time()
-    cutoff = now - max_age_days * 86400
-    candidates = []
+    cutoff = time.time() - max_age_days * 86400
     for name in names:
         if not name.endswith(".json"):
             continue
         path = os.path.join(target, name)
-        if not os.path.isfile(path):
-            continue
         created = _envelope_created_at(path)
-        if created is None:
-            continue  # cannot date it; never sweep blind (W6-P2-4)
-        if created > now:
-            continue  # clock rolled back; keep (W6-P2-3)
-        if created < cutoff:
-            candidates.append((path, name))
-    if len(candidates) > _SWEEP_CIRCUIT_BREAKER:
-        sys.stderr.write(
-            "morrow: WARNING: sweep_stale_pending would remove %d "
-            "pending envelopes (limit %d): refusing; the system clock "
-            "may have jumped forward. Investigate before sweeping.\n"
-            % (len(candidates), _SWEEP_CIRCUIT_BREAKER))
-        return 0
-    for path, name in candidates:
-        try:
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    envelope = json.load(fh)
-                op_id = envelope.get("op_id") or name[:-5]
-                _delete_brief_files(envelope.get("brief_dir"), op_id)
-                # W2-P0-2: a swept orphan's journal claim goes with
-                # it, so journal_status() does not list phantom
-                # pendings forever. W5-P0-1: the envelope never
-                # yields a raw claim token (new envelopes store only
-                # the hash); the sweep releases via the system-only
-                # forced release, which journals forced=true for the
-                # TTL-expired orphan (outcome unknown). No
-                # disk-derived token is honored anywhere on this
-                # path.
-                if op_id:
-                    try:
-                        ex.release_op_id_forced(
-                            op_id,
-                            "stale pending envelope swept after "
-                            "TTL; outcome unknown")
-                    except Exception:
-                        pass
-            except (OSError, ValueError):
-                pass
-            os.remove(path)
-            removed += 1
-        except OSError:
+        if created is None or created >= cutoff:
             continue
-    # Stale conflict locks (crashed dispatches) are swept with the same TTL.
-    try:
-        sweep_stale_locks(target, max_age_days)
-    except OSError:
-        pass
+        try:
+            with open(path, encoding="utf-8") as fh:
+                envelope = json.load(fh)
+            op_id = name[:-5]
+            if not isinstance(envelope, dict) or envelope.get("op_id") != op_id:
+                continue
+            with ex.journal_recovery_cleanup(op_id) as settled:
+                if not settled:
+                    continue
+                _delete_brief_files(envelope.get("brief_dir"), op_id)
+                os.remove(path)
+                removed += 1
+        except (ex.ExecutorError, OSError, ValueError, TypeError):
+            continue
+    sweep_stale_locks(target, max_age_days)
     return removed
 
 
 def purge_transient_state(pending_dir=None, brief_dir=None, force=False):
-    """Uninstall/support path: delete pending envelopes and browser
-    brief files. Returns (pending_removed, briefs_removed,
-    inflight_skipped).
+    """Delete settled old recovery files, preserving unresolved evidence.
 
-    W4-P0-4/W4-P0-5: pending envelopes hold RAW provider payloads
-    (including learner PII) for internal verify/undo resolution, and
-    brief files render op params (learner names). Neither the legacy
-    purge/wipe CLIs nor the shipped deletion path covered them. This
-    function is now wired into every purge/wipe path (privacy/pseudonym,
-    privacy/learner_vault, privacy/executor_wire) and scripts/uninstall.sh.
-
-    W5-P1-2: in-flight state is never silently destroyed. An envelope
-    is in-flight when it is younger than PENDING_TTL_DAYS (by mtime) OR
-    its op_id still holds a live journal claim: it belongs to an op
-    parked between its request and verify phases, and deleting it would
-    wedge the op permanently (no verify, no claim release, op_id
-    bricked, journal claim dangling). Such envelopes are SKIPPED
-    (counted in inflight_skipped), and their brief files are kept with
-    them. Only envelopes with no live claim that are older than the TTL
-    are removed, and their journal claims are released via
-    ex.release_op_id_forced so no phantom pendings
-    linger. conflict-locks.json (and the *.lock / *.new.* machinery
-    files) are never deleted: live locks are the P0-6
-    never-replay-an-uncertain-write guard, they carry no learner PII,
-    and stale ones are TTL-swept by sweep_stale_locks instead.
-    force=True restores the old delete-everything behavior for callers
-    that own the whole tree (uninstall deletes the journal right after,
-    so nothing can dangle).
+    Ordinary privacy/support purges require authenticated settlement just
+    like automatic cleanup. Journal failures preserve recovery state.
+    force=True is reserved for explicitly authorized whole-tree removal
+    (uninstall), which also deletes the journal and installed connector.
+    Returns (pending_removed, briefs_removed, inflight_skipped).
     """
     pending_target = pending_dir or PENDING_DIR
     brief_target = brief_dir or BRIEF_DIR
@@ -1673,18 +1539,6 @@ def purge_transient_state(pending_dir=None, brief_dir=None, force=False):
     briefs_removed = 0
     inflight_skipped = 0
     cutoff = time.time() - PENDING_TTL_DAYS * 86400
-
-    # W5-P1-2: journal liveness is the in-flight signal, not just mtime.
-    # An envelope older than the TTL whose op_id still has a LIVE journal
-    # claim belongs to an op the orchestrator may yet complete (the token
-    # lives in the orchestrator's memory); purging it would wedge the
-    # verify phase. Such envelopes are preserved like fresh ones. Only
-    # envelopes with no live claim are stale enough to purge (their
-    # claims are forced-released below, so nothing dangles).
-    try:
-        live_op_ids = {p["op_id"] for p in ex.journal_pending_ops()}
-    except Exception:
-        live_op_ids = set()
 
     # Envelopes first, so the in-flight set is known before briefs.
     inflight_op_ids = set()
@@ -1710,38 +1564,38 @@ def purge_transient_state(pending_dir=None, brief_dir=None, force=False):
             # is treated as in-flight (never purged blind).
             created = _envelope_created_at(path)
             op_id = name[:-5]
-            if not force and (created is None or created >= cutoff
-                              or op_id in live_op_ids):
-                # In-flight: parked between request and verify phases
-                # (fresh by age, or still holding a live journal claim).
+            guard = nullcontext(True) if force else ex.journal_recovery_cleanup(op_id)
+            try:
+                with guard as settled:
+                    if not force and (created is None or created >= cutoff or not settled):
+                        inflight_op_ids.add(op_id)
+                        inflight_skipped += 1
+                        continue
+                    try:
+                        with open(path, encoding="utf-8") as fh:
+                            envelope = json.load(fh)
+                        if not isinstance(envelope, dict) or envelope.get("op_id") != op_id:
+                            if not force:
+                                inflight_op_ids.add(op_id)
+                                inflight_skipped += 1
+                                continue
+                        else:
+                            briefs_removed += _delete_brief_files(envelope.get("brief_dir"), op_id)
+                            if force:
+                                try:
+                                    ex.release_op_id_forced(op_id, "authorized whole-tree removal")
+                                except ex.ExecutorError:
+                                    pass
+                    except (OSError, ValueError, TypeError):
+                        if not force:
+                            inflight_op_ids.add(op_id)
+                            inflight_skipped += 1
+                            continue
+                    os.remove(path)
+                    pending_removed += 1
+            except (ex.ExecutorError, OSError, ValueError, TypeError):
                 inflight_op_ids.add(op_id)
                 inflight_skipped += 1
-                continue
-            # Stale (or forced): release the journal claim before
-            # deleting, so the op does not linger in
-            # journal_pending_ops forever. W5-P0-1: the envelope never
-            # yields a raw claim token; release via the system-only
-            # forced release (forced=true is the truthful record for a
-            # purged in-flight op whose outcome is unknown).
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    envelope = json.load(fh)
-                _op = envelope.get("op_id") or op_id
-                _delete_brief_files(envelope.get("brief_dir"), _op)
-                if _op:
-                    try:
-                        ex.release_op_id_forced(
-                            _op,
-                            "pending envelope purged after TTL; "
-                            "outcome unknown")
-                    except Exception:
-                        pass
-            except (OSError, ValueError):
-                pass
-            try:
-                os.remove(path)
-                pending_removed += 1
-            except OSError:
                 continue
         except OSError:
             continue
@@ -1759,12 +1613,23 @@ def purge_transient_state(pending_dir=None, brief_dir=None, force=False):
         try:
             if not os.path.isfile(path):
                 continue
-            if not force and any(
-                    name.startswith(op_id + "-")
-                    for op_id in inflight_op_ids):
-                continue
-            os.remove(path)
-            briefs_removed += 1
+            if not force:
+                if any(name.startswith(op_id + "-") for op_id in inflight_op_ids):
+                    continue
+                match = re.fullmatch(r"([0-9a-fA-F-]{36})-(?:request|verify|dupcheck)\.txt", name)
+                if not match:
+                    continue
+                try:
+                    with ex.journal_recovery_cleanup(match.group(1)) as settled:
+                        if not settled:
+                            continue
+                        os.remove(path)
+                        briefs_removed += 1
+                except (ex.ExecutorError, ValueError, TypeError, OSError):
+                    continue
+            else:
+                os.remove(path)
+                briefs_removed += 1
         except OSError:
             continue
     return pending_removed, briefs_removed, inflight_skipped
@@ -2065,8 +1930,7 @@ def dispatch_browser_entry(entry, params, lane_state, pack, plan=None,
     ex.live_proven_gate(entry)
     entry_name = entry.get("name")
     provider = entry.get("provider") or "canvas"
-    # Best-effort TTL sweep of orphaned pending envelopes (crashes between
-    # phases); never blocks a dispatch.
+    # Best-effort cleanup of settled recovery residue; unknown writes remain.
     try:
         sweep_stale_pending(pending_dir)
     except Exception:

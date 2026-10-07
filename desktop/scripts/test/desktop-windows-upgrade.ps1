@@ -9,7 +9,8 @@ param(
   [Parameter(Mandatory = $true)][string] $NewVersion,
   [Parameter(Mandatory = $true)][string] $InstallDirectory,
   [Parameter(Mandatory = $true)][string] $StateDirectory,
-  [Parameter(Mandatory = $true)][string] $Receipt
+  [Parameter(Mandatory = $true)][string] $Receipt,
+  [switch] $RequireSignature
 )
 
 $ErrorActionPreference = 'Stop'
@@ -272,7 +273,9 @@ $stateAfterInstall = Compare-Files $stateBefore (Capture-Files $stateTargets) 'T
 $newReady = Run-App 'after-upgrade'
 $newApp = App-Metadata
 Assert-AppMetadata $newApp
-if ($newApp.signatureStatus -ne 'NotSigned' -or $newApp.signerCertificate) { throw 'The private QA application is not the expected unsigned build.' }
+if ($RequireSignature) {
+  if ($newApp.signatureStatus -ne 'Valid' -or !$newApp.signerCertificate) { throw 'The signed application has no valid Authenticode signature.' }
+} elseif ($newApp.signatureStatus -ne 'NotSigned' -or $newApp.signerCertificate) { throw 'The private QA application is not the expected unsigned build.' }
 
 $retainedAfterUpgrade = Compare-Files $retainedBefore (Capture-Files $retainedTargets) 'The installer upgrade retained data'
 $stateAfterUpgrade = Capture-Files $stateTargets
@@ -285,7 +288,9 @@ if ($registryAfterUpgrade[0].publisher -ne 'Braden Riggins' -or $registryAfterUp
 
 $uninstaller = "$InstallDirectory\Uninstall Morrow.exe"
 $uninstallSignature = (Get-AuthenticodeSignature -LiteralPath $uninstaller).Status.ToString()
-if ($uninstallSignature -ne 'NotSigned') { throw 'The private QA uninstaller is not the expected unsigned build.' }
+if ($RequireSignature) {
+  if ($uninstallSignature -ne 'Valid') { throw 'The signed uninstaller has no valid Authenticode signature.' }
+} elseif ($uninstallSignature -ne 'NotSigned') { throw 'The private QA uninstaller is not the expected unsigned build.' }
 Run-Process $uninstaller @('/S', "/D=$InstallDirectory") $InstallTimeoutMs 'Morrow uninstaller'
 $cleanupDeadline = (Get-Date).AddSeconds(30)
 do {

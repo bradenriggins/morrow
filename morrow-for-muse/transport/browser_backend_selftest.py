@@ -587,7 +587,7 @@ def main():
     check("verify completion deletes the verify brief file",
           not os.path.exists(bb._brief_path(BRIEF_DIR, op_id, "verify")))
 
-    # The TTL sweeper removes only stale envelopes, and takes their
+    # The TTL sweeper removes only stale settled envelopes, and takes their
     # brief files with them. Fixture op_ids are real UUIDs: the path
     # builders fail closed on non-UUID ids (W5-P2-1), so no legacy
     # non-UUID op_id can reach the sweeper in production.
@@ -613,6 +613,8 @@ def main():
     with open(stale, "w", encoding="utf-8") as fh:
         json.dump({"op_id": stale_oid, "brief_dir": BRIEF_DIR,
                    "created_at": old_iso}, fh)
+    ex.journal_append({"op_id": stale_oid, "wal": "complete",
+                       "verification": "verified", "uncertain": False})
     os.utime(stale, (old, old))
     removed = bb.sweep_stale_pending(PENDING_DIR)
     check("sweeper removes the stale envelope only",
@@ -630,11 +632,14 @@ def main():
     from datetime import datetime, timezone
     _pold = _pt.time() - 8 * 86400
     _pold_iso = datetime.fromtimestamp(_pold, tz=timezone.utc).isoformat()
-    pj = os.path.join(PENDING_DIR, "purge-me.json")
-    bj = os.path.join(BRIEF_DIR, "purge-me-request.txt")
+    purge_oid = str(uuid.uuid4())
+    pj = os.path.join(PENDING_DIR, purge_oid + ".json")
+    bj = os.path.join(BRIEF_DIR, purge_oid + "-request.txt")
     with open(pj, "w", encoding="utf-8") as fh:
-        json.dump({"op_id": "purge-me", "brief_dir": BRIEF_DIR,
+        json.dump({"op_id": purge_oid, "brief_dir": BRIEF_DIR,
                    "created_at": _pold_iso}, fh)
+    ex.journal_append({"op_id": purge_oid, "wal": "complete",
+                       "verification": "verified", "uncertain": False})
     with open(bj, "w", encoding="utf-8") as fh:
         fh.write("x")
     os.utime(pj, (_pold, _pold))
@@ -646,7 +651,10 @@ def main():
     # W4-P0-5: an orphan brief (crash between brief write and envelope
     # write; no matching envelope) is purged too, not just briefs the
     # TTL sweeper would eventually reach.
-    _orphan = os.path.join(BRIEF_DIR, "orphan-op-request.txt")
+    orphan_oid = str(uuid.uuid4())
+    _orphan = os.path.join(BRIEF_DIR, orphan_oid + "-request.txt")
+    ex.journal_append({"op_id": orphan_oid, "wal": "complete",
+                       "verification": "verified", "uncertain": False})
     with open(_orphan, "w", encoding="utf-8") as fh:
         fh.write("brief: post comment to submission of Zeldana Fakeington "
                  "<zeldana.fakeington@example.test>")

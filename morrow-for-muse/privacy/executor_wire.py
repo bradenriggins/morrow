@@ -1269,9 +1269,9 @@ def purge_tenant(tenant_base, error_cls=Exception):
     on the scope's exact canvasOrigin), then purge browser transient
     state (pending envelopes + briefs, W4-P0-4/W4-P0-5: they hold raw
     payloads and cannot be scoped to a tenant). Envelopes still in
-    flight (younger than TTL or under a live journal claim) are kept
-    by design so running ops cannot wedge; they age out, and a later
-    purge removes them. Uninstall forces the full transient purge.
+    flight or without authenticated settlement are kept so unknown
+    writes retain recovery evidence. They do not age out. Uninstall
+    forces full transient removal with the whole installation.
 
     The vault map is rewritten atomically (flock + tmp/rename/fsync);
     other tenants' records and the vault key are untouched. Issued
@@ -1301,7 +1301,7 @@ def purge_tenant(tenant_base, error_cls=Exception):
 
 def purge_course(tenant_base, course_id, error_cls=Exception):
     """Drop every shipped-vault record for one course on one tenant,
-    then purge all browser transient state (same un-scopable rationale
+    then purge settled browser transient state (same un-scopable rationale
     as purge_tenant). Returns the same report shape."""
     origin = _exact_origin(tenant_base, error_cls)
     vault = _privacy_core.LearnerVault(_source_vault_path())
@@ -1321,7 +1321,8 @@ def purge_course(tenant_base, course_id, error_cls=Exception):
 def purge_all(full_profile=False, error_cls=Exception):
     """Full shipped-lane purge without uninstalling: delete the wired
     source vault file and its .key (issued labels can never resolve
-    again), purge ALL browser transient state (W4-P0-4/W4-P0-5), and
+    again), purge settled browser transient state while preserving
+    unresolved recovery evidence, and
     wipe the Chromium profile's learner-data-carrying stores
     (W4-P0-6; selective by default, keeping session cookies so the
     educator stays signed in; full_profile=True wipes the whole

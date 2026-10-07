@@ -113,6 +113,17 @@ jobs:
       - name: Install desktop installer dependencies
         run: pnpm --dir installer install --frozen-lockfile
       - run: pnpm build
+      - name: Detect official Codex CLI on Windows without a Store app
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $cliPrefix = Join-Path $env:RUNNER_TEMP 'morrow-codex-cli-only'
+          node scripts/test/windows-codex-cli-native.cjs absent $cliPrefix 0.160.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm install --prefix $cliPrefix --no-save --no-package-lock --ignore-scripts --no-audit --no-fund --registry https://registry.npmjs.org @openai/codex@0.160.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/test/windows-codex-cli-native.cjs installed $cliPrefix 0.160.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Start pnpm with no shell, as the release packager does
         run: node --test scripts/test/pnpm-command.test.mjs
       - name: Check out the committed bytes the release packager seals and reads
