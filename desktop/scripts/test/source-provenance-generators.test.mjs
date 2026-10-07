@@ -48,6 +48,8 @@ for (const layout of ["standalone", "monorepo"]) {
       put("ARCHITECTURE.md", "Uncommitted bytes must not enter provenance\n");
       execFileSync(process.execPath, [join(desktop, "scripts/create-source-origin-ledger.mjs")], { cwd: repository });
       execFileSync(process.execPath, [join(desktop, "scripts/create-source-rights-manifest.mjs"), "--reviewer", "fixture-reviewer", "--authorization", "fixture authorization"], { cwd: repository });
+      const checked = execFileSync(process.execPath, [join(scripts, "validate-source-rights.mjs"), "--root", desktop], { cwd: repository, encoding: "utf8" });
+      assert.match(checked, /public-source-rights=ok/);
       const origin = JSON.parse(readFileSync(join(desktop, "config/source-origin-ledger.json")));
       const rights = JSON.parse(readFileSync(join(desktop, "config/source-rights.manifest.json")));
       assert.equal(origin.candidateCommit, candidateCommit);
@@ -62,6 +64,10 @@ for (const layout of ["standalone", "monorepo"]) {
       assert.equal(rights.files.find((entry) => entry.path === "ARCHITECTURE.md").sha256, architecture.afterDigest);
       assert.equal(rights.files.find((entry) => entry.path === source.path).disposition, "adapted_owned");
       assert.equal(rights.files.some((entry) => entry.path === "excluded.txt" || entry.path.startsWith("config/")), false);
+      const tampered = structuredClone(rights);
+      tampered.files.find((entry) => entry.path === "ARCHITECTURE.md").sha256 = "0".repeat(64);
+      writeFileSync(join(desktop, "config/source-rights.manifest.json"), JSON.stringify(tampered));
+      assert.throws(() => execFileSync(process.execPath, [join(scripts, "validate-source-rights.mjs"), "--root", desktop], { stdio: "pipe" }), /Command failed/);
       for (const entry of [...origin.entries, ...rights.files]) {
         assert.equal(entry.path.startsWith("desktop/"), false);
         assert.equal(entry.path.includes("sibling.txt"), false);
