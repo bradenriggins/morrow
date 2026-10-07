@@ -5,7 +5,7 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { detectAssistant, readCommandOutput, runBoundedCommand } = require("../../installer/shared/installer-controller.cjs");
+const { detectAssistant, runBoundedCommand } = require("../../installer/shared/installer-controller.cjs");
 const { probeWindowsCommandShim, windowsCommandShimInvocation } = require("../../installer/shared/assistant-app-detection.cjs");
 const { WINDOWS_CODEX_APPX_QUERY, parseAppxPackages } = require("../../installer/shared/windows-appx-detection.cjs");
 const { windowsPowerShellPath } = require("../../installer/shared/process-lifetime.cjs");
@@ -42,6 +42,26 @@ async function inspectShim(candidate) {
   return { literal, detected };
 }
 
+async function readStorePackages(runCommand = runBoundedCommand, emit = (value) => process.stdout.write(value)) {
+  const startedAt = Date.now();
+  const result = await runCommand(windowsPowerShellPath(), [
+    "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_CODEX_APPX_QUERY,
+  ], { timeoutMs: 30_000, maxOutputBytes: 8 * 1024 });
+  emit(`${JSON.stringify({
+    schema: "morrow.windows-store-query-diagnostic.v1",
+    durationMs: Date.now() - startedAt,
+    code: result.code,
+    termination: result.termination,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  })}\n`);
+  assert.equal(result.termination, null, "The real Windows Store query must finish within its proof limit");
+  assert.equal(result.code, 0, `The real Windows Store query must succeed: ${result.stderr}`);
+  const packages = parseAppxPackages(result.stdout);
+  assert.notEqual(packages, null, "The real Windows Store query must return valid package metadata");
+  return packages;
+}
+
 async function main(values = process.argv.slice(2)) {
   assert.equal(process.platform, "win32", "This proof requires native Windows");
   const input = argumentsFrom(values);
@@ -66,7 +86,7 @@ async function main(values = process.argv.slice(2)) {
     delete environment.OPENAI_API_KEY;
     delete environment.CODEX_API_KEY;
     const result = spawnSync(process.execPath, [__filename, ...values, "--worker"], {
-      cwd: home, env: environment, encoding: "utf8", timeout: 30_000,
+      cwd: home, env: environment, encoding: "utf8", timeout: 90_000,
     });
     assert.equal(result.error, undefined, "The native detector proof exceeded its process limit");
     process.stdout.write(result.stdout);
@@ -75,11 +95,7 @@ async function main(values = process.argv.slice(2)) {
   }
 
   assert.equal(os.homedir().toLowerCase(), path.join(input.prefix, "isolated-home").toLowerCase());
-  const storeOutput = await readCommandOutput(windowsPowerShellPath(), [
-    "-NoProfile", "-NonInteractive", "-Command", WINDOWS_CODEX_APPX_QUERY,
-  ], { timeoutMs: 10_000, maxBytes: 8 * 1024 });
-  assert.notEqual(storeOutput, null, "The real Windows Store query must succeed");
-  assert.deepEqual(parseAppxPackages(storeOutput), [], "This runner must have no OpenAI.Codex Store package");
+  assert.deepEqual(await readStorePackages(), [], "This runner must have no OpenAI.Codex Store package");
 
   let cliVersion = null;
   if (input.phase === "installed") {
@@ -122,4 +138,4 @@ async function main(values = process.argv.slice(2)) {
 
 if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1; });
 
-module.exports = { argumentsFrom, main };
+module.exports = { argumentsFrom, main, readStorePackages };

@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { argumentsFrom, main } = require("../../scripts/test/windows-codex-cli-native.cjs");
+const { argumentsFrom, main, readStorePackages } = require("../../scripts/test/windows-codex-cli-native.cjs");
 
 test("native Windows CLI proof requires explicit phase, absolute prefix, and pinned version", () => {
   const prefix = path.resolve("test-prefix");
@@ -20,6 +20,29 @@ test("native Windows CLI proof requires explicit phase, absolute prefix, and pin
 
 test("native Windows CLI proof refuses another operating system", { skip: process.platform === "win32" }, async () => {
   await assert.rejects(main([]), /requires native Windows/);
+});
+
+test("the Store precondition accepts only a successful bounded query with valid metadata", async () => {
+  const diagnostics = [];
+  const emit = (value) => diagnostics.push(JSON.parse(value));
+  const runCommand = async (executable, args, options) => {
+    assert.match(executable.toLowerCase(), /powershell\.exe$/);
+    assert.ok(args.includes("-NoLogo") && args.includes("-NonInteractive"));
+    assert.equal(options.timeoutMs, 30_000);
+    assert.equal(options.maxOutputBytes, 8 * 1024);
+    return { code: 0, termination: null, stdout: "", stderr: "" };
+  };
+  assert.deepEqual(await readStorePackages(runCommand, emit), []);
+  for (const result of [
+    { code: null, termination: "timeout", stdout: "", stderr: "" },
+    { code: 1, termination: null, stdout: "", stderr: "Store query failed" },
+    { code: 0, termination: null, stdout: "invalid", stderr: "" },
+  ]) {
+    await assert.rejects(readStorePackages(async () => result, emit));
+    assert.equal(diagnostics.at(-1).code, result.code);
+    assert.equal(diagnostics.at(-1).termination, result.termination);
+    assert.equal(diagnostics.at(-1).stderr, result.stderr);
+  }
 });
 
 test("Windows CI checks absence before installing the pinned official CLI and checks it afterward", () => {
