@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "585478279e2d9367192cddb96bd1fcbccea2d184",
+  "candidateCommit": "832ecb91ab444632b779b80c939003a551f145ce",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -1996,14 +1996,14 @@
     },
     {
       "path": "installer/WINDOWS-DEPLOYMENT.md",
-      "sourceCommit": "b7d4b734a37a53afd9446f2aad845917c1cd5d1d",
+      "sourceCommit": "832ecb91ab444632b779b80c939003a551f145ce",
       "originalPath": "installer/WINDOWS-DEPLOYMENT.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e5414d35a04380d8281743c074bca35b7128e947396daebba791c6f5834ebc75",
-      "afterDigest": "44efe508e9a90544e16c82c3ce9fbf6cc9f99eae8525159d7f529ef7d53e199f"
+      "beforeDigest": "44efe508e9a90544e16c82c3ce9fbf6cc9f99eae8525159d7f529ef7d53e199f",
+      "afterDigest": "eafb69a95bd88dff445380d49913a245ab0a236ce18f447a7ae1a071fb1b30c3"
     },
     {
       "path": "installer/assets/Manrope-variable.ttf",
@@ -9677,14 +9677,14 @@
     },
     {
       "path": "scripts/test/desktop-doc-claims.test.mjs",
-      "sourceCommit": "e15f9c6a451596f43e94a5f1a10564dd8c546979",
+      "sourceCommit": "832ecb91ab444632b779b80c939003a551f145ce",
       "originalPath": "scripts/test/desktop-doc-claims.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "23953b0842b954d7d2b4a8c539296f68a5fe14112918a3191aac91cb9128ef7f",
-      "afterDigest": "43122a3d9ffaa5dda72e8b87b79932b46a26937fbe819ca5f898b78333c52b37"
+      "beforeDigest": "43122a3d9ffaa5dda72e8b87b79932b46a26937fbe819ca5f898b78333c52b37",
+      "afterDigest": "04654152ce78711f7e4ea2ba9012fa9906d5af0d73f5bede3bcc581e1777ffc6"
     },
     {
       "path": "scripts/test/desktop-entrypoint-uniqueness.test.mjs",
@@ -10799,14 +10799,14 @@
     },
     {
       "path": "scripts/test/release-gates.test.mjs",
-      "sourceCommit": "30dad5f0cb4527635f6433b85e44b8752d3ec92d",
+      "sourceCommit": "832ecb91ab444632b779b80c939003a551f145ce",
       "originalPath": "scripts/test/release-gates.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "19c4f41a77e27aa519e6e30de41eb637fcc323ea9a0d652aeb4a46801e21a5e4",
-      "afterDigest": "915dcf51a9b52f131d572ee4a59777899c8623bca85bae1ed672cd1d78b01c8a"
+      "beforeDigest": "915dcf51a9b52f131d572ee4a59777899c8623bca85bae1ed672cd1d78b01c8a",
+      "afterDigest": "c074872c1aa13ece414effd6d7aa651de0d39ee33869d7360b8f0405feb775c7"
     },
     {
       "path": "scripts/test/release-signing-preflight.test.mjs",
