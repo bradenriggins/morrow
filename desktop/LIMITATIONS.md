@@ -1,6 +1,6 @@
 # Limitations
 
-Morrow Desktop `1.0.14` runs on Mac with Apple silicon and Windows x64. No Windows 1.0.6 or 1.0.7 asset was published. Live provider verification remains subject to the evidence below. The version is not an Instructure authorization claim.
+This checkout contains Morrow Desktop `1.0.15` for Mac with Apple silicon and Windows x64. Until Morrow Desktop `1.0.15` is published, public installers remain on Morrow Desktop `1.0.14`. No Windows 1.0.6 or 1.0.7 asset was published. Live provider verification remains subject to the evidence below. The version is not an Instructure authorization claim.
 
 ## Platform coverage
 

@@ -1,10 +1,10 @@
-# Set up Morrow from the extracted archive (engineering route)
+# Test Morrow MCP from an extracted archive (engineering route)
 
-This is not the normal way to install Morrow, and it is not the setup a person is asked to follow. The normal path is the Morrow desktop app: it installs Morrow MCP, writes the assistant configuration, and walks a person through the Chrome step without a terminal. That app is not signed or released yet; [MORROW-REMAINING-WORK.md](MORROW-REMAINING-WORK.md) section 6 records what it still needs.
+The normal installation path is [Morrow Desktop](../../README.md#the-morrow-desktop-app). Published unsigned installers are available for Mac with Apple silicon and Windows x64. Morrow Desktop installs Morrow MCP, writes the assistant configuration, and guides you through the Chrome step without a terminal.
 
-Use this file when you are testing the extracted archive itself, or when no desktop app build exists for your system. It asks you to run commands in a terminal.
+Use this file only to test the MCP configuration and startup in an existing engineering archive. It asks you to run commands in a terminal. The current packager creates Desktop payloads and installers; it does not create this historical archive. See the [engineering archive record](../../README.md#development-and-engineering-evidence).
 
-You install two components: Morrow MCP for your assistant, and Morrow Bridge for Chrome. This folder contains both, including the runtime. Keep the extracted folder in one permanent location.
+This route configures Morrow MCP for your assistant. It does not prepare a Bridge folder that Morrow accepts for course pairing. Keep the extracted folder in one permanent location for the MCP test.
 
 ## 1. Add Morrow to your assistant
 
@@ -20,26 +20,19 @@ Each assistant keeps its own file in the project: Codex `.codex/config.toml`, Cl
 
 This command sets up only the current project. Reopen that project in your assistant. Claude Code can ask you to approve its new Morrow entry. This bundle does not install Claude Desktop.
 
-## 2. Add Morrow Bridge to Chrome
+## 2. Use a supported route for course setup
 
-1. In Chrome, open `chrome://extensions`.
-2. Turn on **Developer mode** and select **Load unpacked**.
-3. In this extracted folder, select `app/connector/extension`.
-4. Morrow opens its setup guide. Use **Guide me** for the next action or **Setup overview** for the three stages. You can reopen the guide from **Setup guide** in Morrow Bridge.
+Morrow pairs only a Morrow Bridge loaded from a Bridge folder that Morrow set up. The archive commands above prepare no such folder. **Connect Morrow** refuses a Bridge loaded from the archive's `app/connector/extension`.
 
-Morrow pairs only a Morrow Bridge loaded from a Bridge folder that Morrow set up, and this route sets up none, so **Connect Morrow** refuses a Bridge loaded from `app/connector/extension`. To connect Morrow Bridge, use the Morrow desktop app, or install from source, where `pnpm run setup` prepares `connector/extension`.
+For complete course setup, follow one of these existing paths:
 
-Open a permitted Canvas or Moodle course in Chrome and sign in. Morrow Bridge identifies the platform and shows **Connect Canvas** or **Connect Moodle**. Select that button and allow Chrome access to the exact address shown. In **Plan and Edit settings**, find courses, choose one, and select **Connect selected courses in Plan**.
-
-When the guide shows **Try a first read**, return to your assistant and ask: “Use Morrow to list the modules in my selected course.” The guide shows **Ready to use** after that read returns, and names the course it read.
+- [Morrow Desktop setup](../../README.md#the-morrow-desktop-app), the normal installation path.
+- [Install from source for development](../../README.md#install-from-source-for-development). Follow the whole source setup; `pnpm run setup` prepares `connector/extension` with its local pairing configuration and prints the folder to load.
 
 ## If setup stops
 
 - Open the project where you installed Morrow and keep the assistant running.
 - Keep the extracted folder in its original location. If you move it, run the install command again from your project.
-- If managed Chrome blocks Developer mode or unpacked extensions, this preview cannot use that Chrome profile.
 - For startup details, run `/path/to/extracted-morrow/bin/morrow doctor --json` from the same project. A started MCP alone does not confirm a course connection.
 
-Plan keeps changes for your review. You can choose separate Edit permissions later. Course sign-in stays in Chrome. Course content that passes Morrow's checks can reach your selected assistant; known-learner redaction does not make every personal fact anonymous.
-
-This is a preview. Selected Canvas and Moodle workflows are supported. Blackboard is not available. The current recipient-tested archive is for Macs with Apple silicon. Other target archives need their own recipient checks.
+The supported setup paths describe course connections and permissions. Read [LIMITATIONS.md](../../LIMITATIONS.md) for the current platform coverage and verification limits. An engineering archive startup check does not prove those course workflows.

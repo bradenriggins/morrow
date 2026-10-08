@@ -840,13 +840,18 @@ test("pnpm test:browser runs the harnesses pnpm check cannot, and names the rest
   const rootPackage = JSON.parse(readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8"));
   assert.equal(rootPackage.scripts["test:browser"], "pnpm build && node scripts/run-browser-harnesses.mjs");
   assert.equal(rootPackage.scripts["test:browser:attended"], "pnpm build && node scripts/run-browser-harnesses.mjs --attended");
-  assert.match(rootPackage.scripts["scripts:test"], /^node --test (?:--test-concurrency=2 )?scripts\/test\/\*\.test\.mjs$/,
-    "the always-on gate globs test files only, which is why these harnesses need their own command");
+  assert.deepEqual(rootPackage.scripts["scripts:test"].split(" && "), [
+    "node --test --test-concurrency=2 scripts/test/*.test.mjs",
+    "node --test connector/extension-test/versioning.test.mjs",
+  ], "the always-on gate runs its test-file glob and the registered Store-update regression");
+  assert.doesNotMatch(rootPackage.scripts["scripts:test"], /run-browser-harnesses\.mjs/,
+    "browser harnesses need their own command");
 
   assert.deepEqual(HARNESSES.map((harness) => harness.id), [...BROWSER_HARNESS_IDS],
     "the runner and the release gate must name the same harnesses");
   for (const harness of HARNESSES) {
     assert.equal(existsSync(resolve(import.meta.dirname, "../..", harness.script)), true, `${harness.script} must exist`);
+    assert.ok(!rootPackage.scripts["scripts:test"].includes(harness.script), `${harness.id} must stay outside the always-on gate`);
     assert.match(harness.summary, /\S/);
   }
 

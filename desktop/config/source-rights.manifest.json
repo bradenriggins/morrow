@@ -5,61 +5,61 @@
       "path": ".gitignore",
       "sha256": "6a515b0f4b6c42d94e9489fbca82452b9369b42ec62d0e33bed965e2aad98561",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "ARCHITECTURE.md",
       "sha256": "370e1e9313dc1f8996a1cdd9bd47f769f54668a4026bdf7867b1678a509caba5",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "LICENSE",
       "sha256": "f37f80963047fbbf92f6da766ca977de53d8ee56f60d1d26cf17b22cda65cace",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "LIMITATIONS.md",
-      "sha256": "446c4a483388df722765e309c8b0e9c63e36a6eb81c7c76ae569457a8eb1ecec",
+      "sha256": "3bc39bd8d1f56c2c0d316b5f810bd5710ff6930b3996cac2e3f544afdf92eab2",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "README.md",
-      "sha256": "6a9e0f8ce3602836d2688407595b7eb7feb1722e3c6e91567bb275c5ed97ffc6",
+      "sha256": "c81f41422bd41381da418a211b1958b0d4539fc4695c0b0bf3516296c6268af4",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "SOURCE-ORIGIN.md",
       "sha256": "3be74b486a1f5eb158869e75e3c4c55f2644ba7f972688f2a8e149c7185e3a76",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "artifacts/canvas-api/canvas-admission-report.json",
       "sha256": "0e2a47194bd7ceb4950f0167cc2de73a0e2bc0d2d40ec8b07158bf93763534ad",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "artifacts/canvas-api/canvas-api-catalog.json",
       "sha256": "56deda185a61dd000ed72c72567d2e6662b0a6cc22185289d17bcefb154634ab",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "config/publication-selections.example.json",
       "sha256": "a8cc524b430eca079718453c6c08b32f34072e33aafb2a141e49b10fb911c788",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
       "sha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
       "disposition": "third_party_redistributable",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD",
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD",
       "thirdParty": {
         "assetSha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
         "copyright": "Copyright 2018 The Manrope Project Authors (https://github.com/sharanda/manrope)",
@@ -73,7 +73,7 @@
       "path": "connector/extension/brand/Manrope-variable.ttf",
       "sha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40",
       "disposition": "third_party_redistributable",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD",
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD",
       "thirdParty": {
         "assetSha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40",
         "copyright": "Copyright 2018 The Manrope Project Authors (https://github.com/sharanda/manrope)",
@@ -87,1711 +87,1711 @@
       "path": "connector/extension/brand/morrow-knot-128.png",
       "sha256": "41c4e1e10dce0ba77aa6a788ae0b50437c9aaf9e5289c671b01676ac613b99ae",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/brand/morrow-knot.svg",
       "sha256": "4caa420507d236c37d95176ea869453ec296001fa6307963a0f001bbb416b07b",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/brand/review.css",
       "sha256": "0aa80c1618b4ff794c76ee04a70b667aff461458f505b79550a62ec08583b212",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/brand/theme.css",
       "sha256": "77706ab5ed18a906a0f724f98353267c579b87c8b275e983b591f300bd01193f",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/generated/canvas-api-catalog.json",
       "sha256": "56deda185a61dd000ed72c72567d2e6662b0a6cc22185289d17bcefb154634ab",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/generated/canvas-browser-catalog.json",
       "sha256": "54f72f52a9b50440f5fca23a570a2b28e44f888df370f7147b543df304bb47aa",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/generated/canvas-operation-admission.js",
       "sha256": "2eec2b2035cb502951f495a8e14c1fdbf45cba7af2f9ccea97b35479b25fcece",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/generated/canvas-readback-plan.js",
       "sha256": "d1ce826bf631405c87e5d5605cb7e21187a6cd9e1727c4e06130792a1c56b166",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/generated/canvas-semantic-target.js",
       "sha256": "bf41dd69fd63490ca1dce3a8147424a9a8dfc0a2bac54c1cac24d8ea4fe8aa34",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/generated/moodle-browser-catalog.json",
       "sha256": "67a5942ba3701d1aface73cd2ff9ee3936b3f741d170ca2e1a80e4ea53411228",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/manifest.json",
-      "sha256": "72a2bb391255ddc1e26e570dc9a628b58d9ca5e396fe74b76e07ef130ebfc6c7",
+      "sha256": "1acd67378d2458d3cdffe2ecb82b2c24f90eeb19c0ae949fd8132651560769fa",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/onboarding/onboarding-install.js",
       "sha256": "37a6d5c5bc331e56cbabe33a3b07b84a9b7c17a24ae0d53b47f67b8bbe039b8a",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/onboarding/onboarding-state.js",
       "sha256": "7b03cf5eece687790d9fed319c928534d9e888637e9b010e671d168791c2b1a3",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/onboarding/onboarding.css",
       "sha256": "11939a0edbf451b71da6c1062892220443a14b3f3c07116358062c5ee97f8ec8",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/onboarding/onboarding.html",
       "sha256": "2fb0c7854a23e20c0b6fcc85df5a5119f6422986af118e7dd88e49f73b67eb9c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/onboarding/onboarding.js",
       "sha256": "6616871461228d9a8608131709ec6c484e37cea94e07b19a1159f5414d3b67a3",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/popup/popup-view.js",
       "sha256": "392286dc3cc28b95fbc2030072c32101924a6eeb1d0707658940e0454c372bd4",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/popup/popup.css",
       "sha256": "9b684f87f0c6e043755e17fc4449e7715010c68c9431685eedb16ed741c66e03",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/popup/popup.html",
       "sha256": "f59307612f55b2b43c6c1e43992d267f2e52568111812cbdb6cdce59af3c17b2",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/popup/popup.js",
       "sha256": "615fd96357ecc3b92208b40c6f8da4b46ab4ff66374b1a9339a6ba7a6607993e",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/render-check/render-check-host.html",
       "sha256": "df62ba22f4094aa15bdae82cfc478b650adefd68124b90a2d6004191c4f14189",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/render-check/render-check-host.js",
       "sha256": "a0a2613c9ec02c4c91eeff168bd13fed7058c6f7f8efdcee3e3a053ddcedd0e3",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/render-check/render-check.html",
       "sha256": "178399e3f686259040c88a0779e1a8f298d3dc124a0a1cfd61c1c904f71299bb",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/render-check/render-check.js",
       "sha256": "dac2d8287dc6ef5e4d1f017b4bee1031fa5b716d550c17f53fb107e9228a307c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/settings/settings.css",
       "sha256": "ff98711032cab8dad9b798dfdaebc2859aa0b3e4758d4f407feab3109d317ed6",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/settings/settings.html",
       "sha256": "e5636fd0981d63f20bb4a923ae08aeae5f8fd2e1546dea74274c04b45d4cc4c6",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/settings/settings.js",
       "sha256": "9b91196cf94c464f959aec7beedcaafe98561a84b3efa21c40e22e21780a23df",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/bridge-maintenance.js",
       "sha256": "85cbc3f88b1e4076d9d4a506167260e2c9050521e76834659d61cc1060c8fe64",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/bridge-problem-copy.js",
       "sha256": "868dc2517e7eb02bc5446ea14bfdaa82e32a20f843bd4651ed5aecc9ee40abaf",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/bridge-transport.js",
       "sha256": "277eb8ce44d1f6ba499508625870d124f072a4dee019a98ffe144bd247fe9613",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-classic-quiz-submission-read.js",
       "sha256": "3359a7bbe6bfd6101eb0633fb77a30d2bc33e1a1d30f9c420d987248293a8502",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-content.js",
       "sha256": "ebb67e69e4c9a0e63f4ea83274095785a6ce91f62dd1f5810eb94ed3c56fda90",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-conversations.js",
       "sha256": "4cd9aab80d4f27d46a05bfab4383be67c3e6f1f35e74b1f88098fdc0092d7a9d",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-course-summary-read.js",
       "sha256": "8bdeed8269d48a33bc98eacbdbd2a27f04548a5441d330c135f405fe62091404",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-file-content.js",
       "sha256": "a766420e5144c0fd107500e42a0385b3a54081901984803d009350e944ee58ad",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-file-signals.js",
       "sha256": "6c8db9fe36959ef3e184b80dea8b5ba5646d3f790321ceac2c7628f55d42581a",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-file-transfer.js",
       "sha256": "4b170c10e918e01275f876c620bfe38118aad2aa61f50aa16064b6987fd5f017",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-new-quiz-hot-spot.js",
       "sha256": "ef7f734b41c4ffde4d942a296ff7f09e31244c427c9940cfcd6d116efe449180",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-operation-readback.js",
       "sha256": "47d6354ebd9ef05b2e8c8340d74c3bb4a354a908626e33f98a62c972d7d4c8ba",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-write-outcome.js",
       "sha256": "fa3de21a81d870a4448d91a578d217d3d4ed33da25dd58a4da01006427445d51",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/catalog-compatibility.js",
       "sha256": "087d36ac7801b4d4771fed7352ebc0ed61559f3bae0def18becb177a9888ef6d",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/course-connection-intent.js",
       "sha256": "85251573afed35c14981ecb4879aebabdbadd8efe586f254c67f0a7e4dff461a",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/course-data-consent.js",
       "sha256": "824491ef6c20f0d8a3d8e2aae3a5b40b0c2d0dac6376595cf7a4a7ae18e71adf",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/edit-policy.js",
       "sha256": "20acca23bbd78110af4eb68783683563506fa835d41ad69995b6823b7e79a11a",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/item-bank-credential.js",
       "sha256": "a74e2c3342d8a738f8eb4a1c8cb31c256378da3eb00887e8aabfb6c21d3a2edf",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/item-bank-executor.js",
       "sha256": "148969561fcb32e09c0a42df6953a662265827cb200c05c3b977cb278cb9050d",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/item-bank-fan-out.js",
       "sha256": "ab2ca316c1f56f3a1a4fdf255c1ea20fd58b65ca5d7c5ef1ff81c3c205b1938c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/item-bank-frames.js",
       "sha256": "2224be8b0983d15c4dc5e084213a414c86b151f202e41b78955754cbb2ed525d",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/item-bank-guard.js",
       "sha256": "261e3e944030c6edcea21ae105452ae45fd338abbb29b6c02e7fa0b82389f05c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-activity-content-executor.js",
       "sha256": "15e52ac189e8175323b38429af37f078a33da9ad447d4b771d0f368a421d98f6",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-activity-content-read.js",
       "sha256": "147edaee215de529aaf170153b8aa546e113bbecdd570b5525fcadac007eff3c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-activity-lifecycle-executor.js",
       "sha256": "3540bcd934405c60c9c4cca28b2db39cd6e248b3c34b2c06807e795b1105c28a",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-assignment-submission-read.js",
       "sha256": "7ed9bb986fd2d260727ebe1626ca02e824e860be43f16d43873796f1571819f8",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-backup-executor.js",
       "sha256": "20706383ee2aeafd953c804fe689ef020c2c3c3899cc5dc78a61fcee8c7bd71a",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-bbb-executor.js",
       "sha256": "f361f803041eb817d8d363a5e3abb7e2593386e7286625730d868663ae818eb1",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-calendar-executor.js",
       "sha256": "1dedb408f1fc300d788ea2d05246f3d532dcc2fc04c3e92bfa29235db48746d8",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-completion-executor.js",
       "sha256": "cc5e88fba0add29c8a262b7c66cd7bb355d244c886e3335c549f8cc7bd7d02d4",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-course-settings-executor.js",
       "sha256": "d4028ee5b8d3dc76d8789f05cdb1fd887adb1350506d018cb803b4c6de907fb4",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-enrolment-executor.js",
       "sha256": "1456e9267dac2effc6e19d32667afab06cb6c47de10341c066c573176db12e7c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-executor.js",
       "sha256": "968aefb09af6691e83c5d560ce3580b3637514744c8c3a1aea0fe9278b707e1c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-forum-activity-summary-read.js",
       "sha256": "dc2336fad5366af48ad2920e55d5747ea7401a6f1fd8aabc8bb25592f374610e",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-forum-post-executor.js",
       "sha256": "89ccc185c4fd54a6fa0c2be025590ac2c6bc26109bc0525f122b8f67161c7fed",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-forum-read.js",
       "sha256": "b92d7ecc6d50858a968a5201f24855bfca0718e3c5874d1b7f8e7c383af50098",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-glossary-wiki-executor.js",
       "sha256": "0883d87a8577edc460c72f7beac4559381b74ea881dba506d966808bccd2d56c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-grade-report-read.js",
       "sha256": "8dc40b5f9cdb9f68bdc2594b39e92ceaac6b2d342cae777ab654d51065e4657e",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-gradebook-executor.js",
       "sha256": "1c74338b5da5d24d8c2b21ae6d3776fbc127dafbc9be1c71b94f723c30f4cbf0",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-groups-executor.js",
       "sha256": "28f809518dafc7653f325051cefa86effeead7340f1651ca0683ab4095b8b306",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-groups-read.js",
       "sha256": "8b2ca32f2a9345df96ee82b6b0adac37574734fccd3e7ad5a9095d2958834aa9",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-h5p-executor.js",
       "sha256": "0dc4a9343c34e871c86f07a9dacbb6117f9cca445ba40a1da68f5a2a50848e33",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-learner-submission-read.js",
       "sha256": "335572b09d90b55c34d79ad332bc806149742d644022d736c6834ca3ad5c07b7",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-lesson-executor.js",
       "sha256": "26b85c077c20eb910ca6df2921abcaa75ad5a41778bd2811c4a1ad68b42915f8",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-lesson-read.js",
       "sha256": "d3429f976581d05b10dc1a80e36b20816d2257e131a8fb7da86e2caeb5b4b1bb",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-lti-executor.js",
       "sha256": "4e2f016d4b4663606e6dca13f96edf4844bb6e5a4d2147d5d1d7aa9163300314",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-participants-read.js",
       "sha256": "2fda54fbfa405d1c078a4caa0ceaf746996f9dc44c7c6d963c6a02c4d7e2818f",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-privacy.js",
       "sha256": "ca2d502d55fb341959ff84efbe1fc379ceba9b115d2dd68adace55f2a4fb711b",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-qbank-executor.js",
       "sha256": "406b79764ba364ee279155c5b07fea9d374db70256b1dc07daf2fb3c4048bd38",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-qbank-question-executor.js",
       "sha256": "31e6bfe071eb2352ba91160dba9fe826da5f4d53643dcf666f8724164ecfc4c9",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-question-impact-read.js",
       "sha256": "fc4641f9a4da28ecfc59483abc071f833b09955563d27255d778f89cb87417ab",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-quiz-attempt-detail-read.js",
       "sha256": "a109d35414d78c33aa1ebc43ceb186b9cac08af1e80eab83c2c31f5ffde51d38",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-quiz-attempt-summary-read.js",
       "sha256": "2f41f08a52d1a27e1aacccaf28e959ddd686d5f5d6237ce6918a09066a73ca6b",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-quiz-structure-executor.js",
       "sha256": "f0d1ec3d74a135b41690f6aaaed1fc76be96e750079d09e82526ed9799a4a8fd",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-reports-read.js",
       "sha256": "083b795b993c3f2ceb5bb11e84081ad3a4194c1ae249fc35b1f6d91aeacfce24",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-restrictions-executor.js",
       "sha256": "d9000ef442f5f4f0a9f139150ceccbed84e39966820bb2f7205be0bb82b15c03",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-scorm-executor.js",
       "sha256": "69e5c0c9972ef6a40b428561fa557eb06ce73e766352e5df8711228845131652",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-scorm-report-read.js",
       "sha256": "f550bd3e56716ebee9e0d1324d47295d66a6aa5a42dc2f3fa3af62470cc81ec9",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-section-executor.js",
       "sha256": "41e3b94993d1c4786d0ca45a7dcc57f110bd1e9a2bbd1eeba6a61df927773c6c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-site-inventory-read.js",
       "sha256": "3852c0ebcd2fe62f69b3be3b22e1ee1708bb7b8e208105b70d70948de28785de",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-subsection-executor.js",
       "sha256": "0bcd1b72fab1904e9603b82cb220c438f55cdf35560d59c929675e46ed45f7dc",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/moodle-workshop-executor.js",
       "sha256": "7eab3a80247564234f124d4c694c28d020a36e66e007e5f30421a877ac384f14",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/new-quiz-item-guard.js",
       "sha256": "be7f459ea4624617b4b85bc49426b49c2915a64c8d3397d4220820f91b18a954",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/new-quiz-write-contract.js",
       "sha256": "ed4dbacb90be4ecda46b2bed64f8f07aefce7ffd0d1909d4a3478f917322bd75",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/protected-request.js",
       "sha256": "ee3024da29fe394ea2a2b841c9d1672f612f3398b7623b8891400bc95f9bee3d",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/quiz-bank-draw-executor.js",
       "sha256": "094441e1ed26e13b1ca9bdd8c55da8e1c78853900207dbe9e80394a40e6064eb",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/quiz-item-payload.js",
       "sha256": "02956ddde147b90545bfe82181f09933e0b08fea5e6afe938405c3fa01bb2e24",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/review-approval-content.js",
       "sha256": "92440afd8620e2d61ac44c051c73b7c634aca9ec3f62a99b2024d547c4d80431",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/review-approval.js",
       "sha256": "31c193cbc2006b6b63c6670f8defcf233fa946f63a977961db018c6e0ab77b88",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/service-worker.js",
-      "sha256": "93993c567a1932c7a7a22c76e3c14932d7c56a48d7e2007461ffec872913a4c6",
+      "sha256": "028ee8499e05acea9c86dc7bae728c51f7d2ff7ab3ad10805cac460849efcba2",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "connector/extension/src/verification.js",
       "sha256": "9c29b214748e3667a4bf68740659282265290ccb0f17d370e96009746d0b337d",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "docs/architecture/ADR-001-federated-convergence.md",
       "sha256": "5df9ad43fc856d353942cb633ccd4de7aa145c873ddb5fafcf61e63cac69ecfb",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "docs/architecture/ADR-002-local-extension-bridge.md",
       "sha256": "8b2ea0008706f90b6fce99d5a34d2ffff520e1b9b68fe82a080a11ad5b12ad07",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "docs/implementation/MULTI-LMS-AND-LESSON-REVIEW.md",
       "sha256": "503ddb66924705596c403b1bd10c43f346f8b896bc4d68d6380fc95b4f685d84",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "docs/release/CONNECT-MINDTAP-INCLUSION-REVIEW-2026-09-05.md",
       "sha256": "97348b69855a4b67a535d7bcd8dd4474b5bb0c1017476a0d3dd97826707e4e06",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "docs/release/PUBLIC-CANVAS-LIMITATIONS.md",
       "sha256": "3801d06e0b9bdfda57eaabf028d3a6e6c79d6f858a64550a0f4dfd18a55d06a7",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "installer/shared/bridge-delivery.cjs",
       "sha256": "9278074a8578452bf565fd395951f81e987cb50eda5a02f8c0ea5539ec550a97",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "installer/shared/bridge-updates.cjs",
       "sha256": "ed4cbfa8f88c67f046440e55d408175d24e39ec05df3bed4bf3400364689fd68",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "installer/shared/packager-admission.cjs",
       "sha256": "418369447e6d39609ea0c9950168a65730c38d22efc81560c3dc77b559703605",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "installer/shared/process-lifetime.cjs",
-      "sha256": "54ea81173a023d8e2f2a688bad29ee8f7465a21a8eddaf4d0e94026bf195667a",
+      "sha256": "6c45497909416d4e00e961b5a0cbc2cc80362c7b4cb2d5193946a1bfd5501365",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "morrow.upstreams.connector.example.json",
       "sha256": "d60ff028d165937eeb3eaed9cdcf0bfc69f3d1089d85e6304fd66a2a74ded088",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "morrow.upstreams.public-canvas.example.json",
       "sha256": "8f1603ba10ea29c8740e7b1933fd3e50966d79e6dca7b58d5329a6f420d0abf0",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "package.json",
-      "sha256": "8c411346731629c326c18eddfa6a3452a9967577c432155dea18e787e6119ab6",
+      "sha256": "77877ac04bf8c2838866bfda37b5d3b65d16ab79045ba068e1d4e8353c1c3a0d",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/batch-engine/package.json",
       "sha256": "d41e37674ab6b2908732b4b9e452f87c127b32089fa7ef3569ffb21c24ac3db8",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/batch-engine/src/canvas-result-binding.ts",
       "sha256": "d38c5ad60eabe4bed2440e4b419d5e94741671d993c43537a841b1449a073feb",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/batch-engine/src/facade.ts",
       "sha256": "49fd99d8760be4a3143dab3c05889f493d3045ebed7ef21d8d6ddc0af56f1d40",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/batch-engine/src/index.ts",
       "sha256": "94ef70e1e21d81bd35ee60c1db9b0780edcabda71992ec99e9120e2a6cc8fe83",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/batch-engine/src/node-sqlite-compat.d.ts",
       "sha256": "8e1e61028b7e401b02c0edd747960d74b3511b0754c83afd8e85ba68265a798a",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/batch-engine/src/public.ts",
       "sha256": "e03729178de1b1f10729b6c8bf0da46a8ea5650d069682e3bf6ed0b286a123b3",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/batch-engine/src/recovery.ts",
       "sha256": "06a4fc5868caa665006acb779e15c40dd7532fbbfc36d2889037a93b5b8196c8",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/batch-engine/src/settlement.ts",
       "sha256": "55f86c5dceeef18ee2396ed6a5dc9d83e5acf31c2ec90daa2ee61596a77ed696",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/batch-engine/tsconfig.json",
       "sha256": "c0416651fb924b94421509ec89bf153b3bda9fe7d93d34557ee312b8ec4c2e95",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/package.json",
       "sha256": "3681cb4295485e0b202a573c0aea7557c2d7c0c45b2d1d9d9943167ff4d38775",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/binding.ts",
       "sha256": "9e1c693bb060895dc21e826926fb3331880b9f1f54c33d2088cf4b93694deed8",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/client.ts",
       "sha256": "8c6bf2ea53dbd535312b864ba639f39e70e22e992432cc48bbd90dc47b69e7a5",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/config.ts",
       "sha256": "3a2a1030a6e678285243d357ef80bdf2f2a6d4977b477c00b4ab2edac2d64a69",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/effect-grant.ts",
       "sha256": "06a30e81de01eeda19655e0c5512a5dcaf190af2023c32056077cd3c777f539d",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/index.ts",
       "sha256": "d7f2d786d084d22317f5f5415befd14a50b08128fc3253a462553ab5a09c6392",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/library.ts",
       "sha256": "61562f440a7608ee3c9f532932f7b00082b0fac150d585f8209dace9b6466ca0",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/announcements.ts",
       "sha256": "5fc91a72426ade753f6b8c9a1f723873304b92d2d77a21e5161f5cf0e6ba94ae",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/assignments.ts",
       "sha256": "4791b47495a233c080a69b675d025bd3ca405e6de5630b98cf132e70863f1a23",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/catalog.ts",
       "sha256": "5e5c624c941688e0aadea0360d6e98416083a7d766fbc4a5a42289abdf613e7a",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/content-patch.ts",
       "sha256": "b7e9d5f89e88fd9f084a184c921dc56680fd021ae6b9e8416e839e58ed153ad7",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/course-contents.ts",
       "sha256": "05f7b8d1edeb85c18ff7b5a0a3eaac56934a40124fdcbde039b25485c92dcdca",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/course-lifecycle.ts",
       "sha256": "34984212aa35481f24f5b690cedf3460719f1cc712ff7985a204938a6556a68c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/course-read.ts",
       "sha256": "242d4ee4e5ffcf0cff8817fa6a4ba5da01b1cb2d0247d5a85cea540f88fc5b81",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/definition.ts",
       "sha256": "cccca28728425a3c390be688497f60811d559f860c88ffa9eb5dbc2f30242ed9",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/durable-state.ts",
       "sha256": "2f3b383227aeea9e99e08aac79d32ceb9cce3274a66a4b766a605c62b14da0e3",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/effect-receipts.ts",
       "sha256": "08b38a7888f7ce9d66f0dd4e1f3a207e57f2250cd2eb183ae3ddedbcdafb5020",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/effect-scope.ts",
       "sha256": "7f902279481fa72cdf777c1d990d3397df594b15128a195031434960c5081bc2",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/files.ts",
       "sha256": "5787da30c98c243faf41a6f486dda30abda2419b1511c4c851e2734f381cb723",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/gradebook.ts",
       "sha256": "f26dcbb6c2126bc64530faa6dcd7776eaf22e0bfc7300909639d0c485e7787e2",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/groups.ts",
       "sha256": "1ceb2a6e7581ab654431089169e6774c4b014afcf555f4d80f044a64460c47dd",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/health.ts",
       "sha256": "bf1ecc5bc837d9d00c52ae130e31c678a574e371de81d5f51352b7a8162529a8",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/index.ts",
       "sha256": "99adaaebda929b80c4a761e59ab452e88e2921dfb998826e41016ed08ff844f6",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/memberships.ts",
       "sha256": "26b521f43629e5bcd8b9430e643e2cd425c394f169c66405ab59ef4ba04720dd",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/provider-contract.ts",
       "sha256": "f526405d4b7f394e55d5f3653fde473e05274bb321badfc22f079de411333701",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/runtime.ts",
       "sha256": "882320c50b3e7d39f03d76062a1506799b2039325ea2771402e9b1389c365a53",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/server.ts",
       "sha256": "ac19851970230715f858587d7b1d731492eff0b5e4d313e8bd8f68d98c5fe540",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/src/types.ts",
       "sha256": "e551299895bf3614ae853665672dbe2c936d1a61e5963ecbfd805c651e21056c",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/blackboard-learn-api/tsconfig.json",
       "sha256": "c0416651fb924b94421509ec89bf153b3bda9fe7d93d34557ee312b8ec4c2e95",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/bridge-loopback/package.json",
       "sha256": "c223dd36c23518d807185f00563971499a183d49166446ff86a1a367b3ba8d71",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/bridge-loopback/src/brand.ts",
       "sha256": "ae847e3ab34d31f9d34380cceeded10b70b3547632d070c0c864188bb6a1cad0",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/bridge-loopback/src/index.ts",
       "sha256": "8311039de43e805018704997a33844e5a992250f8033148b891ef34d9fe30573",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/bridge-loopback/tsconfig.json",
       "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/bridge-protocol/package.json",
       "sha256": "7df5a7809648e4cfd26de070b6543eb986275d6778016a2b590d3073491f72da",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/bridge-protocol/src/index.ts",
       "sha256": "fd18b4f679eb77fd14c109a6f792d4eccbd37944abda6149225f3eee6d33bce6",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/bridge-protocol/tsconfig.json",
       "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-api-catalog/package.json",
       "sha256": "df017dc24d6561421738031ad7ce4f1b16218a74a6e94162b4ac2528b306a8e4",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-api-catalog/plain-labels.json",
       "sha256": "c1fb04a09461f74970ad04ecee474704eea1a4e3153235e6be5409e6f3f95b26",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-api-catalog/src/classic-quiz-question-contract.ts",
       "sha256": "b129e580d232fdc1402b2c9b34ed1719e69c1afa1ac06069efda593881c6e192",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-api-catalog/src/entity-read-routes.ts",
       "sha256": "89dbc272c3cfa0517d803f4aa7768503563a6df11240fa603c06916dd3a743c6",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-api-catalog/src/index.ts",
       "sha256": "4fc238742d9ca452a595f1c661acd2ec9bae23c0e9fc0c58a8c5afedebe90b96",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-api-catalog/src/operation-admission.ts",
       "sha256": "e43ff93c6d0da79311e37d2424492a0bb7547f0c9834bda1ebb1b317c4dc6166",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-api-catalog/src/readback-plan.ts",
       "sha256": "f7efe92f793538c30b12daff6b12635fe949761bcba15b61fe0de224b19733c2",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-api-catalog/src/semantic-target.ts",
       "sha256": "060ddc562f078498d5fcc00d4fb19e7986fe9bc3b15129c75e0276f0f1789e3f",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-api-catalog/tsconfig.json",
       "sha256": "2d7b3bb8c244034a0c123fad7913ee4d68501f6b4019400e51e1e047265f8ba3",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-connector-mcp/package.json",
       "sha256": "5122d34e14e81827f0373f9a005fc2f02e61deb8b11442764c4f500f00a9be19",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-connector-mcp/src/browser-catalog.ts",
       "sha256": "1daaa54c0a03002cc29fb3fcf636cc2eeb4fa8a30a85fc731d3884eadae9982f",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-connector-mcp/src/config.ts",
       "sha256": "96c6eb29d14e8e83bb302e5aa05cb78fc626e649e11ab642e137493e4bec7627",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-connector-mcp/src/index.ts",
       "sha256": "47f25ade5f51cf5c05c571058be6399a63f88cd9627cd1fea3f94cba10debef7",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-connector-mcp/src/runtime.ts",
       "sha256": "9c2ff48f73bbf4dbcd5ab791b074b7f6d6c278381ee6481b3fcaca069bd652f3",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-connector-mcp/src/server.ts",
       "sha256": "d08c8665b831ed0c88ad04fd4746c89bd998b349d3f7dfc7f908ed41e5a6dbc0",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/canvas-connector-mcp/tsconfig.json",
       "sha256": "48b018b4b3461e9a4a240ff42d10f09ccba6a4ebb0de283c833ace5b45a69c86",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/client-config/package.json",
       "sha256": "a1ec24b735ea3a850d627b4c55da20befd7692c3f1bd5a27d1ed2c9922932a62",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/client-config/src/cli.ts",
       "sha256": "b8ea79195bebf8e4c2a15e4c7c29072128c7a73bbc9df45dac0bd15121149f78",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/client-config/src/index.ts",
       "sha256": "f246a0aa91c9ec978f404e196e388dc839c73acf709f8b1b73765f44545a2510",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/client-config/tsconfig.json",
       "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/contracts/package.json",
       "sha256": "480683f74149b039458dc0946ba062f2380b21d3109f839de55077a2341f10da",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/contracts/src/index.ts",
       "sha256": "f34a673efc8807cc6d5cd28515a8258b179045dc5314df50b60422171ef9b266",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/contracts/tsconfig.json",
       "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/package.json",
       "sha256": "cddfae1321cbb6f88e14a5149377b744924be83d83f579fd01c4ce996252717a",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/canvas-privacy-pagination.ts",
       "sha256": "56f1969f9b2796a15f9ddb6b924bc29b1464f648a5ad24ea5f3542d330d96291",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/catalog.ts",
       "sha256": "4ac518339acc116fccc7a2a2ed2de1ddeac057ecb1d419e3ef048a79dc5ffa75",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/index.ts",
       "sha256": "1f80ad8d17f45ae3965ce65a9b8dd21171382b70bdfe4867b324f780a21f6514",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/privacy.ts",
       "sha256": "09afa9b268eac50669b7963b30cfb81ec2153a28fe67b32a3fcf462801a1113f",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/private-file-access.ts",
       "sha256": "d2fa3b69e16f28c42e6bdad0e1888ddcb098190eea4f8b8a6b97d2051b8e23d9",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/private-sqlite-state.ts",
       "sha256": "04c7aae32735f5176f31910ea4d5bc61aba6099cd495e20aa514f554794569b7",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/private-state-file.ts",
       "sha256": "7f018af73540be81573ee096608694914c4fd0b28b60f6590b3a52afbda34d4a",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/process-lifetime.ts",
       "sha256": "e86084d8f24ba73118314b18e8777426ffab34b8aa9500768e71071b3fa1858d",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/publication-candidate.ts",
       "sha256": "47b1e77b8c4d6536194f35f43dfb942d9ebb1e97ab28aa796b39eebe2937379b",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/publication.ts",
       "sha256": "3be7fd0929f402a814f0905325f344654c681690fd209ca21307d3222bd20dc4",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/reconcile.ts",
       "sha256": "70ad0f4b6fcbccfaf22204aac4988feebebb02df122c9b31156978c65a4b8564",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/result.ts",
       "sha256": "6cff3c69a28bbb29a6078d36a42b8c31a49c6a379aded803f5b0d4ed6a88bb90",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/source-mcp-privacy.ts",
       "sha256": "2122534efc98053dd2de897dc9efdb8b66229f82bc8a9a667b418c289ecc7382",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/src/source-rights.ts",
       "sha256": "d72002e5c0ec8a01e4b15388618e9dc402958727261047f22094c29bfe5283d6",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/gateway-core/tsconfig.json",
       "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/package.json",
       "sha256": "2a46adc56b0b5c7b90372b72c95788e8a0fc5fd986ef444c26412da027b84b3a",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/activity-tools.ts",
       "sha256": "dc4dda3d5e0d7ea7ccbfdba4ce47eb5dad7f7e5c32434b792d2633ab113aa999",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/approval-context.ts",
       "sha256": "f33dcfb5aea9a4c34441b7f96985500a54dd477a295d52f0d94304a03bbf1a8c",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/approval-entry.ts",
       "sha256": "f6bb73de5580982c7f6876533d4161ed5ccddfd5ce0f6b7dba5f35c9ebe9cced",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/approval-preview.ts",
       "sha256": "6fd8076f518654feceb4a881a45f942b5ede99aad19b9fa19d3f7c7c359747ba",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/approval-server.ts",
       "sha256": "27d67cea6044c78c18ea708b7ddb0c80c3c54d20bc5a056a9c97cd568133b780",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/batch-recovery.ts",
       "sha256": "8d1896aca4a151017329e15a71a79e5d5f1ee25ef62ec418d168126d4bd996a3",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/batch-tools.ts",
       "sha256": "44fdc0813ac99a118f6e0252bf4957fb0eba049fc21fd67d61a89fc478351612",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/batch-window-scheduler.ts",
       "sha256": "7f73ea00299e97a22af8372c031c77933a01ac3f6561b68d2bca6db1cbc9e217",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/blackboard-actions.ts",
       "sha256": "79f2c4596ef982dcad6656f8addf9c17824e6cd72aed69630a05cb6ba25f589e",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/blackboard-content-patch.ts",
       "sha256": "8bd05666905ecf4868dd3fd9e6f54bd4100dbc00d8d8d5e13f6ef38faf3b5c36",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/canvas-classic-quiz-submissions.ts",
       "sha256": "b73267c4b0c72306d76fc40273e6ebb6a459efb06366876c35c32216e0249014",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/canvas-conversations.ts",
       "sha256": "8d8c628604d59f2f9c05b7c1ab2b9e2439467e11c9897ce76dc2e79cb7bad7a5",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/canvas-course-compose.ts",
       "sha256": "bd69bf278d7b411c1888429484fe72a4079eaa30c8d9b3caf3738ed5b54eb78a",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/canvas-course-summaries.ts",
       "sha256": "b8abd54be6a945fbf60561d9dd849304a7f08f29226a4d06198fed9a556afad1",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/canvas-file-transfer.ts",
       "sha256": "2a2b13f44e46269990fd73b5d23b78c6037a361396e699c70c791294f8a6f2d4",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/canvas-new-quiz-hot-spot.ts",
       "sha256": "f7d6dcf659ab62961bd000d407236c910f962135e22dde596b1e5cca1ada0fc5",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/canvas-read.ts",
       "sha256": "7482474923f59c28232fc6e9afa65f0d0b319b72e3eb88254e1dd8b887279c54",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/client-route.ts",
       "sha256": "18a8a8729164fe15e8816df784c5045c3ac30d5fc00707d4c7c0003b9f9818f9",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/config.ts",
       "sha256": "9c93604dc7c996f00430a7c7e7cc7ca1920dd3eebd4b886699dbfe4ea1f49013",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/course-audit.ts",
       "sha256": "464812269988ee7a6923115141aea612228f38fe45c36519e0b699a5dbd5a2dc",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/course-inventory.ts",
       "sha256": "42f06c3834158a2d1d5ab2d7e4cbe844530e29ae220324ee5a191b93ce223d56",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/edit-access-review.ts",
       "sha256": "6fdca07728490f2b5abee149693ae3a46cf8a92ed2a1eeb5a8c9403b273e1434",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/edit-access.ts",
       "sha256": "ef35c023f8fab2934acbadcbb4e301a967c6f4f58eb92040c278771f144ad10f",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/exact-trust-file.ts",
       "sha256": "50e48ad25225d1aab8685cdae10ea037870afd9ce38b1ecfb9f0dcb03610f3eb",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/file-staging.ts",
       "sha256": "b7dc47c9577222194d618581e760f750e3cb5fd22f35bc43dbfb53920067f4c9",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/full-server.ts",
       "sha256": "2e9cf0eb00f154cecc50c21a72ed6ded86aa116e730d7d86081b4d73d655f4e3",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/index.ts",
       "sha256": "edc28b4cc36488465a48f31322ea48eb5b40c02eedb0c19d0945114a94014e6f",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/item-bank-fan-out.ts",
       "sha256": "bf1e0217b7d9d1632843f7884a973cb603b27a06ef128a224941f66825e41446",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/item-bank-repair.ts",
       "sha256": "6c8279de7505c6de5cb843258b62417ad2ba59a95740c323065c2b3d9dce5060",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/lesson-review.ts",
       "sha256": "af9ba66aa7a58db13c684742f04180f1724c963124f1298355fbbba2993810cb",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/local-owner-maintenance.ts",
       "sha256": "a777de002ba30eb8deaa34946c56efd3e0949fecac3c224e8488243a5db3d8a7",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/local-owner-sidecar-access.ts",
       "sha256": "7f9c0c04bd7bb5888168d0bad826ec30668b42a19a84191606183f13d477619a",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/local-owner.ts",
       "sha256": "4f122ab6997e3e0d5754125d80631a983ae5a114b741ead6d8cbe3de2c51f09b",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/meridian-catalog-truth.ts",
       "sha256": "b76f4e21a3c5cb89620d1a9ff3e5ba4e8659c23a30687651a27ff7f5c2a9f649",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-activity-content.ts",
       "sha256": "5aa26f0e16b93d6c3d117d360c6793e1ea45944c006755010274687d6e08382a",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-assignment-submission-detail.ts",
       "sha256": "a590067adf7c4080f754b697838c04d853040e9f47ee69ecf64a8bf68e1743c8",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-assignment-submissions.ts",
       "sha256": "80a7a1be0b73e89105d1824e932ed9747d33ad4da10e3ac934b5f6aad4a3132b",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-course-list.ts",
       "sha256": "b6536a83aaf11dee86c8e52caac0c23d4e8281290b7642e959399adca03b0c01",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-forum-activity-summaries.ts",
       "sha256": "c2918f55b1e5039ce843ef2e45651668bcd5847c0e26eff1b485d3e2c713c511",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-grade-reports.ts",
       "sha256": "1f905f269f62a9a416bc916a6ee520fe09b504f3102be66a2c5b19b1d4cbf2c8",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-learner-input.ts",
       "sha256": "f0e27fc840e94702d80360363e96ac09e51920a6e8fc2ef1daba29a177c1e93b",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-lesson-pages.ts",
       "sha256": "3fa50601ac5d499c2252044b1f0b436a6d88a42f8c371de8290cb784ab71cac4",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-participants.ts",
       "sha256": "d9c0a354a8f278e600606de365632b929f1f76b7be5450be0fcc528dc22e85b1",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-question-impact.ts",
       "sha256": "7540ebca3d562badb793884d6456e8f0a52698fe7447be38cb1bdc75d53f5272",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-quiz-attempt-detail.ts",
       "sha256": "fb8a6997cd9d002f9463895b1454bbe5d6faafba61bbbc2d6f822519c82b66a8",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-quiz-attempt-summaries.ts",
       "sha256": "e659df82f7c3a2d4fd76d0b522d2c0af06946588329cd2553c3793bfcda5a2c5",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-reports.ts",
       "sha256": "39dfc2ea0a5646e6151cdc6fe29351c1f45e524eebf29c96d1388010196e2081",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-resource-file.ts",
       "sha256": "bc01d0aae5921be282377ba7a6d3dcda2e52a429bb191c166f6715b05955b9e8",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-scorm-reports.ts",
       "sha256": "eb076f4ae67adf06dcdc2ea21cade8d31219dcfeedba43cea250bb512afa2fb5",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/moodle-site-inventory.ts",
       "sha256": "46d7135f9d0d69552a2034a2346347303a449d667ecca987a588c4f2a6b3fdab",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/morrow-runtime.ts",
       "sha256": "b8b4d4bc9761fdb7257a23b48efdc5bb0a8e831b67827001c214d412e7e5ee12",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/native-tool-manifest.ts",
       "sha256": "e27afeb4914643387369464c7e463ba044c299febbcad8c19a5a1d8eb079252d",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/new-quiz-effects.ts",
       "sha256": "e1ae0e3a9de3cf9601fd4c64549b2930130d57fd4ade45105c2ca5557ec8fed0",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/new-quiz-item-lifecycle.ts",
       "sha256": "5bf5ffb0e9f78da4ecf812a0d62c83e1f918d2ac8c700e8c81b75ce049a79077",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/new-quiz-item-order.ts",
       "sha256": "086a0c3d46f3b36733fc8ecef85de8390a9ab885a9fde2143245dd82d3bb3090",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/new-quiz-lifecycle.ts",
       "sha256": "274fb271a72660c33a4dea1a85b7a1d024c11a95171f5fc9d9cf5f7fd1ea2e36",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/new-quiz-settings.ts",
       "sha256": "a2fa0c127d2ae26a6908d150ffcd51c11f0b71d10c3cfa2cf98e423e94362942",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/operation-tools.ts",
       "sha256": "4fb04ea1ca8eaa160c1fbcb9688255bdc0c7b28a88bda92122d50d4c431062f1",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/page-correction.ts",
       "sha256": "ae5e9944eb755fbd6f21ab3f05da596df618cdb138e76ce6fd050f72305680b8",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/private-chat.ts",
       "sha256": "3771c91bd81d8247e98edad5b9c33b795cb69c189145719b20204d7d32e2f8b7",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/program-ledger.ts",
       "sha256": "bed8e5b5cb54f9e58cac470d9ee6e9cbfcabb870a7401bb7df2eb60654c28980",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/quiz-check.ts",
       "sha256": "cebfd1e9aef3c8e6d60a53ca3211efb687c227bdb9475199682b50db2587801d",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/quiz-item-payload.ts",
       "sha256": "f80b681d1f3adc5c62cdae8d3485d2e574e187752f4d5dd27eb34455abac001d",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/result-artifacts.ts",
       "sha256": "ac54d7fb41a97f9669120b2ac1e1dd4f75cc65dc92491e1c45e39a41160c8905",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/review-loop-guidance.ts",
       "sha256": "182d399696ea1bff3d8c3a0af50916d2a9b97b4ddd60b1a31fec1a05b2496bf8",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/runtime.ts",
       "sha256": "44a440f216d0bcfda9e20772fecaf6c8d2b9a17724c362af2b9a94f66a3a1f42",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/sandbox-upstream.ts",
       "sha256": "6c865f56b77cf2e765a185349d5c3740774f422674e2896fea7b18654c6196ad",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/server-instructions.ts",
       "sha256": "6d6e1194ef22e61d5a74a00bf4e00419dde50c9fe7cf5942d5f1ccfb91e8bf13",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/server.ts",
       "sha256": "184f837e201e06824bb57c02a9897fe5e61faabf3d348c2b000dff147d4342a0",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/source-attestation.ts",
       "sha256": "bcde37f85451fe9efba546b18752da3862da286b64263c2de2ac0fe4ca8e8673",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/state-lease.ts",
       "sha256": "a4313b24864554078b7ec021288f4e3af7d0914fedcee45b64b526b4a7884eeb",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/src/strict-stdio.ts",
       "sha256": "9cb01e1a429f9e7b636b1649188c1dbdb4154e4593e4ae0a93429ab3972caf09",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/mcp-server/tsconfig.json",
       "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/operation-journal/package.json",
       "sha256": "eccd8ff801a3f6e2cfac650d33ab2cf2e7aae78508f384135c4697614c3dc02a",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/operation-journal/src/causal-sequence.ts",
       "sha256": "56b454e7b5766b78040c042c8cec56c99f9581ed72c368731b6f2c5223f9cf51",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/operation-journal/src/effect-broker.ts",
       "sha256": "fa1effbad329e674fa71d7821dd3e5c5da970050568fcd76727ecbea4c14cc18",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/operation-journal/src/index.ts",
       "sha256": "216267893df78c0faf293ab3fdae4a69dcbc35b24ae81da6126df335971eb76d",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/operation-journal/tsconfig.json",
       "sha256": "c0416651fb924b94421509ec89bf153b3bda9fe7d93d34557ee312b8ec4c2e95",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/upstream-mcp/package.json",
       "sha256": "93a0db3f355c0d894c1e268a64b6874d37d490293b208dfdb7d6753f25be817e",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/upstream-mcp/src/index.ts",
       "sha256": "8dd5b1a95cb3e95bb93cdf3ee3038bb3aa40f891258d82b76cc58dd443558e7f",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/upstream-mcp/src/strict-stdio.ts",
       "sha256": "6532966ecb4007b8e839e76c57011418ffecc8dcab2eb192a1f06c6606e81bc2",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "packages/upstream-mcp/tsconfig.json",
       "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
       "disposition": "adapted_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "pnpm-lock.yaml",
       "sha256": "b7db5e88aaca459a0784268cb2bb9c96643b877095f42cff28109366e92548f6",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "pnpm-workspace.yaml",
       "sha256": "dad9e599022904529948df3127e8875356236cef0b772574970f80095d2c3666",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "scripts/generate-canvas-api-catalog.mjs",
       "sha256": "e2926aa5e830f63ce2c24a4faf0e1cf1ae8b5d220ef9f09b5ba3a5747e254b48",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "scripts/lib/deterministic-archive.mjs",
       "sha256": "c3a7a075a7cfa7f7d57fd350f44496129985d0b15dfeeed1f8ce6f31b49edc7f",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "scripts/package-canvas-connector.mjs",
       "sha256": "d14405acbad3208dfb6b54d374a569760b26e26dab7b73d5f1d959dbd1d77043",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "scripts/package-mcp-bundle.mjs",
       "sha256": "f4cb19fdba56d6fd9917e5147bc83953b4967332cb7b3f646e5def5a028de4db",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "scripts/sync-canvas-readback-plan.mjs",
       "sha256": "510aa36784069e0ef236a28361607fb9e445f2911c723dad424c0875aea62b86",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     },
     {
       "path": "tsconfig.base.json",
       "sha256": "87fe4790e8f588c357efa665a1215777a8b284df559dc7c21591674f988a0e68",
       "disposition": "direct_owned",
-      "review": "Braden authorized corrected Morrow releases and GitHub publication in this task on 2026-10-07; reviewer=codex-launch-repair-review; source=HEAD"
+      "review": "Braden approved Morrow repairs and public release publication on 2026-10-08; reviewer=codex-readiness-repair-review; source=HEAD"
     }
   ]
 }

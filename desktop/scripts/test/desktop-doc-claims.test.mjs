@@ -314,7 +314,7 @@ test("the README names the desktop artifacts the build configuration actually pr
   }
   const windowsGuide = flat("installer/WINDOWS-DEPLOYMENT.md");
   assert.match(windowsGuide, /No Windows 1\.0\.6 or 1\.0\.7 installer was published/);
-  assert.match(windowsGuide, /The Windows download is the published 1\.0\.13 installer/);
+  assert.ok(windowsGuide.includes(`Until Morrow Desktop ${version} is published, the Windows download remains the published 1.0.14 installer`));
   assert.match(windowsGuide, /Every published Windows artifact so far is unsigned/);
   assert.doesNotMatch(windowsGuide, /Every Morrow Desktop release so far, including 1\.0\.5/);
   assert.match(readme, /Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature/,
@@ -324,15 +324,28 @@ test("the README names the desktop artifacts the build configuration actually pr
 
 test("the published downloads stay separate from the current checkout version", () => {
   const version = JSON.parse(read("package.json")).version;
-  assert.match(flat("README.md"), /Morrow Desktop 1\.0\.13 is for Mac with Apple silicon and Windows x64/);
-  assert.ok(flat("LIMITATIONS.md").includes(`Morrow Desktop \`${version}\` runs on Mac with Apple silicon and Windows x64`));
-  assert.match(flat("CHANGELOG.md"), /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.13 \(2026-10-03\).*## 1\.0\.11 \(2026-10-02\)/);
+  assert.equal(JSON.parse(read("installer/package.json")).version, version);
+  assert.notEqual(version, "1.0.14", "the current checkout version differs from the previous public release");
+  const readme = flat("README.md");
+  const limitations = flat("LIMITATIONS.md");
+  const changelog = flat("CHANGELOG.md");
+  assert.match(readme, /Morrow Desktop is for Mac with Apple silicon and Windows x64/);
+  assert.ok(readme.includes(`This checkout carries Morrow Desktop ${version}.`));
+  assert.ok(limitations.includes(`This checkout contains Morrow Desktop \`${version}\` for Mac with Apple silicon and Windows x64`));
+  assert.ok(limitations.includes(`Until Morrow Desktop \`${version}\` is published, public installers remain on Morrow Desktop \`1.0.14\``));
+  assert.ok(changelog.includes(`## ${version} (2026-10-08)`));
+  assert.match(changelog, /^# Changelog Release notes for Morrow Desktop\..*## 1\.0\.14 \(2026-10-07\).*## 1\.0\.13 \(2026-10-03\).*## 1\.0\.11 \(2026-10-02\)/);
   const bridgeVersion = JSON.parse(read("connector/extension/manifest.json")).version;
-  assert.ok(flat("README.md").includes(`This checkout contains Morrow Desktop ${version} with Morrow Bridge ${bridgeVersion}`));
-  assert.match(flat("README.md"), /Published downloads are Mac 1\.0\.13 and Windows 1\.0\.13/);
-  assert.doesNotMatch(flat("README.md"), /unpublished first-use guidance candidate/);
-  assert.doesNotMatch(flat("CHANGELOG.md").split("## 1.0.6")[0], /prepared but has not been published|Mac download remains on published 1\.0\.6/);
-  assert.match(flat("installer\/WINDOWS-DEPLOYMENT.md"), /Published 1\.0\.13: `Morrow-1\.0\.13-win-x64\.exe`/);
+  assert.ok(readme.includes(`This checkout contains Morrow Desktop ${version} with Morrow Bridge ${bridgeVersion}`));
+  assert.ok(readme.includes(`Until Morrow Desktop ${version} is published, public downloads remain Mac 1.0.14 and Windows 1.0.14.`));
+  assert.match(readme, /previous published release, Morrow Desktop 1\.0\.14, reviewed on 2026-10-08/);
+  assert.match(readme, /Previous release 1\.0\.14: `Morrow-1\.0\.14-mac-arm64\.dmg`/);
+  assert.match(readme, /Previous release 1\.0\.14: `Morrow-1\.0\.14-win-x64\.exe`/);
+  assert.match(readme, /The exact Morrow Desktop 1\.0\.14 files passed native platform smoke before publication/);
+  assert.match(read("../docs/versioning.md"), /Unsigned Morrow Desktop builds have no update feed/);
+  assert.doesNotMatch(readme, /unpublished first-use guidance candidate|Published downloads are Mac 1\.0\.13 and Windows 1\.0\.13/);
+  assert.doesNotMatch(changelog.split("## 1.0.6")[0], /prepared but has not been published|Mac download remains on published 1\.0\.6/);
+  assert.match(flat("installer/WINDOWS-DEPLOYMENT.md"), /Published 1\.0\.14: `Morrow-1\.0\.14-win-x64\.exe`/);
 });
 
 // electron-builder.config.cjs takes its target platform from MORROW_TARGET_PLATFORM
