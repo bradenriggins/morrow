@@ -9,8 +9,8 @@ import { createMacSmokeBinding, assertAppReceipt } from "./desktop-mac-smoke.mjs
 import { electronAsarReleaseIdentity, readElectronAsarPackage } from "../lib/electron-asar-package.mjs";
 import { runOwnedProcess } from "../lib/owned-process.mjs";
 
-export const BRIDGE_VERSION = "1.0.137";
-export const BRIDGE_SEAL = "b2b0e2ecbe2a1faf9476212f72fcb9b34643107032262cc28ea58145510e656a";
+export const BRIDGE_VERSION = "1.0.138";
+export const BRIDGE_SEAL = "b5761be70901506f68b281ed90cc2ec53b7e5007bb1196ec73966293df77937d";
 const EXTENSION_ID = "abeloclekioohahgedmjcdbpllfjfhko";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 

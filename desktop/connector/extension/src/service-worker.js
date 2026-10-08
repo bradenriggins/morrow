@@ -3118,11 +3118,10 @@ function retireBridgeSocket(socket, { closeCode = null, reason = "", reconnect =
 async function bridgeApprovalPresence() {
   try {
     const stored = await chrome.storage.session.get(REVIEW_APPROVAL_PRESENCE_SESSION_KEY);
-    try {
-      return parseReviewApprovalPresence(stored?.[REVIEW_APPROVAL_PRESENCE_SESSION_KEY]) !== null;
-    } catch {
-      return false;
-    }
+    const presence = stored?.[REVIEW_APPROVAL_PRESENCE_SESSION_KEY];
+    if (presence === undefined) return false;
+    parseReviewApprovalPresence(presence);
+    return true;
   } catch {
     return null;
   }

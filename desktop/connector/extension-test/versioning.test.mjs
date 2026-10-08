@@ -11,6 +11,7 @@ function event(name) {
 let manifestVersion = "1.0.134";
 let reloads = 0;
 let sessionValues = {};
+let sessionReadError = null;
 
 globalThis.chrome = {
   runtime: {
@@ -29,7 +30,10 @@ globalThis.chrome = {
   },
   storage: {
     local: { get: async () => ({}), set: async () => undefined },
-    session: { get: async () => sessionValues },
+    session: { get: async () => {
+      if (sessionReadError) throw sessionReadError;
+      return sessionValues;
+    } },
     onChanged: event("onChanged"),
   },
   permissions: { onAdded: event("onAdded") },
@@ -142,6 +146,45 @@ describe("Store update reload quiescence", () => {
     assert.equal(worker.updateReloadQuiescent({}), false);
     assert.equal(worker.updateReloadQuiescent({ ...idle, approvalPresence: null }), false);
     assert.equal(worker.updateReloadQuiescent({ ...idle, reviewsWaiting: -1 }), false);
+  });
+
+  it("defers a Store reload while an approval page is open", async () => {
+    sessionValues = { morrowReviewApprovalPresence: { origin: "http://127.0.0.1:32100", key: "a".repeat(43) } };
+    reloads = 0;
+    try {
+      await listeners.get("onUpdateAvailable")();
+      await new Promise((done) => setTimeout(done, 25));
+      assert.equal(reloads, 0);
+    } finally {
+      sessionValues = {};
+    }
+  });
+
+  it("defers a Store reload when stored approval state is malformed", async () => {
+    const invalidRecords = [null, false, [], {}, { origin: "http://127.0.0.1:32100", key: "bad" }];
+    try {
+      for (const presence of invalidRecords) {
+        sessionValues = { morrowReviewApprovalPresence: presence };
+        reloads = 0;
+        await listeners.get("onUpdateAvailable")();
+        await new Promise((done) => setTimeout(done, 25));
+        assert.equal(reloads, 0, JSON.stringify(presence));
+      }
+    } finally {
+      sessionValues = {};
+    }
+  });
+
+  it("defers a Store reload when session storage cannot be read", async () => {
+    sessionReadError = new Error("storage unavailable");
+    reloads = 0;
+    try {
+      await listeners.get("onUpdateAvailable")();
+      await new Promise((done) => setTimeout(done, 25));
+      assert.equal(reloads, 0);
+    } finally {
+      sessionReadError = null;
+    }
   });
 
   it("observes Store updates and reloads while quiescent", async () => {

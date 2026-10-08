@@ -2,6 +2,22 @@
 
 Release notes for Morrow Desktop. Tags use the form `desktop/vX.Y.Z` (see [docs/versioning.md](../docs/versioning.md)). Published installers are on [GitHub Releases](https://github.com/bradenriggins/morrow/releases). Releases before 1.0.5 have no entry here.
 
+## 1.0.15 (2026-10-08)
+
+### Keep approval reviews open
+
+- For Chrome Web Store updates, Morrow Bridge waits to reload when it cannot confirm that your approval review is closed.
+
+### Approvals and Edit access
+
+- When your assistant asks to turn on Edit, Morrow opens a review in Chrome. Wait for Morrow to finish reading the course, then select Turn on Edit. Actions that remove content are turned on only in Morrow Bridge Plan and Edit settings.
+
+### Technical notes
+
+- Include Morrow Bridge 1.0.138. Defer a Chrome Web Store update reload when session storage cannot be read or its stored approval record is malformed.
+- Run the registered Store-update regressions in the existing Desktop CI gate.
+- Clarify that an engineering MCP archive cannot prepare the Bridge folder needed for course pairing. Complete course setup uses Morrow Desktop or the existing source installation.
+
 ## 1.0.14 (2026-10-07)
 
 ### Connect Codex CLI on Windows
