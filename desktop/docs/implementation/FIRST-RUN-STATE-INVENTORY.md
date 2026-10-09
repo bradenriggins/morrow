@@ -565,9 +565,9 @@ stale name here.
 | `Check connection` | Morrow app | `installer/shared/setup-view.mjs:297`, `installer/shared/setup-view.mjs:297` |
 | `Check for updates` | Morrow app | `installer/renderer/renderer.js:275` |
 | `Restart to update` | Morrow app | `installer/renderer/renderer.js:302` |
-| `Try restart again` | Morrow app | `installer/renderer/renderer.js:288` |
-| `Retry the update` | Morrow app | `installer/renderer/renderer.js:304` |
-| `Try again` | Morrow app | `installer/renderer/renderer.js:287` |
+| `Try restart again` | Morrow app | `installer/renderer/renderer.js:298` |
+| `Retry the update` | Morrow app | `installer/renderer/renderer.js:314` |
+| `Try again` | Morrow app | `installer/renderer/renderer.js:264` |
 | `https://meetmorrow.app/support` | Morrow app | `installer/shared/setup-view.mjs:717` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:92` |
 | `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:687` |

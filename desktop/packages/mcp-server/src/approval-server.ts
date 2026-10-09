@@ -1430,6 +1430,18 @@ const OPERATIONS_LIST_PROOF_NONCE = "list";
 /** The nonce Morrow Bridge uses when it signs the open of a review page, before that page has a form nonce. */
 export const REVIEW_OPEN_NONCE = "open";
 
+function reviewPageReferer(referer: string, baseUrl: string, kind: string, id: string): boolean {
+  const expected = `${baseUrl}/${kind}/${encodeURIComponent(id)}`;
+  if (referer === expected) return true;
+  try {
+    const url = new URL(referer);
+    if (`${url.origin}${url.pathname}` !== expected || url.hash) return false;
+    return [...url.searchParams.keys()].every((key) => key === "presence");
+  } catch {
+    return false;
+  }
+}
+
 function presentedReviewProof(request: IncomingMessage, url: URL): string {
   const header = request.headers["x-morrow-review-presence"];
   if (typeof header === "string" && header) return header;
@@ -1857,7 +1869,7 @@ export class LoopbackApprovalServer {
         const requestReferer = String(request.headers.referer || "");
         const baseUrl = this.baseUrl;
         const originValid = requestOrigin === baseUrl;
-        const refererValid = requestReferer === `${baseUrl}/${target.kind}/${encodeURIComponent(target.id)}`;
+        const refererValid = reviewPageReferer(requestReferer, baseUrl, target.kind, target.id);
         const { nonce: formNonce, remember, presence } = await readFormNonce(request);
         signal.throwIfAborted();
         const expected = formNonce ? this.nonces.get(formNonce) : undefined;

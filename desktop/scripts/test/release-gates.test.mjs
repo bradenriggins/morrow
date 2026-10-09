@@ -553,6 +553,13 @@ test("the committed source-origin ledger is unreviewed, and the old self-stamp i
   assert.ok(ledger.entries.every((entry) => entry.reviewer === null));
   assert.ok(ledger.entries.every((entry) => entry.beforeDigest === null || /^[0-9a-f]{64}$/.test(entry.beforeDigest)));
   const head = execFileSync("git", ["-C", desktop, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  if (typeof ledger.candidateCommit === "string" && ledger.candidateCommit !== head) {
+    try {
+      execFileSync("git", ["-C", desktop, "cat-file", "-e", `${ledger.candidateCommit}^{commit}`], { stdio: "ignore" });
+    } catch {
+      execFileSync("git", ["-C", desktop, "fetch", "--depth=1", "origin", ledger.candidateCommit], { stdio: "ignore" });
+    }
+  }
   const generated = validateSourceOriginLedger({
     root: desktop,
     commit: head,
