@@ -39,10 +39,10 @@ export const BROWSER_HARNESS_IDS = Object.freeze([
   "desktop_windows_smoke",
 ]);
 /**
- * The harnesses a release candidate cannot be promoted without. `desktop_windows_smoke` is not one
- * of them: it runs separately on a native Windows host with the exact installer and package
- * receipt. This receipt records what happened on the current host. It still blocks if it is
- * recorded as run and did not pass. The desktop installer QA workflow runs it on native Windows.
+ * The harnesses a release candidate cannot be promoted without on this host. `desktop_windows_smoke`
+ * runs on a native Windows host with the exact installer, so this command records it as not run
+ * here. A promotable receipt still requires that smoke to have passed. `not-run-on-this-host` does
+ * not satisfy it.
  */
 export const REQUIRED_BROWSER_HARNESS_PASSES = Object.freeze([
   "canvas_connector_browser",
@@ -457,6 +457,92 @@ function validDigest(value) {
   return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 }
 
+/** A Node test log counts only when it reports passes and zero failures. */
+export function logTextShowsPass(text) {
+  const plain = Buffer.isBuffer(text) ? text.toString("utf8") : String(text ?? "");
+  const stripped = plain.replace(/\u001b\[[0-9;]*m/g, "");
+  const total = (label) => {
+    const values = [...stripped.matchAll(new RegExp(`^ℹ ${label} (\\d+)\\s*$`, "gmi"))].map((match) => Number(match[1]));
+    if (values.length === 0) return null;
+    return values.reduce((sum, value) => sum + value, 0);
+  };
+  const pass = total("pass");
+  const fail = total("fail");
+  if (pass === null || fail === null || pass < 1 || fail !== 0) return false;
+  const tests = total("tests");
+  if (tests !== null && tests !== pass) return false;
+  if (/\bnot-run-on-this-host\b/.test(stripped)) return false;
+  return true;
+}
+
+function gitFailureDetail(error) {
+  return `${error?.stderr || ""}\n${error?.message || ""}`;
+}
+
+function gitPathMissing(detail) {
+  return /invalid object name|bad revision|unknown revision|exists on disk, but not in|does not exist in|path .* does not exist/i.test(detail);
+}
+
+function showTracked(root, revision, path) {
+  const { gitRoot, sourcePrefix } = sourceGitContext(root);
+  return execFileSync("git", ["-C", gitRoot, "show", `${revision}:${sourcePrefix}${path}`], {
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 64 * 1024 * 1024,
+  });
+}
+
+function sourceCommitBlob(root, commit, path) {
+  try {
+    const { gitRoot } = sourceGitContext(root);
+    if (git(gitRoot, ["cat-file", "-t", commit]).trim() !== "commit") return { status: "invalid" };
+  } catch {
+    return { status: "invalid" };
+  }
+  try {
+    return { status: "present", bytes: showTracked(root, commit, path) };
+  } catch (error) {
+    return { status: gitPathMissing(gitFailureDetail(error)) ? "absent" : "invalid" };
+  }
+}
+
+function parentBlob(root, commit, path) {
+  try {
+    return { status: "present", bytes: showTracked(root, `${commit}^`, path) };
+  } catch (error) {
+    return { status: gitPathMissing(gitFailureDetail(error)) ? "absent" : "invalid" };
+  }
+}
+
+function sourceOriginGitMatches(root, entry, file) {
+  if (typeof entry.sourceCommit !== "string" || !/^[0-9a-f]{40,64}$/i.test(entry.sourceCommit)) return false;
+  if (/^(.)\1+$/.test(entry.sourceCommit)) return false;
+  const blob = sourceCommitBlob(root, entry.sourceCommit, file.path);
+  if (blob.status !== "present") return false;
+  const blobSha = sha256(blob.bytes);
+  const derivation = entry.derivation;
+  const blobMatches = derivation ? derivation.sourceSha256 === blobSha : entry.afterDigest === blobSha;
+  if (!blobMatches) return false;
+  const parent = parentBlob(root, entry.sourceCommit, file.path);
+  if (parent.status === "invalid") return false;
+  if (parent.status === "absent") return entry.beforeDigest === null;
+  return entry.beforeDigest === sha256(parent.bytes);
+}
+
+function withoutMorrowEnv(run) {
+  const saved = [];
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith("MORROW_")) {
+      saved.push([key, process.env[key]]);
+      delete process.env[key];
+    }
+  }
+  try {
+    return run();
+  } finally {
+    for (const [key, value] of saved) process.env[key] = value;
+  }
+}
+
 function validThirdPartyEvidence(entry, files) {
   const evidence = entry?.thirdParty;
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return false;
@@ -536,8 +622,9 @@ export function validateSourceOriginLedger({
       && Array.isArray(entry.dependencies)
       && Array.isArray(entry.testMapping)
       && typeof entry.reviewer === "string" && entry.reviewer.trim().length > 0
-      && validDigest(entry.beforeDigest)
-      && exactCandidateDerivation(entry, file, derived.get(file.path), "afterDigest");
+      && (entry.beforeDigest === null || validDigest(entry.beforeDigest))
+      && exactCandidateDerivation(entry, file, derived.get(file.path), "afterDigest")
+      && sourceOriginGitMatches(root, entry, file);
     if (!valid) invalid.push(file.path);
   }
   const unexpected = entries
@@ -563,7 +650,7 @@ export function validateSourceOriginLedger({
     ledgerStatus: ledger.status || "unknown",
     candidateCommit: ledger.candidateCommit || null,
     candidateCommitMatches,
-    passed: reviewed && missing.length === 0 && invalid.length === 0,
+    passed: reviewed && missing.length === 0 && invalid.length === 0 && unexpected.length === 0,
     missing,
     invalid,
     unexpected,
@@ -682,7 +769,8 @@ function externalReceiptPolicy(root, id) {
 function authorizationReceiptValid(root, entry) {
   const configured = externalReceiptPolicy(root, entry.id);
   if (!configured) return false;
-  if (configured.receipt.kind === "evidence") return true;
+  // A matching local file is checked separately and is not verification.
+  // Evidence and authorization both need a signature from a trusted key.
   const signature = entry.signature;
   const key = configured.policy.trustedAuthorizationKeys.find((candidate) => candidate?.keyId === signature?.keyId
     && candidate?.algorithm === "ed25519" && typeof candidate.publicKeyPem === "string");
@@ -756,8 +844,15 @@ export function zeroToleranceState(root, binding = currentEvidenceBinding(root))
       && entry.evidence.every((evidence) => {
         if (!/^[a-zA-Z0-9-]+\.log$/.test(evidence.path) || !validDigest(evidence.sha256)) return false;
         const evidencePath = resolve(root, supplied.evidenceRoot, evidence.path);
-        return existsSync(evidencePath)
-          && exactFileDigestMatches(evidencePath, evidence.sha256, "Zero-tolerance evidence");
+        try {
+          const bytes = readExactTrustFile(evidencePath, {
+            label: "Zero-tolerance evidence",
+            maxBytes: MAX_EXTERNAL_EVIDENCE_BYTES,
+          });
+          return sha256(bytes) === evidence.sha256 && logTextShowsPass(bytes);
+        } catch {
+          return false;
+        }
       });
     const passed = bindingMatches && evidenceValid && entry?.status === "passed" && entry.count === 0
       && entry.receiptDigest === sha256(JSON.stringify({ binding: supplied.binding, id, evidenceDigests: entry.evidence }));
@@ -787,7 +882,8 @@ function recordedHarnessResult(receiptDirectory, entry) {
       label: "Browser harness evidence",
       maxBytes: MAX_EXTERNAL_EVIDENCE_BYTES,
     });
-    return bytes.byteLength === entry.logBytes && sha256(bytes) === entry.logSha256;
+    return bytes.byteLength === entry.logBytes && sha256(bytes) === entry.logSha256
+      && (entry.status !== "passed" || logTextShowsPass(bytes));
   } catch {
     return false;
   }
@@ -808,7 +904,7 @@ export function browserHarnessState(root, binding = currentEvidenceBinding(root)
     const entry = byId.get(id);
     const recorded = boundToHead && recordedHarnessResult(dirname(path), entry);
     const status = recorded ? entry.status : "missing";
-    const required = REQUIRED_BROWSER_HARNESS_PASSES.includes(id);
+    const required = REQUIRED_BROWSER_HARNESS_PASSES.includes(id) || id === "desktop_windows_smoke";
     const blocking = required
       ? status !== "passed"
       : !recorded || (BROWSER_HARNESS_RAN_STATUSES.includes(status) && status !== "passed");
@@ -1170,7 +1266,8 @@ function expectedCandidateGraph(root, profileName) {
   };
 }
 
-export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-full", verifyRebuild = false }) {
+export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-full", verifyRebuild = false, _stripped = false } = {}) {
+  if (!_stripped) return withoutMorrowEnv(() => stageCandidate({ root, profileName, verifyRebuild, _stripped: true }));
   assertFrozenReleaseProfiles(root);
   const profile = loadProfile(root, profileName);
   const output = assertOutputPath(root, candidateDirectory(root, profileName));
@@ -1472,7 +1569,8 @@ export function scanStagedCandidate({ root = DEFAULT_ROOT, profileName = "privat
   return report;
 }
 
-export function conformanceReport({ root = DEFAULT_ROOT, profileName = "private-full" }) {
+export function conformanceReport({ root = DEFAULT_ROOT, profileName = "private-full", _stripped = false } = {}) {
+  if (!_stripped) return withoutMorrowEnv(() => conformanceReport({ root, profileName, _stripped: true }));
   const identity = releaseIdentity(root);
   const profile = loadProfile(root, profileName);
   const lockTracked = (() => {

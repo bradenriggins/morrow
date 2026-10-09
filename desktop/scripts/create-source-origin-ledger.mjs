@@ -43,8 +43,12 @@ function tracked(path, revision = "HEAD") {
 function beforeDigest(commit, path) {
   try {
     return sha256(tracked(path, `${commit}^`));
-  } catch {
-    return sha256(Buffer.alloc(0));
+  } catch (error) {
+    const detail = `${error?.stderr || ""}\n${error?.message || ""}`;
+    if (/invalid object name|bad revision|unknown revision|exists on disk, but not in|does not exist in|path .* does not exist/i.test(detail)) {
+      return null;
+    }
+    throw error;
   }
 }
 
@@ -71,7 +75,7 @@ const entries = paths.map((path) => {
     ownership,
     dependencies: [],
     testMapping,
-    reviewer: "codex-plan-convergence-review",
+    reviewer: null,
     beforeDigest: beforeDigest(sourceCommit, path),
     afterDigest: sha256(tracked(path)),
   };
@@ -79,13 +83,15 @@ const entries = paths.map((path) => {
 
 const ledger = {
   schema: "morrow.source-origin-ledger.v1",
-  status: "reviewed",
+  status: "unreviewed",
   candidateCommit,
   entries,
   notes: [
     "Entries bind every tracked candidate source to its last source commit and current file digest.",
-    "Extra entries are allowed because private and public profiles include different reviewed subsets.",
-    "This technical origin review does not grant public source rights or publication authorization.",
+    "This generator does not review files. status stays unreviewed and reviewer stays empty until a person reviews each file.",
+    "A file added in sourceCommit has beforeDigest null. A git show error is not stored as a digest.",
+    "Extra entries are allowed in the file because private and public profiles include different subsets. The validator rejects entries that are not in the staged set.",
+    "This record does not grant public source rights or publication authorization.",
   ],
 };
 

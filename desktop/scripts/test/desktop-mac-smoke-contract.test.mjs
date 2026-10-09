@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -115,6 +115,16 @@ test("macOS smoke evidence binds the retained package graph, DMG, ZIP, source, a
     diskImage,
     packageReceipt,
     source: "d".repeat(40),
+    runId: "b".repeat(32),
+  }), /not the expected verified release graph/);
+  const skipped = JSON.parse(readFileSync(packageReceipt, "utf8"));
+  skipped.source.rebuildSkipped = true;
+  skipped.source.headIdentifiesDeliveredSource = false;
+  writeFileSync(packageReceipt, JSON.stringify(skipped));
+  await assert.rejects(createMacSmokeBinding({
+    diskImage,
+    packageReceipt,
+    source: SOURCE,
     runId: "b".repeat(32),
   }), /not the expected verified release graph/);
 });

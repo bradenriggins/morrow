@@ -132,7 +132,11 @@ test("desktop payload seals the actual gateway package, records its source prove
     .sort((left, right) => left.path.localeCompare(right.path));
   assert.deepEqual(runtime.directFiles, expectedDirectFiles);
   assert.equal(receipt.source.reproducibleFrom, "app/package-input-manifest.json");
-  assert.match(receipt.source.note, /dirty[\s\S]*inputManifestSha256/);
+  assert.equal(receipt.source.rebuildSkipped, true);
+  assert.equal(receipt.source.headIdentifiesDeliveredSource, false);
+  assert.match(receipt.source.note, /rebuild was skipped/);
+  assert.match(receipt.source.note, /does not identify the delivered source/);
+  assert.match(receipt.source.note, /inputManifestSha256/);
   for (const path of [
     "node_modules/postcss/node_modules/.bin/nanoid",
     "node_modules/cross-spawn/node_modules/.bin/node-which"
@@ -283,9 +287,32 @@ test("release output capture replaces every stale ignored workspace build", (t) 
       writeFileSync(join(entry.source, "dist", "index.js"), `export const packageName = ${JSON.stringify(entry.name)};\n`);
     }
   });
-  assert.equal(rebuilt.length, 13);
-  for (const entry of rebuilt) {
+  assert.equal(rebuilt.rebuildSkipped, false);
+  assert.equal(rebuilt.packages.length, 13);
+  for (const entry of rebuilt.packages) {
     assert.equal(existsSync(join(entry.source, "dist", "stale.js")), false);
     assert.match(readFileSync(join(entry.source, "dist", "index.js"), "utf8"), /packageName/);
   }
+
+  const previous = process.env.MORROW_PACKAGER_SKIP_REBUILD;
+  process.env.MORROW_PACKAGER_SKIP_REBUILD = "1";
+  t.after(() => {
+    if (previous === undefined) delete process.env.MORROW_PACKAGER_SKIP_REBUILD;
+    else process.env.MORROW_PACKAGER_SKIP_REBUILD = previous;
+  });
+  let ran = false;
+  const skipped = rebuildWorkspaceReleaseOutputs(directory, () => { ran = true; }, { release: false });
+  assert.equal(ran, false);
+  assert.equal(skipped.rebuildSkipped, true);
+  for (const entry of skipped.packages) writeFileSync(join(entry.source, "dist", "stale.js"), "stale again\n");
+  const released = rebuildWorkspaceReleaseOutputs(directory, (packages) => {
+    ran = true;
+    for (const entry of packages) {
+      assert.equal(existsSync(join(entry.source, "dist", "stale.js")), false);
+      mkdirSync(join(entry.source, "dist"), { recursive: true });
+      writeFileSync(join(entry.source, "dist", "index.js"), "export const released = true;\n");
+    }
+  }, { release: true });
+  assert.equal(ran, true);
+  assert.equal(released.rebuildSkipped, false);
 });

@@ -101,6 +101,8 @@ export function createWindowsSmokeBindingFromPackage({ runId, sourceCommit, pack
     || receipt.target !== "win32-x64"
     || receipt.source?.head !== requestedSource
     || receipt.source?.dirty !== false
+    || receipt.source?.rebuildSkipped === true
+    || receipt.source?.headIdentifiesDeliveredSource === false
     || receipt.payload?.releaseGraph?.schema !== "morrow.desktop-packager-admission.v1"
     || !SHA256_PATTERN.test(receipt.payload?.releaseGraph?.sha256 || "")
     || (!isUnsignedPackageSigning(receipt.signing, "win32-x64", { artifactSignature: "authenticode_absent" }) && !isSignedPackageSigning(receipt.signing, "win32-x64"))

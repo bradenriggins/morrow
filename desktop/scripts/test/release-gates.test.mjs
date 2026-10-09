@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, relative, resolve } from "node:path";
 import test from "node:test";
@@ -65,6 +65,13 @@ function attendedResults() {
     : { id: planned.harness.id, status: planned.status, reason: planned.reason }));
 }
 
+/** Attended results plus a Windows smoke log that actually passed. */
+function promotionResults() {
+  return attendedResults().map((entry) => (entry.id === "desktop_windows_smoke"
+    ? { id: entry.id, status: "passed" }
+    : entry));
+}
+
 /** Writes the receipt and the logs `pnpm test:browser` writes into `root`, and returns the receipt. */
 function writeBrowserHarnessProof(root, { commit, tree, workingTreeClean = true, results = attendedResults() }) {
   const receiptPath = resolve(root, BROWSER_HARNESS_RECEIPT_PATH);
@@ -75,7 +82,9 @@ function writeBrowserHarnessProof(root, { commit, tree, workingTreeClean = true,
       return { id: result.id, script, status: result.status, reason: result.reason };
     }
     const log = `${result.id}.log`;
-    const data = `${result.id} ${result.status}\n`;
+    const data = result.status === "passed"
+      ? `${result.id}\nℹ tests 1\nℹ pass 1\nℹ fail 0\n`
+      : `${result.id} ${result.status}\nℹ tests 1\nℹ pass 0\nℹ fail 1\n`;
     writeFileSync(resolve(dirname(receiptPath), log), data);
     return {
       id: result.id,
@@ -370,7 +379,7 @@ test(`public candidate rights and origin evidence bind the post-transform packag
         dependencies: [],
         testMapping: [],
         reviewer: "release review",
-        beforeDigest: sha256(Buffer.alloc(0)),
+        beforeDigest: null,
         afterDigest: sourceDigest,
       }],
     }));
@@ -468,7 +477,7 @@ test("a public package is not reported built while its source rights are missing
         dependencies: [],
         testMapping: [],
         reviewer: "release review",
-        beforeDigest: sha256(Buffer.alloc(0)),
+        beforeDigest: null,
         afterDigest: sha256(packageBytes),
       }],
     }));
@@ -512,9 +521,22 @@ test("source-origin validation fails closed until every staged file is reviewed"
         reviewer: "release-review",
         beforeDigest: "c".repeat(64),
         afterDigest: "a".repeat(64),
+      }, {
+        path: "extra.txt",
+        sourceCommit: "d".repeat(40),
+        originalPath: "extra.txt",
+        ownership: "new",
+        dependencies: [],
+        testMapping: [],
+        reviewer: "release-review",
+        beforeDigest: "c".repeat(64),
+        afterDigest: "a".repeat(64),
       }],
     }));
-    assert.equal(validateSourceOriginLedger({ root, files, commit: "b".repeat(40) }).passed, true);
+    const fabricated = validateSourceOriginLedger({ root, files, commit: "b".repeat(40) });
+    assert.equal(fabricated.passed, false);
+    assert.deepEqual(fabricated.invalid, ["packages/example.js"]);
+    assert.deepEqual(fabricated.unexpected, ["extra.txt"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -588,7 +610,7 @@ test("candidate set receipts bind the final digest of every profile", (t) => {
         dependencies: [],
         testMapping: ["scripts/test/release-gates.test.mjs"],
         reviewer: "release-review",
-        beforeDigest: sha256(Buffer.alloc(0)),
+        beforeDigest: null,
         afterDigest: sha256(packageBytes),
       }],
     }));
@@ -622,8 +644,9 @@ test("candidate set receipts bind the final digest of every profile", (t) => {
     const evidenceRoot = "artifacts/release/evidence-test";
     mkdirSync(resolve(root, evidenceRoot), { recursive: true });
     const log = resolve(root, evidenceRoot, "proof.log");
-    writeFileSync(log, "passed");
-    const evidence = [{ path: "proof.log", sha256: sha256("passed") }];
+    const proof = "ℹ tests 1\nℹ pass 1\nℹ fail 0\n";
+    writeFileSync(log, proof);
+    const evidence = [{ path: "proof.log", sha256: sha256(proof) }];
     writeFileSync(resolve(root, "artifacts/release/zero-tolerance-receipt.json"), JSON.stringify({
       schema: "morrow.zero-tolerance-receipt.v1", status: "passed", binding, evidenceRoot,
       checks: ZERO_TOLERANCE_TARGETS.map((id) => ({
@@ -635,7 +658,25 @@ test("candidate set receipts bind the final digest of every profile", (t) => {
     writeFileSync(log, "changed after verification");
     assert.equal(zeroToleranceState(root).passed, false);
 
-    writeFileSync(log, "passed");
+    const failedProof = "ℹ tests 1\nℹ pass 0\nℹ fail 1\n";
+    writeFileSync(log, failedProof);
+    const failedEvidence = [{ path: "proof.log", sha256: sha256(failedProof) }];
+    writeFileSync(resolve(root, "artifacts/release/zero-tolerance-receipt.json"), JSON.stringify({
+      schema: "morrow.zero-tolerance-receipt.v1", status: "passed", binding, evidenceRoot,
+      checks: ZERO_TOLERANCE_TARGETS.map((id) => ({
+        id, status: "passed", count: 0, evidence: failedEvidence,
+        receiptDigest: sha256(JSON.stringify({ binding, id, evidenceDigests: failedEvidence })),
+      })),
+    }));
+    assert.equal(zeroToleranceState(root).passed, false, "a log that does not show a pass does not count");
+    writeFileSync(log, proof);
+    writeFileSync(resolve(root, "artifacts/release/zero-tolerance-receipt.json"), JSON.stringify({
+      schema: "morrow.zero-tolerance-receipt.v1", status: "passed", binding, evidenceRoot,
+      checks: ZERO_TOLERANCE_TARGETS.map((id) => ({
+        id, status: "passed", count: 0, evidence,
+        receiptDigest: sha256(JSON.stringify({ binding, id, evidenceDigests: evidence })),
+      })),
+    }));
     const staleDigest = "f".repeat(64);
     const externalEvidenceRoot = "artifacts/release/evidence-external-test";
     mkdirSync(resolve(root, externalEvidenceRoot), { recursive: true });
@@ -655,13 +696,11 @@ test("candidate set receipts bind the final digest of every profile", (t) => {
           catalogDigest: binding.catalogDigest,
           candidateDigests,
         };
-        if (AUTHORIZATION_RECEIPTS.has(id)) {
-          entry.signature = {
-            algorithm: "ed25519",
-            keyId: authorizationKeyId,
-            value: sign(null, Buffer.from(stableJson(externalReceiptClaim(entry))), authorizationKey.privateKey).toString("base64"),
-          };
-        }
+        entry.signature = {
+          algorithm: "ed25519",
+          keyId: authorizationKeyId,
+          value: sign(null, Buffer.from(stableJson(externalReceiptClaim(entry))), authorizationKey.privateKey).toString("base64"),
+        };
         return mutate(entry);
       });
       writeFileSync(resolve(root, "artifacts/release/external-receipts.json"), JSON.stringify({
@@ -750,11 +789,42 @@ test("candidate set receipts bind the final digest of every profile", (t) => {
     assert.deepEqual(singleProfile.blockingReasons, BROWSER_HARNESS_IDS.map((id) => `browser_harness_result_missing:${id}`).sort());
 
     writeBrowserHarnessProof(root, { commit: receipts[0].commit, tree: receipts[0].tree });
+    const windowsNotRun = stageCandidate({ root, profileName: "private-full", verifyRebuild: false });
+    assert.equal(windowsNotRun.browserHarness.harnesses.find((entry) => entry.id === "desktop_windows_smoke").status, "not-run-on-this-host");
+    assert.equal(windowsNotRun.browserHarness.passed, false);
+    assert.equal(windowsNotRun.promotable, false);
+    assert.ok(windowsNotRun.blockingReasons.includes("browser_harness_not_passed:desktop_windows_smoke"));
+
+    writeBrowserHarnessProof(root, { commit: receipts[0].commit, tree: receipts[0].tree, results: promotionResults() });
     const withBrowserProof = stageCandidate({ root, profileName: "private-full", verifyRebuild: true });
     assert.equal(withBrowserProof.browserHarness.passed, true);
     assert.deepEqual(withBrowserProof.blockingReasons, []);
     assert.equal(withBrowserProof.promotable, true);
     assert.equal(withBrowserProof.stablePromotionReady, true);
+    const zeroPath = resolve(root, "artifacts/release/zero-tolerance-receipt.json");
+    const browserPath = resolve(root, BROWSER_HARNESS_RECEIPT_PATH);
+    const outside = mkdtempSync(resolve(tmpdir(), "morrow-redirected-receipts-"));
+    writeFileSync(resolve(outside, "zero-tolerance-receipt.json"), readFileSync(zeroPath));
+    writeFileSync(resolve(outside, "receipt.json"), readFileSync(browserPath));
+    for (const name of readdirSync(dirname(browserPath))) {
+      if (name.endsWith(".log")) writeFileSync(resolve(outside, name), readFileSync(resolve(dirname(browserPath), name)));
+    }
+    rmSync(zeroPath);
+    writeBrowserHarnessProof(root, { commit: receipts[0].commit, tree: receipts[0].tree });
+    process.env.MORROW_ZERO_TOLERANCE_RECEIPT_PATH = resolve(outside, "zero-tolerance-receipt.json");
+    process.env.MORROW_BROWSER_HARNESS_RECEIPT_PATH = resolve(outside, "receipt.json");
+    try {
+      const redirected = stageCandidate({ root, profileName: "private-full", verifyRebuild: false });
+      assert.equal(redirected.zeroTolerance.passed, false, "a redirected zero-tolerance receipt does not count");
+      assert.equal(redirected.browserHarness.passed, false, "a redirected browser receipt does not count");
+      assert.equal(conformanceReport({ root, profileName: "private-full" }).checks
+        .find((entry) => entry.id === "current_browser_harness_evidence").passed, false);
+    } finally {
+      delete process.env.MORROW_ZERO_TOLERANCE_RECEIPT_PATH;
+      delete process.env.MORROW_BROWSER_HARNESS_RECEIPT_PATH;
+      writeFileSync(zeroPath, readFileSync(resolve(outside, "zero-tolerance-receipt.json")));
+      writeBrowserHarnessProof(root, { commit: receipts[0].commit, tree: receipts[0].tree, results: promotionResults() });
+    }
     assert.deepEqual(withBrowserProof.deterministicRebuild, {
       verified: true,
       digest: withBrowserProof.packageDigest,
@@ -788,6 +858,11 @@ test("candidate set receipts bind the final digest of every profile", (t) => {
     assert.equal(diagnosticOnly.stablePromotionReady, false);
     assert.ok(diagnosticOnly.blockingReasons.includes("deterministic_rebuild_missing"));
 
+    writeExternalReceipts(expected, (entry) => entry.id === "canvas_live_proof"
+      ? { ...entry, signature: undefined }
+      : entry);
+    assert.equal(stageCandidate({ root, profileName: "private-full", verifyRebuild: false }).externalReceipts.passed, false,
+      "a self-written evidence file whose hash matches is not verification");
     writeExternalReceipts(expected, (entry) => entry.id === "client_parity"
       ? { ...entry, receiptDigest: "d".repeat(64), evidence: { ...entry.evidence, sha256: "d".repeat(64) } }
       : entry);
@@ -886,13 +961,20 @@ test("the browser gate reads a receipt only while it belongs to this checkout", 
   assert.equal(none.passed, false);
   assert.deepEqual(none.harnesses.map((entry) => entry.status), BROWSER_HARNESS_IDS.map(() => "missing"));
 
-  writeBrowserHarnessProof(root, { commit, tree });
+  writeBrowserHarnessProof(root, { commit, tree, results: promotionResults() });
   const accepted = browserHarnessState(root, binding);
   assert.equal(accepted.boundToHead, true);
   assert.equal(accepted.passed, true);
-  assert.deepEqual(accepted.harnesses.filter((entry) => entry.required).map((entry) => entry.status),
+  assert.deepEqual(accepted.harnesses.filter((entry) => REQUIRED_BROWSER_HARNESS_PASSES.includes(entry.id)).map((entry) => entry.status),
     REQUIRED_BROWSER_HARNESS_PASSES.map(() => "passed"));
-  assert.equal(accepted.harnesses.find((entry) => entry.id === "desktop_windows_smoke").status, "not-run-on-this-host");
+  assert.equal(accepted.harnesses.find((entry) => entry.id === "desktop_windows_smoke").status, "passed");
+
+  writeBrowserHarnessProof(root, { commit, tree });
+  const windowsRecordedNotRun = browserHarnessState(root, binding);
+  assert.equal(windowsRecordedNotRun.harnesses.find((entry) => entry.id === "desktop_windows_smoke").status, "not-run-on-this-host");
+  assert.equal(windowsRecordedNotRun.harnesses.find((entry) => entry.id === "desktop_windows_smoke").blocking, true);
+  assert.equal(windowsRecordedNotRun.passed, false, "not-run-on-this-host does not satisfy the Windows smoke");
+  writeBrowserHarnessProof(root, { commit, tree, results: promotionResults() });
 
   const logPath = resolve(root, dirname(BROWSER_HARNESS_RECEIPT_PATH), "canvas_connector_browser.log");
   const recorded = readFileSync(logPath);
@@ -902,6 +984,18 @@ test("the browser gate reads a receipt only while it belongs to this checkout", 
   assert.equal(edited.passed, false);
   writeFileSync(logPath, recorded);
   assert.equal(browserHarnessState(root, binding).passed, true);
+
+  const claimed = JSON.parse(readFileSync(resolve(root, BROWSER_HARNESS_RECEIPT_PATH), "utf8"));
+  const neutral = "suite ended without a passing summary\n";
+  const canvas = claimed.harnesses.find((entry) => entry.id === "canvas_connector_browser");
+  canvas.logBytes = Buffer.byteLength(neutral);
+  canvas.logSha256 = sha256(neutral);
+  canvas.status = "passed";
+  writeFileSync(logPath, neutral);
+  writeFileSync(resolve(root, BROWSER_HARNESS_RECEIPT_PATH), `${JSON.stringify(claimed, null, 2)}\n`);
+  assert.equal(browserHarnessState(root, binding).harnesses.find((entry) => entry.id === "canvas_connector_browser").status, "missing");
+  assert.equal(browserHarnessState(root, binding).passed, false, "a harness log that does not show a pass does not count");
+  writeBrowserHarnessProof(root, { commit, tree, results: promotionResults() });
 
   const receiptPath = resolve(root, BROWSER_HARNESS_RECEIPT_PATH);
   const truncated = JSON.parse(readFileSync(receiptPath, "utf8"));
@@ -942,7 +1036,7 @@ test("the browser gate counts only a recorded pass, and never a harness that did
   const withoutPermissionProof = stateOf(attendedResults().filter((entry) => entry.id !== "canvas_file_optional_permission"));
   assert.equal(withoutPermissionProof.passed, false);
   assert.deepEqual(withoutPermissionProof.harnesses.filter((entry) => entry.blocking).map((entry) => entry.id),
-    ["canvas_file_optional_permission"]);
+    ["canvas_file_optional_permission", "desktop_windows_smoke"]);
 
   const permissionProofNotRun = stateOf(attendedResults().map((entry) => (entry.id === "canvas_file_optional_permission"
     ? { id: entry.id, status: "not-run-unattended", reason: "no person answered the Chrome prompts" }
@@ -964,8 +1058,10 @@ test("the browser gate counts only a recorded pass, and never a harness that did
   assert.equal(windowsFailed.passed, false, "the Windows smoke does not have to run here, but a recorded failure blocks");
 
   const windowsNotRunElsewhere = stateOf(attendedResults());
-  assert.equal(windowsNotRunElsewhere.passed, true);
-  assert.equal(windowsNotRunElsewhere.harnesses.find((entry) => entry.id === "desktop_windows_smoke").required, false);
+  assert.equal(windowsNotRunElsewhere.passed, false);
+  assert.equal(windowsNotRunElsewhere.harnesses.find((entry) => entry.id === "desktop_windows_smoke").status, "not-run-on-this-host");
+  assert.equal(windowsNotRunElsewhere.harnesses.find((entry) => entry.id === "desktop_windows_smoke").required, true);
+  assert.equal(stateOf(promotionResults()).passed, true);
 });
 
 test("a harness result is the run that happened: its own timeout, and the log it was hashed from", async (t) => {
@@ -1017,4 +1113,65 @@ test("a harness result is the run that happened: its own timeout, and the log it
   assert.equal(excessive.logBytes, 4_096);
   assert.equal(boundedLog.byteLength, 4_096);
   assert.equal(excessive.logSha256, sha256(boundedLog));
+});
+
+test("package commands fail when the candidate is not promotable, and an explicit scan does not", () => {
+  const root = mkdtempSync(resolve(tmpdir(), "morrow-package-promotable-"));
+  try {
+    mkdirSync(resolve(root, "config"), { recursive: true });
+    const packageBytes = Buffer.from('{"name":"morrow-test","version":"1.0.0"}\n');
+    writeFileSync(resolve(root, ".gitignore"), "artifacts/\noutput/\n");
+    writeFileSync(resolve(root, "package.json"), packageBytes);
+    writeFileSync(resolve(root, "config/release-profiles.json"), JSON.stringify({
+      schema: "morrow.release-profiles.v2",
+      profiles: {
+        "private-full": {
+          visibility: "private",
+          include: ["package.json"],
+          exclude: [],
+          providers: {},
+          externalEvidenceReceipts: [],
+          promotionEvidenceReceipts: [],
+        },
+      },
+    }));
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Morrow Test"], { cwd: root });
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "fixture"], { cwd: root });
+    const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    writeFileSync(resolve(root, "config/source-origin-ledger.json"), JSON.stringify({
+      schema: "morrow.source-origin-ledger.v1",
+      status: "reviewed",
+      candidateCommit: sourceCommit,
+      entries: [{
+        path: "package.json",
+        sourceCommit,
+        originalPath: "package.json",
+        ownership: "new",
+        dependencies: [],
+        testMapping: [],
+        reviewer: "release-review",
+        beforeDigest: null,
+        afterDigest: sha256(packageBytes),
+      }],
+    }));
+    execFileSync("git", ["add", "config/source-origin-ledger.json"], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "ledger"], { cwd: root });
+
+    const script = resolve(import.meta.dirname, "../package-profile.mjs");
+    const packaged = spawnSync(process.execPath, [script, "--profile", "private-full", "--root", root], { encoding: "utf8" });
+    assert.equal(packaged.status, 1, packaged.stderr);
+    const receipt = JSON.parse(packaged.stdout);
+    assert.equal(receipt.promotable, false);
+    assert.ok(receipt.blockingReasons.length > 0);
+    assert.equal(receipt.candidateBuilt, true);
+
+    const scanned = spawnSync(process.execPath, [script, "--profile", "private-full", "--root", root, "--scan"], { encoding: "utf8" });
+    assert.equal(scanned.status, 0, scanned.stderr);
+    assert.equal(JSON.parse(scanned.stdout).passed, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

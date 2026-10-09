@@ -58,7 +58,7 @@ function Run-Process([string] $Path, [string[]] $Arguments, [int] $TimeoutMs, [s
     else { $env:PSModulePath = $previousModulePath }
   }
   if (-not $process.WaitForExit($TimeoutMs)) {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    & taskkill.exe /PID $process.Id /T /F
     throw "$Label did not exit in $TimeoutMs ms."
   }
   if ($process.ExitCode -ne 0) { throw "$Label exited $($process.ExitCode)." }
