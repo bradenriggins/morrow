@@ -37,7 +37,7 @@ Native Moodle helper onboarding still needs release qualification.
   refused. Step 2 below installs it hash-pinned from the release
   (`python3 -m pip`, so pip must be available). Install step 1 checks
   for it and prints a warning (repeated at the end) when it is missing
-  or older than the pinned version. The Moodle lane keeps authentication in Chromium. Install the hash-locked
+  or older than 50.0.1. The Moodle lane keeps authentication in Chromium. Install the hash-locked
   runtime dependencies from `requirements-optional.txt`.
 - `unzip`, to unpack the release (step 1).
 - The command-line tools the installer and keepalive use: `curl`, `ss`,
@@ -265,11 +265,11 @@ it hash-pinned:
 
     python3 -m pip install --require-hashes -r requirements-optional.txt
 
-The file pins `cryptography==50.0.1` (plus its `cffi`/`pycparser`
+The file pins `cryptography==50.0.2` (plus its `cffi`/`pycparser`
 closure) with `--require-hashes`, so pip verifies every downloaded
 artifact against the published SHA-256 hashes before installing;
 a tampered mirror fails the install loudly instead of silently.
-Without the package (or with a version older than the pin), every
+Without the package (or with a version older than 50.0.1), every
 student-data request is refused with a clear message: finding a
 student by name and reading the course roster. Student names in course content are hidden without
 labels, and a change that would save a hidden name back is refused.
