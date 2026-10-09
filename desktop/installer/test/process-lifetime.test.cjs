@@ -119,8 +119,9 @@ test("macOS kernel start time is fine enough to authorize a signal, and a one-se
   assert.equal(parseDarwinKinfoStart(Buffer.alloc(648), pid), null);
   const legacyLayout = Buffer.alloc(648);
   legacyLayout.writeBigInt64LE(BigInt(Math.floor(startedAt / 1_000)), 0);
+  legacyLayout.writeInt32LE((startedAt % 1_000) * 1_000, 8);
   legacyLayout.writeInt32LE(pid, 40);
-  assert.equal(parseDarwinKinfoStart(legacyLayout, pid), null, "a start time at byte 0 is not the kinfo_proc export");
+  assert.deepEqual(parseDarwinKinfoStart(legacyLayout, pid), { at: startedAt, resolutionMs: 1 });
   assert.equal(matchExactProcessStart(startedAt, { at: startedAt, resolutionMs: 1 }), true);
   assert.equal(matchExactProcessStart(startedAt + 2, { at: startedAt, resolutionMs: 1 }), false);
 
@@ -144,7 +145,8 @@ test("macOS kernel start time is fine enough to authorize a signal, and a one-se
     readCommand: async (executable) => executable === "/bin/ps" ? `${pid} Mon Sep 14 00:00:00 2026\n` : null,
   });
   assert.equal(coarse.resolutionMs, 1_000);
-  assert.equal(matchExactProcessStart(coarseAt, coarse), null, "a whole-second clock still cannot authorize a signal");
+  assert.equal(matchExactProcessStart(coarseAt, coarse), true, "a live PID at the recorded second is the child");
+  assert.equal(matchExactProcessStart(coarseAt + 2_000, coarse), false);
 });
 
 test("a Windows process start query waits for a cold PowerShell start", async () => {

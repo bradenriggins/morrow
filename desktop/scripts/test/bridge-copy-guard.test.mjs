@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { LoopbackApprovalServer } from "../../packages/mcp-server/dist/approval-server.js";
+import { LoopbackApprovalServer, REVIEW_OPEN_NONCE, reviewApprovalProof } from "../../packages/mcp-server/dist/approval-server.js";
 import { LoopbackBridgeServer } from "../../packages/bridge-loopback/dist/index.js";
 
 const root = new URL("../../", import.meta.url);
@@ -96,7 +96,10 @@ async function approvalPages(snapshot) {
   try {
     const baseUrl = await server.start();
     const operation = `${baseUrl}/operations/${encodeURIComponent(snapshot.operationId)}`;
-    const html = { accept: "text/html" };
+    const html = {
+      accept: "text/html",
+      "x-morrow-review-presence": reviewApprovalProof(server.approvalPresence.key, new URL(operation).pathname, REVIEW_OPEN_NONCE),
+    };
     return {
       review: await (await fetch(operation, { headers: html })).text(),
       notFound: await (await fetch(`${baseUrl}/not-a-review`, { headers: html })).text(),

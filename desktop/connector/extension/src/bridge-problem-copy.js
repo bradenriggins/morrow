@@ -430,6 +430,11 @@ const COPY = {
     detail: "Morrow Bridge could not complete an upkeep request from Morrow, so nothing changed.",
     action: "Try again. If it continues, reload Morrow Bridge on the Chrome extensions page.",
   },
+  moodle_extension_upload_failed: {
+    title: "The Moodle file was not uploaded",
+    detail: "Morrow prepared the file on this computer, but the upload from Morrow Bridge did not finish. Nothing was saved in the course.",
+    action: "Keep the Moodle course open and ask your assistant to try the upload again.",
+  },
   canvas_file_storage_access_required: {
     title: "Course file access is off",
     detail: "Morrow reads course file content, and sends a reviewed image to a course, only while course file access is on, and it is off.",

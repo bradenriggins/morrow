@@ -11,7 +11,7 @@ import { runOwnedProcess } from "../lib/owned-process.mjs";
 import { bridgeReleaseManifest } from "../package-mcp-bundle.mjs";
 
 export const BRIDGE_VERSION = "1.0.138";
-export const BRIDGE_SEAL = "b5761be70901506f68b281ed90cc2ec53b7e5007bb1196ec73966293df77937d";
+export const BRIDGE_SEAL = "6730a9c62c55a9dceabde15e63c128465a6e23518fd4f70f86cbedbd263376c6";
 const DESKTOP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const EXTENSION_ID = "abeloclekioohahgedmjcdbpllfjfhko";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");

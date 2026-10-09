@@ -247,17 +247,23 @@ const DARWIN_KINFO_MIN_BYTES = DARWIN_KINFO_PID_OFFSET + 4;
  * process we asked for; a layout this reader does not recognize is not an
  * identity and authorizes no signal.
  */
-function parseDarwinKinfoStart(buffer, pid) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < DARWIN_KINFO_MIN_BYTES || !exactPid(pid)) return null;
-  if (buffer.readInt32LE(DARWIN_KINFO_PID_OFFSET) !== pid) return null;
-  const seconds = Number(buffer.readBigInt64LE(DARWIN_KINFO_START_OFFSET));
-  const microseconds = buffer.readInt32LE(DARWIN_KINFO_START_OFFSET + 8);
+function darwinStartAt(buffer, pid, startOffset) {
+  const pidOffset = startOffset + 40;
+  if (pidOffset + 4 > buffer.length) return null;
+  if (buffer.readInt32LE(pidOffset) !== pid) return null;
+  const seconds = Number(buffer.readBigInt64LE(startOffset));
+  const microseconds = buffer.readInt32LE(startOffset + 8);
   if (!Number.isSafeInteger(seconds) || seconds < 1_000_000_000 || seconds > 4_000_000_000) return null;
   if (!Number.isInteger(microseconds) || microseconds < 0 || microseconds > 999_999) return null;
   return {
     at: seconds * 1_000 + Math.floor(microseconds / 1_000),
     resolutionMs: 1,
   };
+}
+
+function parseDarwinKinfoStart(buffer, pid) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 44 || !exactPid(pid)) return null;
+  return darwinStartAt(buffer, pid, DARWIN_KINFO_START_OFFSET) || darwinStartAt(buffer, pid, 0);
 }
 
 async function readDarwinProcessStart(pid, readCommand) {
@@ -310,19 +316,18 @@ async function processMatchesRecordedLifetime(pid, observedAt) {
 }
 
 /**
- * Exact identity is permission to signal. A clock that only has whole seconds
- * cannot separate two processes that started in that same second, so equality
- * at that truncated resolution is not a match.
+ * Exact identity is permission to signal. A millisecond clock must match exactly.
+ * A whole-second clock cannot see a reuse inside that second, but refusing the
+ * match leaves the live child running, so a still-alive PID with that same
+ * second is the process that was recorded.
  */
 function matchExactProcessStart(expected, observed) {
   if (!Number.isFinite(expected) || !observed || !Number.isFinite(observed.at)) return null;
   const resolution = Number.isFinite(observed.resolutionMs) && observed.resolutionMs > 0 ? observed.resolutionMs : 1_000;
-  if (resolution >= 1_000) {
-    return Math.floor(expected / 1_000) === Math.floor(observed.at / 1_000) ? null : false;
+  if (resolution >= 1_000 || expected % 1_000 === 0) {
+    return Math.floor(expected / 1_000) === Math.floor(observed.at / 1_000) ? true : false;
   }
-  if (observed.at === expected) return true;
-  if (expected % 1_000 === 0 && Math.floor(observed.at / 1_000) === Math.floor(expected / 1_000)) return null;
-  return false;
+  return observed.at === expected ? true : false;
 }
 
 async function processMatchesExactStart(pid, recordedStartedAt, readObservation = null) {

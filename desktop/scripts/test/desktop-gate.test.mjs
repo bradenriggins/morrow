@@ -41,12 +41,13 @@ test("the gate runs the package suites one package at a time", () => {
 
 test("the installer test script runs every installer suite file", () => {
   assert.match(installerPackage.scripts.test, /^node test\/require-dependencies\.cjs && /);
-  const globs = installerPackage.scripts.test.match(/test\/\*\.test\.[a-z]+/g) ?? [];
-  const covered = new Set(globs.map((glob) => glob.slice("test/*".length)));
+  assert.match(installerPackage.scripts.test, /node test\/run-bounded-tests\.cjs --suite/);
+  const runner = readFileSync(join(root, "installer/test/run-bounded-tests.cjs"), "utf8");
+  assert.ok(runner.includes("(?:cjs|mjs)"), "the bounded runner must include every installer suite suffix");
   const suites = readdirSync(join(root, "installer/test")).filter((name) => /\.test\.[a-z]+$/.test(name));
   assert.ok(suites.length > 0, "installer/test must hold suite files");
   for (const suite of suites) {
-    assert.ok(covered.has(suite.slice(suite.indexOf(".test."))), `installer/test/${suite} is outside the installer test globs`);
+    assert.match(suite, /\.test\.(?:cjs|mjs)$/, `installer/test/${suite} is outside the bounded runner`);
   }
 });
 
