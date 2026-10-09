@@ -84,6 +84,8 @@ test("accepts only a loopback review origin and a 32-byte key", () => {
     { ...presence, extra: 1 },
   ]) assert.throws(() => parseReviewApprovalPresence(bad), /ui_state_invalid/);
   assert.equal(reviewPagePath(`${presence.origin}${pagePath}`, presence), pagePath);
+  assert.equal(reviewPagePath(`${presence.origin}${pagePath}?presence=abc`, presence), pagePath);
+  assert.equal(reviewPagePath(`${presence.origin}${pagePath}?presence=abc&other=1`, presence), null);
   assert.equal(reviewPagePath(`${presence.origin}/batches/batch-1234`, presence), "/batches/batch-1234");
   assert.equal(reviewPagePath(`${presence.origin}/recent`, presence), null);
   assert.equal(reviewPagePath("not a url", presence), null);

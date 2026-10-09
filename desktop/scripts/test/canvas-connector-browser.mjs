@@ -1429,14 +1429,15 @@ try {
   // The page's nonce and cookie prove only that a caller read the page. A program that posts the
   // form itself has both, and still cannot approve without the Bridge's signature over it.
   const presenceReviewUrl = operationApprovalPage.url();
+  const presenceApproveUrl = `${new URL(presenceReviewUrl).origin}${new URL(presenceReviewUrl).pathname}/approve`;
   const presenceNonce = await operationApprovalPage.locator('form[action$="/approve"] input[name="nonce"]').inputValue();
-  const unsignedApproval = await operationApprovalPage.request.post(`${presenceReviewUrl}/approve`, {
+  const unsignedApproval = await operationApprovalPage.request.post(presenceApproveUrl, {
     form: { nonce: presenceNonce },
     headers: { origin: new URL(presenceReviewUrl).origin, referer: presenceReviewUrl },
   });
   assert.equal(unsignedApproval.status(), 403);
   assert.equal((await unsignedApproval.json()).code, "approval_presence_required");
-  const forgedApproval = await operationApprovalPage.request.post(`${presenceReviewUrl}/approve`, {
+  const forgedApproval = await operationApprovalPage.request.post(presenceApproveUrl, {
     form: { nonce: presenceNonce, presence: "A".repeat(43) },
     headers: { origin: new URL(presenceReviewUrl).origin, referer: presenceReviewUrl },
   });
@@ -1477,6 +1478,7 @@ try {
   await captureThemes(operationApprovalPage, "approval-batch-confirmed");
   await captureThemes(operationApprovalPage, "approval-batch-confirmed-narrow", 320);
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/batches/batch-large-preview`);
+  await operationApprovalPage.getByText("Showing 1–10 of 40 changes", { exact: true }).waitFor();
   assert.equal(await operationApprovalPage.locator(".change-item:visible").count(), 10);
   assert.equal(await operationApprovalPage.locator(".change-item[open]").count(), 0);
   await operationApprovalPage.getByRole("button", { name: "Next", exact: true }).click();
@@ -1537,8 +1539,9 @@ try {
   assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Course ID|Assignment ID/);
   await captureThemes(operationApprovalPage, "approval-missing-names");
   const blockedReviewUrl = operationApprovalPage.url();
+  const blockedApproveUrl = `${new URL(blockedReviewUrl).origin}${new URL(blockedReviewUrl).pathname}/approve`;
   const blockedNonce = await operationApprovalPage.locator('input[name="nonce"]').inputValue();
-  const blockedApproval = await operationApprovalPage.request.post(`${blockedReviewUrl}/approve`, {
+  const blockedApproval = await operationApprovalPage.request.post(blockedApproveUrl, {
     form: { nonce: blockedNonce },
     headers: { origin: new URL(blockedReviewUrl).origin, referer: blockedReviewUrl },
   });
@@ -1547,7 +1550,7 @@ try {
   assert.equal(await operationApprovalPage.getByRole("button", { name: "Apply this change" }).count(), 0);
   const fileReviewUrl = operationApprovalPage.url();
   const fileNonce = await operationApprovalPage.locator('input[name="nonce"]').inputValue();
-  const refusedFile = await operationApprovalPage.request.post(`${fileReviewUrl}/approve`, { form: { nonce: fileNonce }, headers: { origin: new URL(fileReviewUrl).origin, referer: fileReviewUrl } });
+  const refusedFile = await operationApprovalPage.request.post(`${new URL(fileReviewUrl).origin}${new URL(fileReviewUrl).pathname}/approve`, { form: { nonce: fileNonce }, headers: { origin: new URL(fileReviewUrl).origin, referer: fileReviewUrl } });
   assert.equal(refusedFile.status(), 409);
   assert.equal(approvalStates.has("op:unnamed-file"), false);
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Aexpired-ui-test`);

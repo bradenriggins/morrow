@@ -266,7 +266,8 @@ function finishLoadingReview(response: ServerResponse, title: string, content: s
   response.end(`<div id="review-ready" data-page-title="${escapeHtml(title)}" hidden>${content}</div></article><p class="foot">This review stays on your computer.</p></main></body></html>`);
 }
 
-const STATUS_SCRIPT = `const reviewReady = document.getElementById("review-ready");
+const STATUS_SCRIPT = `(() => {
+const reviewReady = document.getElementById("review-ready");
 if (reviewReady) {
   document.getElementById("review-loading").hidden = true;
   reviewReady.hidden = false;
@@ -384,7 +385,8 @@ async function refreshStatus() {
     clearTimeout(deadline);
   }
 }
-if (status && document.body.dataset.polling === "true") void refreshStatus();`;
+if (status && document.body.dataset.polling === "true") void refreshStatus();
+})();`;
 
 function object(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
@@ -1855,8 +1857,14 @@ export class LoopbackApprovalServer {
             } catch { /* the page still loads; the Bridge asks the person to reload when it has no key */ }
           }
           if (loadingNonce) finishLoadingReview(response, pageTitle, body);
-          else sendHtml(response, 200, body,
-            nonce ? `${approvalCookieName(nonce)}=${nonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900` : undefined);
+          else {
+            // A page that updates itself polls /status. Approval clears the form cookie, and the
+            // proved reload of a running review has no form, so that poll would be refused and the
+            // page would replace its result with an error. A view cookie admits the poll only.
+            const viewNonce = nonce || (active ? this.issueNonce(nonceKey, false) : null);
+            sendHtml(response, 200, body,
+              viewNonce ? `${approvalCookieName(viewNonce)}=${viewNonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900` : undefined);
+          }
           return;
         } catch (error) {
           if (loadingNonce) this.nonces.delete(loadingNonce);
