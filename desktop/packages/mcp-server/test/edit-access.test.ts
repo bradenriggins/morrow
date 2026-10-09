@@ -351,7 +351,7 @@ describe("Edit asked for in a conversation", () => {
       const requested = await requestEdit(test);
       const path = new URL(String(requested.approvalUrl)).pathname;
       const { nonce, cookie } = await reviewForm(test, path);
-      expect((await post(test, path, "cancel", { nonce }, cookie)).status).toBe(303);
+      expect((await post(test, path, "cancel", { nonce, presence: reviewApprovalProof(test.key(), `${path}/cancel`, nonce) }, cookie)).status).toBe(303);
       expect(await waitFor(test, String(requested.editAccessId))).toMatchObject({ ok: false, state: "declined", outcome: "not_sent" });
       expect(test.apply).not.toHaveBeenCalled();
     } finally {

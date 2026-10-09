@@ -234,6 +234,26 @@ describe("Moodle Choice, Feedback and Database child-record projections", () => 
     }, target)).toThrow("moodle_database_entry_summary_invalid");
   });
 
+  it("does not return a credential or hidden choice, feedback, or database string", () => {
+    const hidden = projectMoodleChoiceOptions({
+      ...choiceOptions,
+      options: [
+        { ...choiceOptions.options[0], text: '<p>Morning lab</p><div style="display:none!important">Hidden choice.</div>' },
+        choiceOptions.options[1],
+      ],
+    }, target);
+    expect(JSON.stringify(hidden)).toContain("Morning lab");
+    expect(JSON.stringify(hidden)).not.toContain("Hidden choice.");
+    expect(() => projectMoodleFeedbackItems({
+      ...feedbackItems,
+      items: [{ ...feedbackItems.items[0], text: "Rate this https://moodle.example.edu/webservice/rest/server.php?wstoken=ws-live-77" }, feedbackItems.items[1]],
+    }, target)).toThrow("privacy_sensitive_text_refused");
+    expect(() => projectMoodleDatabaseFields({
+      ...databaseFields,
+      fields: [{ ...databaseFields.fields[0], name: "notes verifier=file-live-88" }, databaseFields.fields[1]],
+    }, target)).toThrow("privacy_sensitive_text_refused");
+  });
+
   it("maps every child read to its own operation and projection", () => {
     expect(moodleActivityContentReadByTool("moodle_get_choice_options")).toMatchObject({
       operation: "moodle.form.choice.options.read.v1", learnerAggregate: false,

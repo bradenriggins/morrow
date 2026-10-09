@@ -254,6 +254,60 @@ describe("learner vault durable ownership", () => {
     }
   });
 
+  it("recovers a dead owner's prepare link so a later transaction can enter", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-private-state-dead-prepare-"));
+    try {
+      const path = join(directory, "state", "record.json");
+      const lockPath = `${path}.transaction.lock`;
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      const startedAt = readProcessStartedAt(process.pid);
+      expect(startedAt).not.toBeNull();
+      const owner = transactionOwner(process.pid, new Date(startedAt! - 60_000).toISOString());
+      const preparePath = `${lockPath}.prepare-${process.pid}-00000000-0000-4000-8000-000000000099`;
+      writeFileSync(lockPath, owner, { mode: 0o600, flag: "wx" });
+      linkSync(lockPath, preparePath);
+      expect(lstatSync(lockPath).nlink).toBe(2);
+
+      let entered = false;
+      withExactPrivateStateFileTransaction(path, { label: "test state" }, () => { entered = true; });
+
+      expect(entered).toBe(true);
+      expect(existsSync(lockPath)).toBe(false);
+      expect(existsSync(preparePath)).toBe(false);
+      expect(readdirSync(dirname(path))).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not steal a live owner's prepare link", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-private-state-live-prepare-"));
+    try {
+      const path = join(directory, "record.json");
+      const lockPath = `${path}.transaction.lock`;
+      const startedAt = readProcessStartedAt(process.pid);
+      expect(startedAt).not.toBeNull();
+      const owner = transactionOwner(process.pid, new Date(startedAt!).toISOString());
+      const preparePath = `${lockPath}.prepare-${process.pid}-00000000-0000-4000-8000-000000000099`;
+      writeFileSync(lockPath, owner, { mode: 0o600, flag: "wx" });
+      linkSync(lockPath, preparePath);
+
+      let entered = false;
+      expect(() => withExactPrivateStateFileTransaction(
+        path,
+        { label: "test state", timeoutMs: 40, pollIntervalMs: 5 },
+        () => { entered = true; },
+      )).toThrow(/not one exact private file/);
+
+      expect(entered).toBe(false);
+      expect(existsSync(lockPath)).toBe(true);
+      expect(existsSync(preparePath)).toBe(true);
+      expect(lstatSync(lockPath).nlink).toBe(2);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps damaged or linked owner state as a fail-closed barrier", () => {
     const directory = mkdtempSync(join(tmpdir(), "morrow-private-state-damaged-lock-"));
     try {

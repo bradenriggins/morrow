@@ -7,7 +7,7 @@ import { sha256Json, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { GatewayRuntime } from "../src/runtime.js";
-import { LoopbackApprovalServer, operationStatus } from "../src/approval-server.js";
+import { LoopbackApprovalServer, operationStatus, reviewApprovalProof } from "../src/approval-server.js";
 import type { ApprovalReviewContext } from "../src/approval-context.js";
 import type { ApprovalReviewContext } from "../src/approval-context.js";
 import { bridgeSignedPresence } from "./fixtures/review-approval.js";
@@ -561,7 +561,11 @@ describe("outer provider effects", () => {
     });
     try {
       const url = await approval.start();
-      const collection = await (await fetch(`${url}/operations`)).json() as JsonObject;
+      const presence = approval.approvalPresence;
+      expect(presence).toBeTruthy();
+      const collection = await (await fetch(`${url}/operations`, {
+        headers: { "x-morrow-review-presence": reviewApprovalProof(presence!.key, "/operations", "list") },
+      })).json() as JsonObject;
       const entry = (collection.operations as JsonObject[])[0]!;
       expect(collection).toMatchObject({
         schema: "morrow.approval-operations.list.v1",

@@ -436,6 +436,11 @@ function bindingCatalogSkewed(binding: { readonly catalogDigest?: string }, expe
   return binding.catalogDigest !== undefined && binding.catalogDigest !== expectedDigest;
 }
 
+/** A bindings update with no stamp, or with another catalog's stamp, must not replace the live set. */
+function bindingCatalogRejected(binding: { readonly catalogDigest?: string }, expectedDigest: string): boolean {
+  return binding.catalogDigest !== expectedDigest;
+}
+
 function strictUtf8(data: Uint8Array): string {
   return new TextDecoder("utf-8", { fatal: true }).decode(data);
 }
@@ -1027,7 +1032,7 @@ export class LoopbackBridgeServer {
       if (message.generation !== active.generation) return;
       active.lastSeenAt = Date.now();
       if (message.syncId === undefined) {
-        const skewed = message.bindings.find((binding) => bindingCatalogSkewed(binding, active.catalogDigest));
+        const skewed = message.bindings.find((binding) => bindingCatalogRejected(binding, active.catalogDigest));
         if (skewed) {
           this.recordVersionMismatch("bridge_bindings_digest_mismatch", {
             runtimeRevision: active.runtimeRevision,
@@ -1060,7 +1065,7 @@ export class LoopbackBridgeServer {
         const synced = [...transfer.bindings.values()].sort((left, right) => left.sourceBindingId < right.sourceBindingId ? -1 : left.sourceBindingId > right.sourceBindingId ? 1 : 0);
         // A sync that drifts to another catalog mid-session is a skewed extension, not a new
         // course list: accepting it would let later commands execute against the wrong catalog.
-        const skewed = synced.find((binding) => bindingCatalogSkewed(binding, active.catalogDigest));
+        const skewed = synced.find((binding) => bindingCatalogRejected(binding, active.catalogDigest));
         if (skewed) {
           this.recordVersionMismatch("bridge_bindings_digest_mismatch", {
             runtimeRevision: active.runtimeRevision,

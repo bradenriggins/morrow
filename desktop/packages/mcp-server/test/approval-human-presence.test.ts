@@ -1,3 +1,4 @@
+import { request as httpRequest } from "node:http";
 import { describe, expect, it } from "vitest";
 import type { JsonObject } from "@morrow/contracts";
 import { LoopbackApprovalServer, reviewApprovalProof, type ReviewApprovalPresence } from "../src/approval-server.js";
@@ -154,6 +155,87 @@ describe("approval needs a person in Chrome, not an HTTP client", () => {
       expect(test.announced).toBe(1);
     } finally {
       await test.server.close();
+    }
+  });
+
+  it("does not list or cancel for a client that sets only Host, and rejects cancel without the Bridge proof", async () => {
+    const test = harness();
+    const cancelled: string[] = [];
+    const server = new LoopbackApprovalServer({
+      operationGet: () => snapshot("awaiting_approval"),
+      operationList: () => ({ schema: "morrow.operations.list.v1", returned: 1, operations: [snapshot("awaiting_approval")] }),
+      operationReviewContext: async () => ({ targets: [{ field: "course_id", label: "Course", name: "Biology 101" }] }),
+      approveOperation: () => snapshot("approved"),
+      runApprovedOperation: async () => undefined,
+      cancelOperation: (id) => { cancelled.push(id); return snapshot("cancelled"); },
+      setApprovalBaseUrl: () => undefined,
+      setApprovalPresence: (presence) => { test.presence.push(presence); },
+    });
+    try {
+      const baseUrl = await server.start();
+      const url = new URL(baseUrl);
+      const hostOnly = (method: string, path: string, body?: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const request = httpRequest({
+          hostname: url.hostname,
+          port: url.port,
+          path,
+          method,
+          headers: { host: url.host },
+        }, (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          response.on("end", () => resolve({ status: response.statusCode || 0, body: Buffer.concat(chunks).toString("utf8") }));
+        });
+        request.on("error", reject);
+        if (body) request.write(body);
+        request.end();
+      });
+      const listed = await hostOnly("GET", "/operations");
+      expect(listed.status).toBe(403);
+      expect(listed.body).toContain("approval_presence_required");
+      expect(listed.body).not.toContain(operationId);
+      const review = await hostOnly("GET", `/operations/${encodedId}`);
+      expect(review.status).toBe(403);
+      expect(review.body).not.toContain("Week 2 overview");
+      expect(review.body).not.toContain("nonce");
+      const page = await fetch(`${baseUrl}/operations/${encodedId}`);
+      const pageBody = await page.text();
+      const nonce = /name="nonce" value="([^"]+)"/.exec(pageBody)?.[1] || "";
+      const cookie = page.headers.get("set-cookie")?.split(";", 1)[0] || "";
+      const cancelPath = `/operations/${encodedId}/cancel`;
+      const unsigned = await fetch(`${baseUrl}${cancelPath}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          accept: "text/html",
+          cookie,
+          origin: baseUrl,
+          referer: `${baseUrl}/operations/${encodedId}`,
+        },
+        body: new URLSearchParams({ nonce }),
+        redirect: "manual",
+      });
+      expect(unsigned.status).toBe(403);
+      expect(await unsigned.text()).toContain("Cancel this request in Chrome");
+      expect(cancelled).toEqual([]);
+      const hostCancel = await hostOnly("POST", cancelPath, new URLSearchParams({ nonce }).toString());
+      expect(hostCancel.status).not.toBe(303);
+      expect(cancelled).toEqual([]);
+      const signed = await fetch(`${baseUrl}${cancelPath}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie,
+          origin: baseUrl,
+          referer: `${baseUrl}/operations/${encodedId}`,
+        },
+        body: new URLSearchParams({ nonce, presence: reviewApprovalProof(test.presence[0]!.key, cancelPath, nonce) }),
+        redirect: "manual",
+      });
+      expect(signed.status).toBe(303);
+      expect(cancelled).toEqual([operationId]);
+    } finally {
+      await server.close();
     }
   });
 

@@ -1,4 +1,6 @@
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
+import { scrubSensitiveCourseText } from "@morrow/gateway-core";
+import { sanitizeCourseHtml } from "./approval-preview.js";
 
 /**
  * Projections for the Moodle Choice, Feedback, and Database child-record reads.
@@ -86,7 +88,10 @@ function count(value: unknown, maximum: number): number | null {
 }
 
 function boundedText(value: unknown): string | null {
-  return typeof value === "string" && value.length <= TEXT_LIMIT ? value : null;
+  if (typeof value !== "string" || value.length > TEXT_LIMIT) return null;
+  const cleaned = value.includes("<") ? sanitizeCourseHtml(value) : value;
+  if (cleaned.length > TEXT_LIMIT) return null;
+  return scrubSensitiveCourseText(cleaned);
 }
 
 function slug(value: unknown): string | null {

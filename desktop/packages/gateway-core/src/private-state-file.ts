@@ -263,26 +263,35 @@ function readTransactionOwner(path: string, label: string, linkCount = 1): Trans
   return content ? parseTransactionOwner(content, label) : null;
 }
 
-type InterruptedClaimKind = "reclaim" | "release";
+type InterruptedClaimKind = "reclaim" | "release" | "prepare";
 
 interface InterruptedClaim {
   readonly kind: InterruptedClaimKind;
   readonly owner: TransactionOwner;
 }
 
+function interruptedClaimPath(path: string, kind: InterruptedClaimKind, owner: TransactionOwner): string {
+  return kind === "prepare"
+    ? `${path}.prepare-${owner.pid}-${owner.nonce}`
+    : `${path}.${kind}-${owner.nonce}`;
+}
+
 /**
- * Recognises a two-link owner whose nonce-derived reclaim or release claim
- * is the same private inode. Either claim proves a reaper or the owner itself
- * had already decided to remove this lock before it stopped, so a later
- * acquirer may finish that exact interrupted step.
+ * Recognises a two-link owner whose nonce-derived reclaim, release, or prepare
+ * claim is the same private inode. A reclaim or release proves a reaper or the
+ * owner itself had already decided to remove this lock before it stopped. A
+ * prepare name is the publication link left behind when the owner died after
+ * hardlinking the lock and before unlinking that name. A later acquirer may
+ * finish that exact interrupted step. A link whose name this recovery cannot
+ * derive from the owner is not a claim.
  */
 function readInterruptedClaim(path: string, label: string): InterruptedClaim | null {
   const current = lstatSync(path);
   if (!current.isFile() || current.isSymbolicLink() || current.nlink !== 2) return null;
   const owner = readTransactionOwner(path, label, 2);
   if (!owner) return null;
-  for (const kind of ["reclaim", "release"] as const) {
-    const claimPath = `${path}.${kind}-${owner.nonce}`;
+  for (const kind of ["reclaim", "release", "prepare"] as const) {
+    const claimPath = interruptedClaimPath(path, kind, owner);
     let claim: Stats;
     try { claim = lstatSync(claimPath); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
@@ -382,10 +391,36 @@ function finishInterruptedRelease(path: string, owner: TransactionOwner, label: 
   }
 }
 
+/**
+ * Finishes a publication that its owner started but did not complete: the
+ * owner linked `<lock>.prepare-<pid>-<nonce>` and then stopped before
+ * unlinking that name. Only a lock whose owner process no longer runs is
+ * removed here. A live owner's prepare link is still that owner's publication
+ * and is left in place.
+ */
+function finishInterruptedPrepare(path: string, owner: TransactionOwner, label: string): boolean {
+  if (processMatchesExactStart(owner.pid, owner.processStartedAt) !== false) return false;
+  const claimPath = interruptedClaimPath(path, "prepare", owner);
+  try {
+    const claim = lstatSync(claimPath);
+    const current = lstatSync(path);
+    if (!sameFile(claim, current) || claim.nlink !== 2 || current.nlink !== 2) return false;
+    const claimedOwner = readTransactionOwner(claimPath, label, 2);
+    if (!claimedOwner || !sameTransactionOwner(claimedOwner, owner)) return false;
+    unlinkSync(path);
+    unlinkExactName(claimPath, claim, `${label} transaction prepare claim`);
+    syncDirectory(dirname(path));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 function finishInterruptedClaim(path: string, claim: InterruptedClaim, label: string): boolean {
-  return claim.kind === "release"
-    ? finishInterruptedRelease(path, claim.owner, label)
-    : reclaimTransactionOwner(path, claim.owner, label);
+  if (claim.kind === "release") return finishInterruptedRelease(path, claim.owner, label);
+  if (claim.kind === "prepare") return finishInterruptedPrepare(path, claim.owner, label);
+  return reclaimTransactionOwner(path, claim.owner, label);
 }
 
 function publishTransactionOwner(path: string, preparedPath: string, owner: TransactionOwner, label: string): boolean {

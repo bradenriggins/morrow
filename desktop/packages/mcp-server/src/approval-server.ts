@@ -1413,14 +1413,27 @@ function closeRefusalText(result: JsonObject): string {
   return text ?? "Return to your assistant and ask Morrow to check this request.";
 }
 
-function presenceRequiredPage(reviewPath: string, purpose: "approve" | "edit-access" | "close" = "approve"): string {
+function presenceRequiredPage(reviewPath: string, purpose: "approve" | "edit-access" | "close" | "cancel" = "approve"): string {
   if (purpose === "edit-access") {
     return pageShell("Turn on Edit in Chrome", `<section class="outcome"><h1>Turn on Edit in Chrome</h1><p>Morrow did not turn on Edit. Morrow accepts Turn on Edit only from a click on this page in Chrome with Morrow Bridge connected, not from a program that sends the form itself.</p><p><a href="${escapeHtml(reviewPath)}">Open the review again</a>, check that Morrow Bridge is connected, and select Turn on Edit there.</p></section>`);
   }
   if (purpose === "close") {
     return pageShell("Close this request in Chrome", `<section class="outcome"><h1>Close this request in Chrome</h1><p>Morrow did not close anything. Morrow closes a request only after a click on its page in Chrome with Morrow Bridge connected, not from a program that sends the form itself.</p><p><a href="${escapeHtml(reviewPath)}">Open the request again</a>, check that Morrow Bridge is connected, and select the button there.</p></section>`);
   }
+  if (purpose === "cancel") {
+    return pageShell("Cancel this request in Chrome", `<section class="outcome"><h1>Cancel this request in Chrome</h1><p>Morrow did not cancel anything. Morrow cancels a request only after a click on its page in Chrome with Morrow Bridge connected, not from a program that sends the form itself.</p><p><a href="${escapeHtml(reviewPath)}">Open the review again</a>, check that Morrow Bridge is connected, and select Cancel there.</p></section>`);
+  }
   return pageShell("Approve this change in Chrome", `<section class="outcome"><h1>Approve this change in Chrome</h1><p>Morrow did not approve anything. Morrow accepts an approval only from a click on the review page in Chrome with Morrow Bridge connected, not from a program that sends the form itself.</p><p><a href="${escapeHtml(reviewPath)}">Open the review again</a>, check that Morrow Bridge is connected, and select the button there.</p></section>`);
+}
+
+const OPERATIONS_LIST_PROOF_NONCE = "list";
+
+/**
+ * A local client that set Host and nothing a browser or fetch client sends.
+ * It has not opened the review page.
+ */
+function hostOnlyClient(request: IncomingMessage): boolean {
+  return !request.headers.accept && !request.headers["user-agent"] && !request.headers["sec-fetch-dest"];
 }
 
 function recentChangesRefusal(title: string, detail: string): string {
@@ -1662,6 +1675,13 @@ export class LoopbackApprovalServer {
         return;
       }
       if (method === "GET" && url.pathname === "/operations") {
+        const presented = typeof request.headers["x-morrow-review-presence"] === "string"
+          ? request.headers["x-morrow-review-presence"]
+          : "";
+        if (!exactSecret(presented, reviewApprovalProof(this.presenceKey, "/operations", OPERATIONS_LIST_PROOF_NONCE))) {
+          sendJson(response, 403, { schema: "morrow.problem.v1", code: "approval_presence_required" });
+          return;
+        }
         sendJson(response, 200, operationsList(this.controller.operationList()));
         return;
       }
@@ -1703,6 +1723,10 @@ export class LoopbackApprovalServer {
       if (!target) {
         if (String(request.headers.accept || "").includes("text/html")) sendHtml(response, 404, statePage("unavailable"));
         else sendJson(response, 404, { schema: "morrow.problem.v1", code: "not_found" });
+        return;
+      }
+      if (method === "GET" && (!target.action || target.action === "status") && hostOnlyClient(request)) {
+        sendJson(response, 403, { schema: "morrow.problem.v1", code: "approval_presence_required" });
         return;
       }
       if (method === "GET" && (!target.action || target.action === "status") && target.kind === "edit-access") {
@@ -1850,11 +1874,11 @@ export class LoopbackApprovalServer {
         // client can do. Approval also needs Morrow Bridge's signature over this exact form, which
         // it adds only after a real click in the review tab. A refusal keeps the nonce, so the
         // person can still approve in Chrome.
-        if ((target.action === "approve" || target.action === "close")
+        if ((target.action === "approve" || target.action === "close" || target.action === "cancel")
           && !exactSecret(presence, reviewApprovalProof(this.presenceKey, url.pathname, formNonce!))) {
           if (String(request.headers.accept || "").includes("text/html")) {
             sendHtml(response, 403, presenceRequiredPage(`/${target.kind}/${encodeURIComponent(target.id)}`,
-              target.action === "close" ? "close" : target.kind === "edit-access" ? "edit-access" : "approve"));
+              target.action === "close" ? "close" : target.action === "cancel" ? "cancel" : target.kind === "edit-access" ? "edit-access" : "approve"));
           } else sendJson(response, 403, { schema: "morrow.problem.v1", code: "approval_presence_required" });
           return;
         }

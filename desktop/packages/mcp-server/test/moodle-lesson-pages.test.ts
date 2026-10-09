@@ -213,4 +213,34 @@ describe("Moodle Lesson page projection", () => {
     expect(() => projectMoodleLessonPage({ ...lessonPage, contents_format: "html" }, pageTarget))
       .toThrow("moodle_lesson_page_invalid");
   });
+
+  it("removes hidden lesson text and refuses a webservice token in the page body", () => {
+    const projected = projectMoodleLessonPage({
+      ...lessonPage,
+      title: "Organelle check",
+      contents_text: '<p>Visible prompt.</p><div style="display:none!important">Hidden prompt.</div><div><noscript></div><a href="https://evil.example">Noscript prompt.</a></noscript>',
+      answers: [
+        { ...lessonPage.answers[0], answer_text: '<p>Mitochondria</p><div hidden>Hidden answer.</div>' },
+        lessonPage.answers[1],
+      ],
+    }, pageTarget);
+    const serialized = JSON.stringify(projected);
+    expect(serialized).toContain("Visible prompt.");
+    expect(serialized).toContain("Mitochondria");
+    expect(serialized).not.toMatch(/Hidden prompt|Noscript prompt|Hidden answer|display:none/);
+    let credential = "";
+    try {
+      credential = JSON.stringify(projectMoodleLessonPage({
+        ...lessonPage,
+        contents_text: '<p>See https://moodle.example.edu/webservice/rest/server.php?wstoken=ws-live-77&wsfunction=core_webservice_get_site_info</p>',
+      }, pageTarget));
+    } catch (error) {
+      expect((error as Error).message).toBe("privacy_sensitive_text_refused");
+      credential = "";
+    }
+    expect(credential).not.toContain("ws-live-77");
+    expect(credential).not.toContain("wstoken=");
+    expect(() => projectMoodleLessonPage({ ...lessonPage, contents_text: "<p>@@PLUGINFILE@@/map.png</p>" }, pageTarget))
+      .toThrow("moodle_lesson_page_invalid");
+  });
 });

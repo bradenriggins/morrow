@@ -4,8 +4,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
-import { DomUtils, parseDocument } from "htmlparser2";
-import sanitizeHtml from "sanitize-html";
+import { sanitizeCourseHtml, textHasCredentialQuery } from "./approval-preview.js";
 import {
   MAX_BRIDGE_UI_LEARNER_NAME_REVIEWS,
   MAX_BRIDGE_UI_REVIEWS,
@@ -62,6 +61,7 @@ import {
   normalizeUpstreamResult,
   redactLearnerEgress,
   redactLearnerEgressBatch,
+  scrubSensitiveCourseText,
   resolveLearnerTokens,
   safeUpstreamFailure,
   sourceLearnerIdentifierFields,
@@ -625,23 +625,36 @@ const CANVAS_PAGE_HTML_READS = new Set([
 ]);
 
 function sanitizeCanvasPageHtml(value: string): string {
-  const document = parseDocument(value);
-  const hidden = DomUtils.findAll((element) => Object.hasOwn(element.attribs, "hidden")
-    || element.attribs["aria-hidden"]?.toLocaleLowerCase("en-US") === "true"
-    || /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:;|$)/iu.test(element.attribs.style || ""), document.children);
-  hidden.forEach((element) => DomUtils.removeElement(element));
-  return sanitizeHtml(DomUtils.getInnerHTML(document), {
-    allowedTags: ["p", "br", "hr", "div", "span", "h1", "h2", "h3", "h4", "h5", "h6", "strong", "b", "em", "i", "u", "s", "del", "ins", "sub", "sup", "small", "mark", "blockquote", "pre", "code", "kbd", "ul", "ol", "li", "dl", "dt", "dd", "table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td", "figure", "figcaption", "a", "img"],
-    allowedAttributes: {
-      "*": ["lang", "dir", "title", "role", "aria-label"],
-      a: ["href", "title"], img: ["src", "alt", "title", "width", "height"],
-      ol: ["start", "reversed", "type"], li: ["value"],
-      th: ["colspan", "rowspan", "scope"], td: ["colspan", "rowspan"],
-    },
-    allowedSchemes: ["http", "https", "mailto"],
-    allowProtocolRelative: false,
-    nonTextTags: ["script", "style", "textarea", "option", "noscript", "template"],
-  });
+  return sanitizeCourseHtml(value);
+}
+
+function scrubProjectedText(value: unknown): unknown {
+  if (typeof value === "string") return scrubSensitiveCourseText(value);
+  if (Array.isArray(value)) return value.map((entry) => scrubProjectedText(entry));
+  if (!isJsonObject(value)) return value;
+  const output: JsonObject = {};
+  for (const [key, child] of Object.entries(value)) output[key] = scrubProjectedText(child) as JsonObject[string];
+  return output;
+}
+
+/** A participation payload that names people is not returned unless the caller asked for them. */
+function withoutUnrequestedParticipantIds(value: JsonObject): JsonObject {
+  if (!Array.isArray(value.participants)) return value;
+  if (!value.participants.some((entry) => isJsonObject(entry) && typeof entry.user_id === "string")) return value;
+  return { ...value, includes_participants: false, participants: [] };
+}
+
+function projectCanvasCourseValue(key: string, value: unknown): unknown {
+  if ((key === "syllabus_body" || key === "public_description") && typeof value === "string") return sanitizeCourseHtml(value);
+  if (typeof value === "string") return textHasCredentialQuery(value) ? undefined : value;
+  if (Array.isArray(value)) return value.map((entry) => projectCanvasCourseValue(key, entry)).filter((entry) => entry !== undefined);
+  if (!isJsonObject(value)) return value;
+  const output: JsonObject = {};
+  for (const [childKey, child] of Object.entries(value)) {
+    const projected = projectCanvasCourseValue(childKey, child);
+    if (projected !== undefined) output[childKey] = projected as JsonObject[string];
+  }
+  return output;
 }
 const MCP_RUNTIME_HEALTH_SCHEMA = "morrow.mcp-runtime.health.v1";
 const MCP_RUNTIME_MANIFEST_SCHEMA = "morrow.mcp-runtime-manifest.v2";
@@ -5565,7 +5578,10 @@ export class GatewayRuntime {
         backend: mapping.upstreamId,
         phase: "read",
         verificationStatus: "not_applicable",
-        result: { content: [{ type: "text", text: read.summary }], structuredContent: bound },
+        result: {
+          content: [{ type: "text", text: read.summary }],
+          structuredContent: scrubProjectedText(withoutUnrequestedParticipantIds(bound)) as JsonObject,
+        },
       });
     }
     const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId!, target.courseId, binding, options);
@@ -5602,7 +5618,7 @@ export class GatewayRuntime {
     // shape, never a Moodle user ID.
     const projected = read.learnerRows && request.include_participants === true
       ? projectPublicMoodleCourseReportResult(read, result.data, { courseId: Number(target.courseId) })
-      : projectMoodleCourseReportBrowserResult(read, result.data, { courseId: Number(target.courseId) });
+      : scrubProjectedText(withoutUnrequestedParticipantIds(projectMoodleCourseReportBrowserResult(read, result.data, { courseId: Number(target.courseId) }))) as JsonObject;
     const output = canonicalMorrowResult({
       tool: read.tool,
       backend: typeof structured.backend === "string" ? structured.backend : "gateway",
@@ -5650,7 +5666,7 @@ export class GatewayRuntime {
       || !/^[0-9a-f]{64}$/u.test(browser.snapshot_digest)) {
       throw new Error(this.moodleReadFailureCode(raw, "moodle_courses_", "moodle_courses_invalid"));
     }
-    const projected = projectMoodleCourseList(browser.data, expected);
+    const projected = scrubProjectedText(projectMoodleCourseList(browser.data, expected)) as JsonObject;
     return canonicalMorrowResult({
       tool: mapping.publicName,
       backend: mapping.upstreamId,
@@ -5674,7 +5690,7 @@ export class GatewayRuntime {
       || result?.schema !== "morrow.result.v1" || result.tool !== MOODLE_COURSE_LIST_TOOL || !isJsonObject(result.data)) {
       throw new Error("moodle_courses_invalid");
     }
-    const projected = projectMoodleCourseList(result.data, expected);
+    const projected = scrubProjectedText(projectMoodleCourseList(result.data, expected)) as JsonObject;
     const output = canonicalMorrowResult({
       tool: MOODLE_COURSE_LIST_TOOL,
       backend: typeof structured.backend === "string" ? structured.backend : "gateway",
@@ -6457,7 +6473,7 @@ export class GatewayRuntime {
       || !/^[0-9a-f]{64}$/u.test(browser.snapshot_digest)) {
       throw new Error(this.moodleReadFailureCode(raw, "moodle_enrolment_methods_", "moodle_enrolment_methods_invalid"));
     }
-    const methods = projectMoodleEnrolmentMethodsBrowserResult(browser.data, { courseId: Number(target.courseId) });
+    const methods = scrubProjectedText(projectMoodleEnrolmentMethodsBrowserResult(browser.data, { courseId: Number(target.courseId) })) as JsonObject;
     return canonicalMorrowResult({
       tool: mapping.publicName,
       backend: mapping.upstreamId,
@@ -6491,7 +6507,7 @@ export class GatewayRuntime {
     if (!structured || structured.schema !== "morrow.result.v1" || structured.tool !== MOODLE_ENROLMENT_METHODS_TOOL
       || !result || result.schema !== "morrow.result.v1" || result.tool !== MOODLE_ENROLMENT_METHODS_TOOL
       || !isJsonObject(result.data)) throw new Error("moodle_enrolment_methods_result_invalid");
-    const methods = projectMoodleEnrolmentMethodsBrowserResult(result.data, { courseId: Number(target.courseId) });
+    const methods = scrubProjectedText(projectMoodleEnrolmentMethodsBrowserResult(result.data, { courseId: Number(target.courseId) })) as JsonObject;
     const output = canonicalMorrowResult({
       tool: MOODLE_ENROLMENT_METHODS_TOOL,
       backend: typeof structured.backend === "string" ? structured.backend : "gateway",
@@ -7643,7 +7659,9 @@ export class GatewayRuntime {
     }
     const projectedCourse: JsonObject = {};
     for (const [key, value] of Object.entries(course)) {
-      if (CANVAS_COURSE_PUBLIC_FIELDS.has(key)) projectedCourse[key] = structuredClone(value) as JsonObject[string];
+      if (!CANVAS_COURSE_PUBLIC_FIELDS.has(key)) continue;
+      const projected = projectCanvasCourseValue(key, value);
+      if (projected !== undefined) projectedCourse[key] = projected as JsonObject[string];
     }
     const projected = structuredClone(raw);
     const projectedStructured = projected.structuredContent as JsonObject;

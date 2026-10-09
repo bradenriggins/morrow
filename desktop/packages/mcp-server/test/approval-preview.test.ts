@@ -26,6 +26,15 @@ describe("rich approval content", () => {
     expect(result).not.toContain('fetch("/approve")');
   });
 
+  it("drops xmp and annotation-xml markup instead of turning it into a live image", () => {
+    const result = formattedTextPreview("Question", '<p>Visible stem.</p><svg><xmp><img src="https://evil.example/x" alt="XMPSECRET"></xmp></svg><math><annotation-xml encoding="text/html"><img src="https://evil.example/m" alt="MATHSECRET"></annotation-xml></math>');
+    expect(result).toContain("Visible stem.");
+    expect(result).not.toContain("XMPSECRET");
+    expect(result).not.toContain("MATHSECRET");
+    expect(result).not.toContain("evil.example");
+    expect(result).not.toMatch(/<img\b/i);
+  });
+
   it("shows no image address from an item bank question body", () => {
     const result = formattedTextPreview("Question text", '<p>Which structure captures light?</p><img src="https://school.instructure.com/courses/42/files/9/preview" alt=""><img src="/courses/42/files/9/preview">');
     expect(result).toContain("Which structure captures light?");

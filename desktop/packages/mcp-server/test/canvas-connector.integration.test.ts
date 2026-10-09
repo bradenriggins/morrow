@@ -1145,7 +1145,7 @@ describe("Canvas connector gateway path", () => {
 
     it("returns visible Canvas page HTML without hidden markup or signed setting URLs", async () => {
       const originalLessonBody = lesson.body;
-      lesson.body = '<p>Visible lesson text.</p><div hidden>Hidden answer.</div><div style="display:none">Hidden note.</div><script>privateScript()</script>';
+      lesson.body = '<p>Visible lesson text.</p><div hidden>Hidden answer.</div><div style="display:none">Hidden note.</div><div style="display:none!important">Important hidden.</div><div aria-hidden="true ">Aria hidden.</div><style>.conceal{display:none}</style><div class="conceal">Class hidden.</div><title>Title hidden.</title><div><noscript></div><a href="https://evil.example">Noscript hidden.</a></noscript><a href="https://school.example/files/9/download?verifier=verifier-secret">file</a><div style="display:none!important"><a href="https://school.example/files/9/download?verifier=hidden-verifier">hidden file</a></div><script>privateScript()</script>';
       try {
         for (const name of ["canvas_show_page_courses", "canvas_show_revision_courses_latest"] as const) {
           const result = await runtime.call(name, {
@@ -1154,7 +1154,7 @@ describe("Canvas connector gateway path", () => {
           const serialized = JSON.stringify(result);
           expect(result.isError, serialized).not.toBe(true);
           expect(serialized).toContain("Visible lesson text.");
-          expect(serialized).not.toMatch(/Hidden answer|Hidden note|privateScript|display:none| hidden/u);
+          expect(serialized).not.toMatch(/Hidden answer|Hidden note|Important hidden|Aria hidden|Class hidden|Title hidden|Noscript hidden|privateScript|display:none| hidden|verifier-secret|hidden-verifier/u);
         }
         const settings = await runtime.call("canvas_get_course_settings", {
           course_id: "42", _morrow: { source_binding_id: sourceBindingId },
