@@ -12,7 +12,7 @@
     "moodle-completion-executor.js": "cc5e88fba0add29c8a262b7c66cd7bb355d244c886e3335c549f8cc7bd7d02d4",
     "moodle-course-settings-executor.js": "d4028ee5b8d3dc76d8789f05cdb1fd887adb1350506d018cb803b4c6de907fb4",
     "moodle-enrolment-executor.js": "1456e9267dac2effc6e19d32667afab06cb6c47de10341c066c573176db12e7c",
-    "moodle-executor.js": "968aefb09af6691e83c5d560ce3580b3637514744c8c3a1aea0fe9278b707e1c",
+    "moodle-executor.js": "eb240a68202eeb8a327e1b9d26112e46388914681205c45d004c5f578e94aab8",
     "moodle-forum-activity-summary-read.js": "dc2336fad5366af48ad2920e55d5747ea7401a6f1fd8aabc8bb25592f374610e",
     "moodle-forum-post-executor.js": "89ccc185c4fd54a6fa0c2be025590ac2c6bc26109bc0525f122b8f67161c7fed",
     "moodle-forum-read.js": "b92d7ecc6d50858a968a5201f24855bfca0718e3c5874d1b7f8e7c383af50098",
@@ -21,7 +21,7 @@
     "moodle-gradebook-executor.js": "1c74338b5da5d24d8c2b21ae6d3776fbc127dafbc9be1c71b94f723c30f4cbf0",
     "moodle-groups-executor.js": "28f809518dafc7653f325051cefa86effeead7340f1651ca0683ab4095b8b306",
     "moodle-groups-read.js": "8b2ca32f2a9345df96ee82b6b0adac37574734fccd3e7ad5a9095d2958834aa9",
-    "moodle-h5p-executor.js": "0dc4a9343c34e871c86f07a9dacbb6117f9cca445ba40a1da68f5a2a50848e33",
+    "moodle-h5p-executor.js": "f0c6986ff9b0a8e93270abec96921122ddb85decf0bb79d993a0b45df99f8b85",
     "moodle-learner-submission-read.js": "335572b09d90b55c34d79ad332bc806149742d644022d736c6834ca3ad5c07b7",
     "moodle-lesson-executor.js": "26b85c077c20eb910ca6df2921abcaa75ad5a41778bd2811c4a1ad68b42915f8",
     "moodle-lesson-read.js": "d3429f976581d05b10dc1a80e36b20816d2257e131a8fb7da86e2caeb5b4b1bb",
@@ -36,13 +36,13 @@
     "moodle-quiz-structure-executor.js": "f0d1ec3d74a135b41690f6aaaed1fc76be96e750079d09e82526ed9799a4a8fd",
     "moodle-reports-read.js": "083b795b993c3f2ceb5bb11e84081ad3a4194c1ae249fc35b1f6d91aeacfce24",
     "moodle-restrictions-executor.js": "d9000ef442f5f4f0a9f139150ceccbed84e39966820bb2f7205be0bb82b15c03",
-    "moodle-scorm-executor.js": "69e5c0c9972ef6a40b428561fa557eb06ce73e766352e5df8711228845131652",
+    "moodle-scorm-executor.js": "1e74642c32bac210e5d15c370725e72606fec47df249e81ea1865eb2379325c1",
     "moodle-scorm-report-read.js": "f550bd3e56716ebee9e0d1324d47295d66a6aa5a42dc2f3fa3af62470cc81ec9",
     "moodle-section-executor.js": "41e3b94993d1c4786d0ca45a7dcc57f110bd1e9a2bbd1eeba6a61df927773c6c",
     "moodle-site-inventory-read.js": "3852c0ebcd2fe62f69b3be3b22e1ee1708bb7b8e208105b70d70948de28785de",
     "moodle-subsection-executor.js": "0bcd1b72fab1904e9603b82cb220c438f55cdf35560d59c929675e46ed45f7dc",
     "moodle-workshop-executor.js": "7eab3a80247564234f124d4c694c28d020a36e66e007e5f30421a877ac384f14",
-    "service-worker.js": "028ee8499e05acea9c86dc7bae728c51f7d2ff7ab3ad10805cac460849efcba2"
+    "service-worker.js": "facbc7c586e91779b0b7889e6feb2d3fdc288ea77cc6ee6be741abb87ecf5858"
   },
   "operations": {
     "moodle.ajax.core_backup.async_progress.backup.read.v1": {
@@ -153,9 +153,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_list_my_courses",
       "readOnly": true,
@@ -166,9 +166,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_list_assignments",
       "readOnly": true,
@@ -179,9 +179,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_list_quizzes",
       "readOnly": true,
@@ -192,9 +192,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_contents",
       "readOnly": true,
@@ -244,9 +244,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_hide_activity",
       "readOnly": false,
@@ -257,9 +257,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_move_activity",
       "readOnly": false,
@@ -283,9 +283,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_show_activity",
       "readOnly": false,
@@ -322,9 +322,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_hide_section",
       "readOnly": false,
@@ -348,9 +348,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_show_section",
       "readOnly": false,
@@ -595,9 +595,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_course",
       "readOnly": true,
@@ -634,9 +634,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_course_summary",
       "readOnly": true,
@@ -647,9 +647,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_course_summary",
       "readOnly": false,
@@ -660,9 +660,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_hide_course",
       "readOnly": false,
@@ -673,9 +673,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_show_course",
       "readOnly": false,
@@ -686,9 +686,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_section",
       "readOnly": true,
@@ -725,9 +725,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_section",
       "readOnly": false,
@@ -738,9 +738,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_assignment_creation_form",
       "readOnly": true,
@@ -751,9 +751,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_assignment",
       "readOnly": false,
@@ -764,9 +764,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_assignment",
       "readOnly": true,
@@ -777,9 +777,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_assignment",
       "readOnly": false,
@@ -842,9 +842,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_book_creation_form",
       "readOnly": true,
@@ -855,9 +855,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_book",
       "readOnly": false,
@@ -868,9 +868,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_book",
       "readOnly": true,
@@ -881,9 +881,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_book",
       "readOnly": false,
@@ -894,9 +894,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_choice_creation_form",
       "readOnly": true,
@@ -907,9 +907,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_choice",
       "readOnly": false,
@@ -920,9 +920,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_choice",
       "readOnly": true,
@@ -933,9 +933,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_choice",
       "readOnly": false,
@@ -972,9 +972,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_database_creation_form",
       "readOnly": true,
@@ -985,9 +985,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_database",
       "readOnly": false,
@@ -998,9 +998,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_database",
       "readOnly": true,
@@ -1011,9 +1011,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_database",
       "readOnly": false,
@@ -1024,9 +1024,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_feedback_creation_form",
       "readOnly": true,
@@ -1037,9 +1037,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_feedback",
       "readOnly": false,
@@ -1050,9 +1050,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_feedback",
       "readOnly": true,
@@ -1063,9 +1063,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_feedback",
       "readOnly": false,
@@ -1076,9 +1076,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_folder_file_creation_form",
       "readOnly": true,
@@ -1089,9 +1089,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_folder_file",
       "readOnly": false,
@@ -1102,9 +1102,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_add_folder_files",
       "readOnly": false,
@@ -1115,9 +1115,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_folder_files",
       "readOnly": true,
@@ -1128,9 +1128,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_folder",
       "readOnly": true,
@@ -1141,9 +1141,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_folder_subfolder",
       "readOnly": false,
@@ -1154,9 +1154,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_forum_creation_form",
       "readOnly": true,
@@ -1167,9 +1167,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_forum",
       "readOnly": false,
@@ -1180,9 +1180,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_forum",
       "readOnly": true,
@@ -1193,9 +1193,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_forum",
       "readOnly": false,
@@ -1206,9 +1206,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_glossary_creation_form",
       "readOnly": true,
@@ -1219,9 +1219,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_glossary",
       "readOnly": false,
@@ -1232,9 +1232,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_glossary",
       "readOnly": true,
@@ -1245,9 +1245,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_glossary",
       "readOnly": false,
@@ -1258,9 +1258,9 @@
       "file": "moodle-h5p-executor.js",
       "functionByteRange": [
         2612,
-        70030
+        72408
       ],
-      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "functionSha256": "eb829a1d66b31a491456baa9e9a50e08931f5c959d8b7e27e600f572e9442390",
       "function": "executeMoodleH5pInPage",
       "toolName": "moodle_get_h5pactivity_creation_form",
       "readOnly": true,
@@ -1271,9 +1271,9 @@
       "file": "moodle-h5p-executor.js",
       "functionByteRange": [
         2612,
-        70030
+        72408
       ],
-      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "functionSha256": "eb829a1d66b31a491456baa9e9a50e08931f5c959d8b7e27e600f572e9442390",
       "function": "executeMoodleH5pInPage",
       "toolName": "moodle_create_h5pactivity",
       "readOnly": false,
@@ -1284,9 +1284,9 @@
       "file": "moodle-h5p-executor.js",
       "functionByteRange": [
         2612,
-        70030
+        72408
       ],
-      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "functionSha256": "eb829a1d66b31a491456baa9e9a50e08931f5c959d8b7e27e600f572e9442390",
       "function": "executeMoodleH5pInPage",
       "toolName": "moodle_replace_h5pactivity_package",
       "readOnly": false,
@@ -1297,9 +1297,9 @@
       "file": "moodle-h5p-executor.js",
       "functionByteRange": [
         2612,
-        70030
+        72408
       ],
-      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "functionSha256": "eb829a1d66b31a491456baa9e9a50e08931f5c959d8b7e27e600f572e9442390",
       "function": "executeMoodleH5pInPage",
       "toolName": "moodle_get_h5pactivity",
       "readOnly": true,
@@ -1310,9 +1310,9 @@
       "file": "moodle-h5p-executor.js",
       "functionByteRange": [
         2612,
-        70030
+        72408
       ],
-      "functionSha256": "07a72e75661ffc43a604dd6ba01463c42ef7c94965bc61fc178484b9e52ff2f4",
+      "functionSha256": "eb829a1d66b31a491456baa9e9a50e08931f5c959d8b7e27e600f572e9442390",
       "function": "executeMoodleH5pInPage",
       "toolName": "moodle_update_h5pactivity",
       "readOnly": false,
@@ -1323,9 +1323,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_imscp_package_creation_form",
       "readOnly": true,
@@ -1336,9 +1336,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_imscp_package",
       "readOnly": false,
@@ -1349,9 +1349,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_imscp",
       "readOnly": true,
@@ -1362,9 +1362,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_label_creation_form",
       "readOnly": true,
@@ -1375,9 +1375,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_label",
       "readOnly": false,
@@ -1388,9 +1388,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_label",
       "readOnly": true,
@@ -1401,9 +1401,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_label",
       "readOnly": false,
@@ -1414,9 +1414,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_lesson_creation_form",
       "readOnly": true,
@@ -1427,9 +1427,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_lesson",
       "readOnly": false,
@@ -1440,9 +1440,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_lesson",
       "readOnly": true,
@@ -1453,9 +1453,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_lesson",
       "readOnly": false,
@@ -1518,9 +1518,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_page_creation_form",
       "readOnly": true,
@@ -1531,9 +1531,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_page",
       "readOnly": false,
@@ -1544,9 +1544,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_page",
       "readOnly": true,
@@ -1557,9 +1557,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_page",
       "readOnly": false,
@@ -1609,9 +1609,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_quiz_creation_form",
       "readOnly": true,
@@ -1622,9 +1622,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_quiz",
       "readOnly": false,
@@ -1635,9 +1635,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_quiz",
       "readOnly": true,
@@ -1648,9 +1648,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_quiz",
       "readOnly": false,
@@ -1661,9 +1661,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_resource_file_creation_form",
       "readOnly": true,
@@ -1674,9 +1674,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_resource_file",
       "readOnly": false,
@@ -1687,9 +1687,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_delete_resource_file",
       "readOnly": false,
@@ -1700,9 +1700,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_replace_resource_file",
       "readOnly": false,
@@ -1713,9 +1713,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_resource_files",
       "readOnly": true,
@@ -1752,9 +1752,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_scorm_package_creation_form",
       "readOnly": true,
@@ -1765,9 +1765,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_scorm_package",
       "readOnly": false,
@@ -1778,9 +1778,9 @@
       "file": "moodle-scorm-executor.js",
       "functionByteRange": [
         846,
-        50329
+        52496
       ],
-      "functionSha256": "5ddfd2017337fcf61767b487e0a2f7140005eb64a8fc0689f422226187aef82c",
+      "functionSha256": "1d4efff2061f788e22c4b92d105663947a91dc5197c10a54c4406502bfabb29b",
       "function": "executeMoodleScormInPage",
       "toolName": "moodle_replace_scorm_package",
       "readOnly": false,
@@ -1791,9 +1791,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_scorm",
       "readOnly": true,
@@ -1804,9 +1804,9 @@
       "file": "moodle-scorm-executor.js",
       "functionByteRange": [
         846,
-        50329
+        52496
       ],
-      "functionSha256": "5ddfd2017337fcf61767b487e0a2f7140005eb64a8fc0689f422226187aef82c",
+      "functionSha256": "1d4efff2061f788e22c4b92d105663947a91dc5197c10a54c4406502bfabb29b",
       "function": "executeMoodleScormInPage",
       "toolName": "moodle_update_scorm",
       "readOnly": false,
@@ -1830,9 +1830,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_url_creation_form",
       "readOnly": true,
@@ -1843,9 +1843,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_url",
       "readOnly": false,
@@ -1856,9 +1856,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_url",
       "readOnly": true,
@@ -1869,9 +1869,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_url",
       "readOnly": false,
@@ -1882,9 +1882,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_wiki_creation_form",
       "readOnly": true,
@@ -1895,9 +1895,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_wiki",
       "readOnly": false,
@@ -1908,9 +1908,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_wiki",
       "readOnly": true,
@@ -1921,9 +1921,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_wiki",
       "readOnly": false,
@@ -2649,9 +2649,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_assignment_override",
       "readOnly": false,
@@ -2662,9 +2662,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_assignment_override",
       "readOnly": false,
@@ -2675,9 +2675,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_assignment_overrides",
       "readOnly": true,
@@ -2688,9 +2688,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_book_chapter_creation_form",
       "readOnly": true,
@@ -2701,9 +2701,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_book_chapter",
       "readOnly": false,
@@ -2714,9 +2714,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_delete_book_chapter",
       "readOnly": false,
@@ -2727,9 +2727,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_hide_book_chapter",
       "readOnly": false,
@@ -2740,9 +2740,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_move_book_chapter",
       "readOnly": false,
@@ -2753,9 +2753,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_book_chapter",
       "readOnly": true,
@@ -2766,9 +2766,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_show_book_chapter",
       "readOnly": false,
@@ -2779,9 +2779,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_book_chapter",
       "readOnly": false,
@@ -2792,9 +2792,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_list_book_chapters",
       "readOnly": true,
@@ -2818,9 +2818,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_list_quiz_questions",
       "readOnly": true,
@@ -2896,9 +2896,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_create_quiz_override",
       "readOnly": false,
@@ -2909,9 +2909,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_update_quiz_override",
       "readOnly": false,
@@ -2922,9 +2922,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_quiz_overrides",
       "readOnly": true,
@@ -3000,9 +3000,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_quiz_question",
       "readOnly": true,
@@ -3013,9 +3013,9 @@
       "file": "moodle-executor.js",
       "functionByteRange": [
         6,
-        415415
+        418302
       ],
-      "functionSha256": "38df7ad3a932576388d7aab6e6e394d4d2781782febfaaa95c48af0641d679c9",
+      "functionSha256": "ee5dc0e86caa01c5857a5c17ebba2506f41dd84b6695c697e74d4f504a16d001",
       "function": "executeMoodleInPage",
       "toolName": "moodle_get_question_bank_filter_inventory",
       "readOnly": true,

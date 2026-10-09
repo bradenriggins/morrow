@@ -9,8 +9,8 @@ import { itemBankMediaFindings } from "./item-bank-guard.js";
 import { canClaimCourseConnectionIntent, canCompleteCourseConnectionIntent, normalizeCourseConnectionUrl, validCourseConnectionIntent } from "./course-connection-intent.js";
 import { MAX_FILE_TEXT_BYTES, canvasCourseFileDownloadUrl, canvasFileTextContentTypeSupported, executeCanvasCourseFileTextInPage } from "./canvas-file-content.js";
 import { CANVAS_FILE_SIGNALS_OPERATION_KEY, CANVAS_FILE_SIGNALS_SCHEMA, CANVAS_FILE_SIGNALS_TOOL_NAME, canvasCourseFileSignals, canvasFileSignalsContentTypeSupported } from "./canvas-file-signals.js";
-import { canvasUploadFolderId, executeCanvasCourseFileTransferInPage } from "./canvas-file-transfer.js";
-import { canvasNewQuizHotSpotVerification, executeCanvasNewQuizHotSpotInPage, unsignedHotSpotImageUrl } from "./canvas-new-quiz-hot-spot.js";
+import { canvasUploadFolderId, canvasUploadUrlShape, executeCanvasCourseFileTransferInPage, executeCanvasUploadInitIsolated } from "./canvas-file-transfer.js";
+import { canvasNewQuizHotSpotVerification, executeCanvasHotSpotMediaInitIsolated, executeCanvasNewQuizHotSpotInPage, unsignedHotSpotImageUrl } from "./canvas-new-quiz-hot-spot.js";
 import { CANVAS_CONVERSATION_PRIVATE_SCHEMA, PRIVATE_CANVAS_CONVERSATION_OPERATION, PRIVATE_CANVAS_CONVERSATION_TOOL, canvasConversationOperationMatches, executeCanvasConversationInPage, normalizeCanvasConversationPrivatePayload } from "./canvas-conversations.js";
 import { problemCopy, problemText } from "./bridge-problem-copy.js";
 import { bridgeWriteFailureCode, canvasWriteOutcomeUncertain } from "./canvas-write-outcome.js";
@@ -18,7 +18,7 @@ import { canvasOperationAdmission, canvasReviewedUploadKind, canvasReviewedUploa
 import { CANVAS_MULTI_CONTEXT_REFUSAL, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "../generated/canvas-semantic-target.js";
 import { evaluateBrowserReadback, planBrowserReadback, planCanvasRecoveryDescriptor } from "./verification.js";
 import { canvasOperationReadbackInputProblem, evaluateCanvasOperationProgress, evaluateCanvasOperationReadback, isCanvasOperationReadback, planCanvasOperationReadback } from "./canvas-operation-readback.js";
-import { executeMoodleInPage } from "./moodle-executor.js";
+import { executeMoodleDraftSessionInPage, executeMoodleDraftUploadInPage, executeMoodleInPage } from "./moodle-executor.js";
 import { executeMoodleForumActivitySummaryInPage } from "./moodle-forum-activity-summary-read.js";
 import { executeMoodleForumPostInPage } from "./moodle-forum-post-executor.js";
 import { executeMoodleForumReadInPage } from "./moodle-forum-read.js";
@@ -3962,6 +3962,65 @@ async function executeQuizBankDraw(binding, operation, args, expiresAt) {
 }
 
 async function executeOperation(binding, operation, args, expiresAt, privateAttachment, privateConversation, privateAttachments) {
+  const finishMoodleDrafts = async (func, payload, missing) => {
+    if (privateAttachment?.routeGenerationOnly === true
+      || (Array.isArray(privateAttachments) && privateAttachments.some((entry) => entry?.routeGenerationOnly === true))) {
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func,
+        args: [JSON.stringify(payload)],
+      });
+      return execution?.result || missing;
+    }
+    const files = [...(privateAttachment ? [privateAttachment] : []), ...(Array.isArray(privateAttachments) ? privateAttachments : [])]
+      .filter((entry) => entry && typeof entry.bytes_base64 === "string" && entry.manifest);
+    const [sessionExecution] = await chrome.scripting.executeScript({
+      target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleDraftSessionInPage, args: [],
+    });
+    const session = sessionExecution?.result;
+    if (!session || session.origin !== binding.origin || session.siteUrl !== binding.siteUrl || typeof session.sesskey !== "string") {
+      return { ok: false, sent: false, error: "moodle_binding_mismatch" };
+    }
+    const channel = bridgeNonce();
+    const listener = chrome.scripting.executeScript({
+      target: { tabId: binding.tabId, frameIds: [0] }, world: "ISOLATED", func: executeMoodleDraftUploadInPage,
+      args: [JSON.stringify({ mode: "listen", channel, files, sesskey: session.sesskey, expiresAt, origin: session.origin })],
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId: binding.tabId, frameIds: [0] }, world: "ISOLATED",
+      func: (name) => new Promise((resolve, reject) => {
+        const started = Date.now();
+        const timer = setInterval(() => {
+          if (document.documentElement?.getAttribute("data-morrow-draft-listener") === name) {
+            clearInterval(timer);
+            resolve(true);
+          } else if (Date.now() - started > 5_000) {
+            clearInterval(timer);
+            reject(new Error("moodle_extension_upload_failed"));
+          }
+        }, 10);
+      }),
+      args: [channel],
+    });
+    const pagePayload = { ...payload, extensionOwnsBytes: true, draftUploadChannel: channel };
+    delete pagePayload.privateAttachment;
+    delete pagePayload.privateAttachments;
+    try {
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func,
+        args: [JSON.stringify(pagePayload)],
+      });
+      return execution?.result || missing;
+    } finally {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: binding.tabId, frameIds: [0] }, world: "ISOLATED",
+          func: (name) => { document.dispatchEvent(new CustomEvent("morrow-draft-upload-close", { detail: { channel: name } })); },
+          args: [channel],
+        });
+      } catch {}
+      await listener.catch(() => {});
+    }
+  };
   if (operation.provider === "canvas" && operation.key === CANVAS_CLASSIC_QUIZ_SUBMISSION_SUMMARY_OPERATION_KEY) {
     if (operation.toolName !== "canvas_get_classic_quiz_submission_summary" || !operation.readOnly
       || privateAttachment !== undefined || privateConversation !== undefined) {
@@ -4419,10 +4478,14 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
         return { ok: false, sent: false, error: "moodle_scorm_arguments_invalid" };
       }
       try {
+        const scormPayload = { mode: "execute", operation, arguments: args, ...(privateAttachment ? { privateAttachment } : {}), binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt };
+        if (privateAttachment) {
+          return await finishMoodleDrafts(executeMoodleScormInPage, scormPayload, { ok: false, sent: true, outcomeUnknown: true, error: "moodle_scorm_result_missing" });
+        }
         const [execution] = await chrome.scripting.executeScript({
           target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleScormInPage,
           // Chrome drops null object fields from scripting arguments unless they are serialized.
-          args: [JSON.stringify({ mode: "execute", operation, arguments: args, ...(privateAttachment ? { privateAttachment } : {}), binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt })],
+          args: [JSON.stringify(scormPayload)],
         });
         return execution?.result || { ok: false, sent: true, outcomeUnknown: true, error: "moodle_scorm_result_missing" };
       } catch {
@@ -4436,10 +4499,14 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
         return { ok: false, sent: false, error: "moodle_h5pactivity_arguments_invalid" };
       }
       try {
+        const h5pPayload = { mode: "execute", operation, arguments: args, ...(privateAttachment ? { privateAttachment } : {}), binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt };
+        if (privateAttachment) {
+          return await finishMoodleDrafts(executeMoodleH5pInPage, h5pPayload, { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "moodle_h5pactivity_result_missing" });
+        }
         const [execution] = await chrome.scripting.executeScript({
           target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleH5pInPage,
           // Chrome drops null object fields from scripting arguments unless they are serialized.
-          args: [JSON.stringify({ mode: "execute", operation, arguments: args, ...(privateAttachment ? { privateAttachment } : {}), binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt })],
+          args: [JSON.stringify(h5pPayload)],
         });
         return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "moodle_h5pactivity_result_missing" };
       } catch {
@@ -4702,10 +4769,14 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
       }
     }
     try {
+      const moodlePayload = { mode: "execute", operation, arguments: args, ...(privateAttachment ? { privateAttachment } : {}), ...(privateAttachments ? { privateAttachments } : {}), binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt };
+      if (PRIVATE_MOODLE_STAGED_FILE_OPERATIONS.some((entry) => entry.toolName === operation?.toolName && entry.key === operation?.key) && (privateAttachment || privateAttachments)) {
+        return await finishMoodleDrafts(executeMoodleInPage, moodlePayload, { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "moodle_result_missing" });
+      }
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage,
         // Chrome drops null object fields from scripting arguments unless they are serialized.
-        args: [JSON.stringify({ mode: "execute", operation, arguments: args, ...(privateAttachment ? { privateAttachment } : {}), ...(privateAttachments ? { privateAttachments } : {}), binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt })],
+        args: [JSON.stringify(moodlePayload)],
       });
       return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "moodle_result_missing" };
     } catch {
@@ -4735,13 +4806,12 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
 
 function privateCanvasUploadPlan(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some((key) => !["course_id", "folder_id", "upload_path", "upload_url", "upload_params"].includes(key))
-    || !decimalId(value.course_id) || typeof value.upload_path !== "string" || (value.folder_id !== undefined && !decimalId(value.folder_id))
+    || Object.keys(value).some((key) => !["ok", "upload_url", "upload_params"].includes(key))
+    || value.ok !== true
     || typeof value.upload_url !== "string" || value.upload_url.length < 1 || value.upload_url.length > 8192
     || !value.upload_params || typeof value.upload_params !== "object" || Array.isArray(value.upload_params)) return null;
-  let uploadUrl;
-  try { uploadUrl = new URL(value.upload_url); } catch { return null; }
-  if (uploadUrl.protocol !== "https:" || uploadUrl.username || uploadUrl.password || uploadUrl.hash) return null;
+  const uploadUrl = canvasUploadUrlShape(value.upload_url);
+  if (!uploadUrl) return null;
   const entries = Object.entries(value.upload_params);
   if (!entries.length || entries.length > 64 || entries.some(([key, entry]) => (
     !/^[A-Za-z0-9_.-]{1,128}$/.test(key) || key === "file" || typeof entry !== "string" || entry.length > 8192
@@ -4818,31 +4888,58 @@ function observeCanvasUploadConfirmation(uploadUrl, canvasOrigin, signal, method
   return observer;
 }
 
+function canvasUploadRedirectKept(response, uploadUrl, canvasOrigin) {
+  if (!response || response.redirected !== true) return true;
+  let finalUrl;
+  try { finalUrl = new URL(response.url); } catch { return false; }
+  if (finalUrl.protocol !== "https:" || finalUrl.username || finalUrl.password || finalUrl.hash) return false;
+  return finalUrl.origin === uploadUrl.origin || finalUrl.origin === canvasOrigin;
+}
+
+function canvasUploadLocationKept(response, uploadUrl, canvasOrigin) {
+  const location = response?.headers?.get?.("location");
+  if (typeof location !== "string" || !location) return true;
+  let next;
+  try { next = new URL(location, uploadUrl); } catch { return false; }
+  if (next.protocol !== "https:" || next.username || next.password || next.hash) return false;
+  return next.origin === uploadUrl.origin || next.origin === canvasOrigin;
+}
+
 /**
- * The signed URL Canvas answered the media upload request with. It is used to
- * send the bytes and then, with its query string removed, as the image URL the
- * created question carries. Its signature never leaves this worker.
+ * A Hot Spot PUT may stay on the host the isolated media init named. A redirect
+ * to any other host, including the Canvas origin, is refused.
  */
-function privateCanvasSignedUploadUrl(value) {
-  if (typeof value !== "string" || value.length < 1 || value.length > 8192) return null;
-  let url;
-  try { url = new URL(value); } catch { return null; }
-  return url.protocol === "https:" && !url.username && !url.password && url.hostname ? url : null;
+function canvasHotSpotRedirectKept(response, uploadUrl) {
+  if (!response || response.redirected !== true) return true;
+  let finalUrl;
+  try { finalUrl = new URL(response.url); } catch { return false; }
+  if (finalUrl.protocol !== "https:" || finalUrl.username || finalUrl.password || finalUrl.hash) return false;
+  return finalUrl.origin === uploadUrl.origin;
+}
+
+function canvasHotSpotLocationKept(response, uploadUrl) {
+  const location = response?.headers?.get?.("location");
+  if (typeof location !== "string" || !location) return true;
+  let next;
+  try { next = new URL(location, uploadUrl); } catch { return false; }
+  if (next.protocol !== "https:" || next.username || next.password || next.hash) return false;
+  return next.origin === uploadUrl.origin;
 }
 
 /**
  * One reviewed New Quizzes Hot Spot question, sent once.
  *
  * Canvas splits this into three requests that only work in order. The page reads
- * the current course, quiz and complete saved question list and asks Canvas for
- * one signed upload URL. This worker sends the reviewed bytes to that URL with
- * one PUT, and watches that exact request so it learns the real response even
- * when the upload host answers opaquely. Only a confirmed upload lets the page
- * create the question, with the same URL minus its query string, and reread what
- * Canvas saved. A watch that ends without confirming refuses the create even
- * when the worker's own read of the PUT looked like a success, and because the
- * bytes may have reached the host anyway, that success-looking read leaves the
- * outcome unknown.
+ * the current course, quiz and complete saved question list. The isolated world
+ * asks the bound Canvas or quiz host for one media upload URL. This worker sends
+ * the reviewed bytes to the https host that answer named, including inst-fs and
+ * S3, and watches that exact request so it learns the real response even when
+ * the upload host answers opaquely. Only a confirmed upload lets the page create
+ * the question, with the same URL minus its query string, and reread what Canvas
+ * saved. A watch that ends without confirming refuses the create even when the
+ * worker's own read of the PUT looked like a success, and because the bytes may
+ * have reached the host anyway, that success-looking read leaves the outcome
+ * unknown.
  *
  * Nothing here is sent twice. Once the create is dispatched, an ending that does
  * not prove a refusal is reported as an unknown outcome, and Morrow never
@@ -4893,8 +4990,27 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
       || !Number.isSafeInteger(prepared.data.item_count) || prepared.data.item_count < 0) {
       return { ok: false, sent: false, error: prepared?.error || "canvas_hot_spot_upload_init_invalid" };
     }
-    const uploadUrl = privateCanvasSignedUploadUrl(prepared.data.upload_url);
-    if (!uploadUrl) return { ok: false, sent: false, error: "canvas_hot_spot_upload_url_refused" };
+    // The page's fetch is not asked for the media URL. A replaced window.fetch
+    // cannot name the host that receives the image.
+    const [initialized] = await chrome.scripting.executeScript({
+      target: { tabId: binding.tabId, frameIds: [0] }, world: "ISOLATED", func: executeCanvasHotSpotMediaInitIsolated,
+      args: [JSON.stringify({
+        origin: binding.origin,
+        courseId: binding.courseId,
+        assignmentId: String(args.assignment_id),
+        expiresAt: deadline,
+      })],
+    });
+    const supplied = initialized?.result?.upload_url;
+    const uploadUrl = initialized?.result?.ok === true ? canvasUploadUrlShape(supplied) : null;
+    if (!uploadUrl || uploadUrl.href !== canvasUploadUrlShape(supplied)?.href) {
+      return {
+        ok: false, sent: false,
+        error: typeof supplied === "string" && !canvasUploadUrlShape(supplied)
+          ? "canvas_hot_spot_upload_url_refused"
+          : (initialized?.result?.error || "canvas_hot_spot_upload_init_invalid"),
+      };
+    }
     uploadHost = uploadUrl.hostname;
     uploadObserver = observeCanvasUploadConfirmation(uploadUrl, binding.origin, controller.signal, "PUT");
     if (!uploadObserver) return { ok: false, sent: false, error: "canvas_hot_spot_upload_observer_unavailable" };
@@ -4915,6 +5031,12 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
       signal: controller.signal,
       body: bytes,
     });
+    if (!canvasHotSpotRedirectKept(upload, uploadUrl) || !canvasHotSpotLocationKept(upload, uploadUrl)) {
+      return {
+        ok: false, sent: true, outcomeUnknown: true, status: upload.status,
+        upload_host: uploadHost, error: "canvas_hot_spot_upload_url_refused",
+      };
+    }
     const observed = await uploadObserver.result;
     uploadStatus = Number.isInteger(observed.status) ? observed.status : upload.status;
     // An observer error is the confirmation channel reporting that it confirmed
@@ -5082,16 +5204,40 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       const imported = await execute({ ...transferInput, mode: "rubric" });
       return imported || { ok: false, sent: true, outcomeUnknown: true, error: "canvas_rubric_import_result_missing" };
     }
-    const prepared = await execute({ ...transferInput, mode: "initialize" });
-    const plan = prepared?.ok === true && prepared?.sent === false && privateCanvasUploadPlan(prepared.data);
-    if (!plan || String(prepared.data.course_id) !== binding.courseId || prepared.data.upload_path !== target.uploadPath) {
+    const prepared = await execute({ ...transferInput, mode: "preflight" });
+    if (prepared?.ok !== true || prepared?.sent !== false || String(prepared.data?.course_id) !== binding.courseId
+      || prepared.data?.upload_path !== target.uploadPath) {
       return { ok: false, sent: false, error: prepared?.error || "canvas_file_upload_init_invalid" };
+    }
+    // The page's fetch is not asked for the upload URL. A replaced window.fetch
+    // cannot name the host that receives the file.
+    const [initialized] = await chrome.scripting.executeScript({
+      target: { tabId: binding.tabId, frameIds: [0] }, world: "ISOLATED", func: executeCanvasUploadInitIsolated,
+      args: [JSON.stringify({
+        origin: binding.origin,
+        uploadPath: target.uploadPath,
+        filename: privateAttachment.manifest.filename,
+        size: privateAttachment.manifest.size_bytes,
+        contentType: privateAttachment.content_type,
+        expiresAt: deadline,
+      })],
+    });
+    const plan = privateCanvasUploadPlan(initialized?.result);
+    if (!plan) {
+      const supplied = initialized?.result?.upload_url;
+      return {
+        ok: false, sent: false,
+        error: typeof supplied === "string" && !canvasUploadUrlShape(supplied) ? "canvas_file_upload_url_refused" : (initialized?.result?.error || "canvas_file_upload_init_invalid"),
+      };
     }
     const form = new FormData();
     for (const [key, value] of plan.entries) form.append(key, value);
     form.append("file", new Blob([Uint8Array.from(atob(privateAttachment.bytes_base64), (character) => character.charCodeAt(0))], {
       type: privateAttachment.content_type,
     }), privateAttachment.manifest.filename);
+    if (plan.uploadUrl.href !== canvasUploadUrlShape(initialized.result.upload_url)?.href) {
+      return { ok: false, sent: false, error: "canvas_file_upload_url_refused" };
+    }
     uploadObserver = observeCanvasUploadConfirmation(plan.uploadUrl, binding.origin, controller.signal);
     if (!uploadObserver) return { ok: false, sent: false, error: "canvas_file_upload_observer_unavailable" };
     if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_transfer_timeout");
@@ -5105,6 +5251,9 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       signal: controller.signal,
       body: form,
     });
+    if (!canvasUploadRedirectKept(upload, plan.uploadUrl, binding.origin) || !canvasUploadLocationKept(upload, plan.uploadUrl, binding.origin)) {
+      return { ok: false, sent: true, outcomeUnknown: true, status: upload.status, error: "canvas_file_upload_url_refused" };
+    }
     const observed = await uploadObserver.result;
     uploadStatus = observed.status || upload.status;
     const confirmation = observed.confirmation;

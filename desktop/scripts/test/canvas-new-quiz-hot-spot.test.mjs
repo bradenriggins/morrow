@@ -5,9 +5,11 @@ import test from "node:test";
 import { runInThisContext } from "node:vm";
 import {
   canvasNewQuizHotSpotVerification,
+  executeCanvasHotSpotMediaInitIsolated,
   executeCanvasNewQuizHotSpotInPage,
   unsignedHotSpotImageUrl,
 } from "../../connector/extension/src/canvas-new-quiz-hot-spot.js";
+import { canvasUploadUrlShape } from "../../connector/extension/src/canvas-file-transfer.js";
 import { stableJson } from "../../connector/extension/src/catalog-compatibility.js";
 import { canvasWriteOutcomeUncertain } from "../../connector/extension/src/canvas-write-outcome.js";
 
@@ -15,8 +17,11 @@ const ORIGIN = "https://school.instructure.com";
 const COURSE_ID = "2";
 const QUIZ_ID = "77";
 const PRINCIPAL_ID = "7";
-const SIGNED_UPLOAD_URL = "https://instructure-uploads.example.net/media/cell.png?X-Amz-Signature=deadbeefsecret&X-Amz-Expires=600";
-const UNSIGNED_UPLOAD_URL = "https://instructure-uploads.example.net/media/cell.png";
+const SIGNED_UPLOAD_URL = "https://school.instructure.com/media/cell.png?X-Amz-Signature=deadbeefsecret&X-Amz-Expires=600";
+const UNSIGNED_UPLOAD_URL = "https://school.instructure.com/media/cell.png";
+const INST_FS_UPLOAD_URL = "https://inst-fs-iad-prod.inscloudgate.net/files/cell.png?token=opaque";
+const S3_UPLOAD_URL = "https://instructure-uploads.s3.amazonaws.com/upload?X-Amz-Signature=opaque";
+const ATTACKER_UPLOAD_URL = "https://attacker.example/media/cell.png?X-Amz-Signature=deadbeef";
 const QUIZ_PATH = `/api/quiz/v1/courses/${COURSE_ID}/quizzes/${QUIZ_ID}`;
 
 const SAVED = [
@@ -165,12 +170,74 @@ test("the unsigned image URL drops the signature and refuses anything but https"
   }
 });
 
-test("initialize proves the binding and the saved list, then returns one signed upload URL", async () => {
+async function runMediaInit(input, { pageOrigin = ORIGIN, body = { url: INST_FS_UPLOAD_URL }, status = 200 } = {}) {
+  const keys = ["location", "fetch"];
+  const saved = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const requests = [];
+  try {
+    Object.defineProperty(globalThis, "location", { configurable: true, writable: true, value: { origin: pageOrigin } });
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true, writable: true,
+      value: async (target, options = {}) => {
+        requests.push({
+          href: String(target?.href ?? target),
+          method: options.method || "GET",
+          redirect: options.redirect,
+          credentials: options.credentials,
+        });
+        return {
+          ok: status >= 200 && status < 300,
+          status,
+          redirected: false,
+          url: String(target?.href ?? target),
+          json: async () => body,
+        };
+      },
+    });
+    return { result: await executeCanvasHotSpotMediaInitIsolated(input), requests };
+  } finally {
+    for (const key of keys) {
+      const descriptor = saved.get(key);
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+}
+
+test("the isolated media init reads the upload URL from the bound Canvas or quiz host", async () => {
+  const input = {
+    origin: ORIGIN,
+    courseId: COURSE_ID,
+    assignmentId: QUIZ_ID,
+    expiresAt: Date.now() + 60_000,
+  };
+  const canvas = await runMediaInit(input);
+  assert.equal(canvas.result.ok, true);
+  assert.equal(canvas.result.upload_url, INST_FS_UPLOAD_URL);
+  assert.equal(canvas.requests.length, 1);
+  assert.equal(canvas.requests[0].href, `${ORIGIN}${QUIZ_PATH}/items/media_upload_url`);
+  assert.equal(canvas.requests[0].redirect, "error");
+  assert.equal(canvas.requests[0].credentials, "include");
+
+  const quizOrigin = "https://school.quiz-lti-prod.instructure.com";
+  const quiz = await runMediaInit({ ...input, origin: quizOrigin });
+  assert.equal(quiz.result.ok, true, JSON.stringify(quiz.result));
+  assert.equal(quiz.requests[0].href, `${quizOrigin}${QUIZ_PATH}/items/media_upload_url`);
+
+  const attacker = await runMediaInit({ ...input, origin: "https://attacker.example" });
+  assert.equal(attacker.result.ok, false);
+  assert.equal(attacker.result.error, "canvas_hot_spot_upload_url_refused");
+  assert.deepEqual(attacker.requests, []);
+});
+
+test("initialize proves the binding and the saved list without naming an upload host", async () => {
   const { result, requests } = await runInPage(baseInput({ mode: "initialize" }), routes());
   assert.equal(result.ok, true);
   assert.equal(result.sent, false);
-  assert.equal(result.data.upload_url, SIGNED_UPLOAD_URL);
   assert.equal(result.data.item_count, SAVED.length);
+  assert.equal(Object.hasOwn(result.data, "upload_url"), false);
+  assert.equal(requests.some((entry) => entry.pathname.endsWith("/media_upload_url")), false);
+  assert.equal(executeCanvasNewQuizHotSpotInPage.toString().includes("media_upload_url"), false);
   assert.deepEqual(requests.filter((entry) => entry.method !== "GET"), []);
 });
 
@@ -293,11 +360,6 @@ test("complete refuses a lost or unusable upload response", async () => {
     assert.equal(result.error, "canvas_hot_spot_upload_url_refused", String(upload_url));
     assert.deepEqual(requests.filter((entry) => entry.method === "POST"), []);
   }
-  // Canvas answered the media upload request without a URL at all.
-  const { result } = await runInPage(baseInput({ mode: "initialize" }), routes({ uploadUrlBody: {} }));
-  assert.equal(result.ok, false);
-  assert.equal(result.sent, false);
-  assert.equal(result.error, "canvas_hot_spot_upload_url_missing");
 });
 
 test("a refused create is reported as sent with a known outcome, and an uncertain one is not", async () => {
@@ -460,6 +522,8 @@ function workerFunction(signature) {
 const hotSpotWorkerRegion = (() => {
   const script = [
     "globalThis.__morrowHotSpotWorkerRegion = (() => {",
+    canvasUploadUrlShape.toString(),
+    "function executeCanvasHotSpotMediaInitIsolated() {}",
     "const canvasUploadObservers = new Map();",
     "const COURSE_FILE_READ_TIMEOUT_MS = 30_000;",
     "async function courseFileStorageAccessEnabled() { return true; }",
@@ -486,7 +550,7 @@ const hotSpotWorkerRegion = (() => {
 /** A reviewed PNG: the leading bytes the stage scope admitted, small but real. */
 const HOT_SPOT_PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 
-function createdFixture() {
+function createdFixture(imageUrl = UNSIGNED_UPLOAD_URL) {
   return {
     schema: "morrow.canvas-new-quiz-hot-spot.v1",
     ok: true, sent: true, outcomeUnknown: false, status: 200,
@@ -503,7 +567,7 @@ function createdFixture() {
     },
     data: {
       course_id: COURSE_ID, assignment_id: QUIZ_ID, item_id: "13",
-      item_count: SAVED.length + 1, image_url: UNSIGNED_UPLOAD_URL,
+      item_count: SAVED.length + 1, image_url: imageUrl,
       interaction_type_slug: "hot-spot", payload_sha256: digest(TEMPLATE),
     },
   };
@@ -514,10 +578,18 @@ function createdFixture() {
  * in flight, which is the only moment the observer endings below can happen:
  * the watch is registered and the create has not been reached.
  */
-async function runHotSpotWorker({ expiresAt, duringFetch }) {
+async function runHotSpotWorker({
+  expiresAt,
+  duringFetch,
+  trustedUploadUrl = SIGNED_UPLOAD_URL,
+  pageUploadUrl = ATTACKER_UPLOAD_URL,
+  trustedResult,
+  uploadResponse,
+}) {
   const keys = ["chrome", "fetch", "canvasWriteOutcomeUncertain", "unsignedHotSpotImageUrl"];
   const saved = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const scriptModes = [];
+  const isolatedInputs = [];
   const putRequests = [];
   const beforeRequestListeners = [];
   const headersListeners = [];
@@ -528,27 +600,32 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
       if (index >= 0) sink.splice(index, 1);
     },
   });
+  const watched = typeof trustedUploadUrl === "string" ? trustedUploadUrl : "";
   const triggers = {
     confirmUpload() {
       const beforeRequest = beforeRequestListeners[0];
       const headers = headersListeners[0];
       assert.ok(beforeRequest && headers, "the observer did not register both listeners");
-      const details = { url: SIGNED_UPLOAD_URL, method: "PUT", requestId: "100" };
+      const details = { url: watched, method: "PUT", requestId: "100" };
       beforeRequest(details);
       headers({ ...details, statusCode: 200, responseHeaders: [] });
     },
     ambiguousUploadRequest() {
       const beforeRequest = beforeRequestListeners[0];
       assert.ok(beforeRequest, "the observer registered no onBeforeRequest listener");
-      beforeRequest({ url: SIGNED_UPLOAD_URL, method: "PUT", requestId: "101" });
-      beforeRequest({ url: SIGNED_UPLOAD_URL, method: "PUT", requestId: "102" });
+      beforeRequest({ url: watched, method: "PUT", requestId: "101" });
+      beforeRequest({ url: watched, method: "PUT", requestId: "102" });
     },
     closeUploadObserver() {
-      const observer = hotSpotWorkerRegion.canvasUploadObservers.get(SIGNED_UPLOAD_URL);
+      const observer = hotSpotWorkerRegion.canvasUploadObservers.get(watched);
       assert.ok(observer, "no upload observer is registered for the signed URL");
       observer.close();
     },
   };
+  let imageUrl = UNSIGNED_UPLOAD_URL;
+  try {
+    if (typeof trustedUploadUrl === "string") imageUrl = unsignedHotSpotImageUrl(trustedUploadUrl);
+  } catch {}
   const values = {
     chrome: {
       scripting: {
@@ -557,10 +634,19 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
           // property of an object argument. See scripts/test/canvas-executor-input-transport.test.mjs.
           assert.equal(typeof injection.args[0], "string");
           const input = JSON.parse(injection.args[0]);
+          if (injection.world === "ISOLATED") {
+            isolatedInputs.push(input);
+            assert.equal(Object.hasOwn(input, "upload_url"), false);
+            if (trustedResult) return [{ result: trustedResult }];
+            if (typeof trustedUploadUrl !== "string") {
+              return [{ result: { ok: false, error: "canvas_hot_spot_upload_url_refused" } }];
+            }
+            return [{ result: { ok: true, upload_url: trustedUploadUrl } }];
+          }
           scriptModes.push(input.mode);
           const result = input.mode === "initialize"
-            ? { ok: true, sent: false, data: { course_id: COURSE_ID, assignment_id: QUIZ_ID, item_count: SAVED.length, upload_url: SIGNED_UPLOAD_URL } }
-            : createdFixture();
+            ? { ok: true, sent: false, data: { course_id: COURSE_ID, assignment_id: QUIZ_ID, item_count: SAVED.length, upload_url: pageUploadUrl } }
+            : createdFixture(imageUrl);
           return [{ result }];
         },
       },
@@ -572,8 +658,8 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
     fetch: async (target, options = {}) => {
       putRequests.push({ url: String(target?.href ?? target), method: options.method || "GET" });
       if (duringFetch) duringFetch(triggers);
-      // The worker's own read is a plain success in every run below.
-      return { status: 200 };
+      // The worker's own read is a plain success unless a case supplies another answer.
+      return uploadResponse || { status: 200 };
     },
     canvasWriteOutcomeUncertain,
     unsignedHotSpotImageUrl,
@@ -597,7 +683,7 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
         },
       },
     );
-    return { result, scriptModes, putRequests };
+    return { result, scriptModes, isolatedInputs, putRequests };
   } finally {
     for (const key of keys) {
       const descriptor = saved.get(key);
@@ -606,6 +692,114 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
     }
   }
 }
+
+test("a Hot Spot inst-fs URL is accepted only from the trusted media init", async () => {
+  const trusted = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    trustedUploadUrl: INST_FS_UPLOAD_URL,
+    pageUploadUrl: ATTACKER_UPLOAD_URL,
+    duringFetch: (triggers) => triggers.confirmUpload(),
+  });
+  assert.equal(trusted.result.ok, true, JSON.stringify(trusted.result));
+  assert.equal(trusted.putRequests.length, 1);
+  assert.equal(trusted.putRequests[0].method, "PUT");
+  assert.equal(trusted.putRequests[0].url, INST_FS_UPLOAD_URL);
+  assert.equal(trusted.isolatedInputs.length, 1);
+  assert.equal(trusted.isolatedInputs[0].origin, ORIGIN);
+  assert.deepEqual(trusted.scriptModes, ["initialize", "complete"]);
+
+  const fromStorage = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    trustedUploadUrl: S3_UPLOAD_URL,
+    pageUploadUrl: INST_FS_UPLOAD_URL,
+    duringFetch: (triggers) => triggers.confirmUpload(),
+  });
+  assert.equal(fromStorage.result.ok, true, JSON.stringify(fromStorage.result));
+  assert.equal(fromStorage.putRequests.length, 1);
+  assert.equal(fromStorage.putRequests[0].url, S3_UPLOAD_URL);
+
+  const pageOnly = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    trustedUploadUrl: null,
+    pageUploadUrl: INST_FS_UPLOAD_URL,
+  });
+  assert.equal(pageOnly.result.ok, false);
+  assert.equal(pageOnly.result.sent, false);
+  assert.equal(pageOnly.result.error, "canvas_hot_spot_upload_url_refused");
+  assert.deepEqual(pageOnly.putRequests, []);
+  assert.deepEqual(pageOnly.scriptModes, ["initialize"]);
+
+  const attacker = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    trustedUploadUrl: null,
+    pageUploadUrl: ATTACKER_UPLOAD_URL,
+  });
+  assert.equal(attacker.result.ok, false);
+  assert.equal(attacker.result.sent, false);
+  assert.equal(attacker.result.error, "canvas_hot_spot_upload_url_refused");
+  assert.deepEqual(attacker.putRequests, []);
+  assert.equal(attacker.isolatedInputs[0].upload_url, undefined);
+
+  const quizHost = "https://school.quiz-lti-prod.instructure.com/media/cell.png?token=opaque";
+  const pageQuizHost = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    trustedUploadUrl: null,
+    pageUploadUrl: quizHost,
+  });
+  assert.equal(pageQuizHost.result.error, "canvas_hot_spot_upload_url_refused");
+  assert.deepEqual(pageQuizHost.putRequests, []);
+});
+
+test("a Hot Spot upload URL with userinfo, a fragment, or a non-https scheme is refused before fetch", async () => {
+  for (const upload_url of [
+    "http://inst-fs-iad-prod.inscloudgate.net/files/cell.png",
+    "https://user:secret@inst-fs-iad-prod.inscloudgate.net/files/cell.png",
+    "https://inst-fs-iad-prod.inscloudgate.net/files/cell.png#fragment",
+  ]) {
+    const run = await runHotSpotWorker({
+      expiresAt: Date.now() + 60_000,
+      trustedResult: { ok: true, upload_url },
+      pageUploadUrl: upload_url,
+    });
+    assert.equal(run.result.ok, false, upload_url);
+    assert.equal(run.result.sent, false, upload_url);
+    assert.equal(run.result.error, "canvas_hot_spot_upload_url_refused", upload_url);
+    assert.deepEqual(run.putRequests, [], upload_url);
+  }
+});
+
+test("a Hot Spot upload that redirects to another host is refused", async () => {
+  const redirected = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    trustedUploadUrl: INST_FS_UPLOAD_URL,
+    uploadResponse: {
+      status: 302,
+      redirected: true,
+      url: ATTACKER_UPLOAD_URL,
+      headers: { get: () => null },
+    },
+  });
+  assert.equal(redirected.result.ok, false);
+  assert.equal(redirected.result.sent, true);
+  assert.equal(redirected.result.error, "canvas_hot_spot_upload_url_refused");
+  assert.equal(redirected.putRequests.length, 1);
+  assert.equal(redirected.putRequests[0].url, INST_FS_UPLOAD_URL);
+  assert.deepEqual(redirected.scriptModes, ["initialize"]);
+
+  const toCanvas = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    trustedUploadUrl: INST_FS_UPLOAD_URL,
+    uploadResponse: {
+      status: 302,
+      redirected: false,
+      url: INST_FS_UPLOAD_URL,
+      headers: { get: (name) => (String(name).toLowerCase() === "location" ? `${ORIGIN}/confirm` : null) },
+    },
+  });
+  assert.equal(toCanvas.result.error, "canvas_hot_spot_upload_url_refused");
+  assert.equal(toCanvas.result.sent, true);
+  assert.deepEqual(toCanvas.scriptModes, ["initialize"]);
+});
 
 test("the worker preserves a complete verified Hot Spot result after one confirmed upload", async () => {
   const { result, scriptModes, putRequests } = await runHotSpotWorker({

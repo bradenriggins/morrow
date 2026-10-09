@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInThisContext } from "node:vm";
 import { canvasReviewedUploadKind, canvasReviewedUploadPath } from "../../connector/extension/generated/canvas-operation-admission.js";
+import { canvasPrivateUploadUrl, canvasUploadUrlShape } from "../../connector/extension/src/canvas-file-transfer.js";
 
 // The Bridge worker carries the saved-file read itself for a folder upload: the
 // page prepares and completes the upload, and the worker reads the bytes back.
@@ -17,6 +18,13 @@ const FILE_ID = "14113694";
 const BYTES = new TextEncoder().encode("Morrow reviewed transfer proof\n");
 const SHA256 = "5c1f4b57f4c8be7e0c3e2c2d8b91a45be6b1cbb5e3c3adcd0a3a4b4f1a8ea6ce";
 
+function workerPlanSource() {
+  const start = WORKER_SOURCE.indexOf("function privateCanvasUploadPlan(value) {");
+  const end = WORKER_SOURCE.indexOf("\n}\n", start);
+  if (start < 0 || end < start) throw new Error("privateCanvasUploadPlan moved");
+  return WORKER_SOURCE.slice(start, end + "\n}\n".length);
+}
+
 function region({ siteTarget = false, courseAccessMode = "selected", resolveResult } = {}) {
   const start = WORKER_SOURCE.indexOf("async function executeCanvasCourseFileTransfer(");
   const end = WORKER_SOURCE.indexOf("\n}\n", WORKER_SOURCE.indexOf("uploadObserver?.close();", start)) + 3;
@@ -29,6 +37,7 @@ function region({ siteTarget = false, courseAccessMode = "selected", resolveResu
     "globalThis.__morrowTransferRegion = (() => {",
     "const MAX_PRIVATE_FILE_BYTES = 1024 * 1024;",
     "function executeCanvasCourseFileTransferInPage() {}",
+    "function executeCanvasUploadInitIsolated() {}",
     "const COURSE_FILE_READ_TIMEOUT_MS = 30_000;",
     "const calls = { downloads: [] };",
     "let completion = null;",
@@ -39,13 +48,20 @@ function region({ siteTarget = false, courseAccessMode = "selected", resolveResu
     "async function courseFileStorageAccessEnabled() { return true; }",
     "function canvasUploadFolderId(path) { return /\\/folders\\/([1-9][0-9]*)\\/files$/.exec(path)?.[1] || ''; }",
     "function decimalId(value) { return /^[1-9][0-9]*$/.test(String(value)) ? String(value) : ''; }",
-    "function privateCanvasUploadPlan(data) { return { entries: [['key', 'uploads/material']], uploadUrl: new URL('https://storage.example.test/upload') }; }",
+    canvasPrivateUploadUrl.toString(),
+    canvasUploadUrlShape.toString(),
+    "function canvasUploadRedirectKept(response, uploadUrl, canvasOrigin) { if (!response || response.redirected !== true) return true; let finalUrl; try { finalUrl = new URL(response.url); } catch { return false; } if (finalUrl.protocol !== 'https:' || finalUrl.username || finalUrl.password || finalUrl.hash) return false; return finalUrl.origin === uploadUrl.origin || finalUrl.origin === canvasOrigin; }",
+    "function canvasUploadLocationKept(response, uploadUrl, canvasOrigin) { const location = response?.headers?.get?.('location'); if (typeof location !== 'string' || !location) return true; let next; try { next = new URL(location, uploadUrl); } catch { return false; } if (next.protocol !== 'https:' || next.username || next.password || next.hash) return false; return next.origin === uploadUrl.origin || next.origin === canvasOrigin; }",
+    workerPlanSource(),
     "function observeCanvasUploadConfirmation() { return { result: Promise.resolve({ status: 201, confirmation: new URL('" + ORIGIN + "/api/v1/files/" + FILE_ID + "/confirm') }), close() {} }; }",
     "async function boundedResponseBytes(response) { return new Uint8Array(await response.arrayBuffer()); }",
     "async function sha256Bytes() { return " + JSON.stringify(SHA256) + "; }",
     "function privateCanvasConfirmationUrl(value, canvasOrigin) { try { const url = new URL(value, canvasOrigin); return url.origin === canvasOrigin ? url : null; } catch { return null; } }",
-    "globalThis.chrome = { scripting: { executeScript: async ({ args }) => [{ result: (() => { const mode = JSON.parse(args[0]).mode;",
-    "  if (mode === 'initialize') return { ok: true, sent: false, data: { course_id: " + JSON.stringify(COURSE_ID) + ", upload_path: '/api/v1/folders/" + FOLDER_ID + "/files' } };",
+    "const trustedUpload = { ok: true, upload_url: " + JSON.stringify(ORIGIN + "/upload") + ", upload_params: { key: 'uploads/material' } };",
+    "globalThis.chrome = { scripting: { executeScript: async ({ world, args }) => [{ result: (() => {",
+    "  if (world === 'ISOLATED') return trustedUpload;",
+    "  const mode = JSON.parse(args[0]).mode;",
+    "  if (mode === 'preflight' || mode === 'initialize') return { ok: true, sent: false, data: { course_id: " + JSON.stringify(COURSE_ID) + ", upload_path: '/api/v1/folders/" + FOLDER_ID + "/files', upload_url: 'https://attacker.example/from-page' } };",
     "  if (mode === 'resolve') return (" + resolveAnswer + ");",
     "  return completion; })() }] } };",
     body,
@@ -200,4 +216,96 @@ test("upload targets name the bound course, own files, or a site import", () => 
     canvasReviewedUploadTarget(binding, { course_id: "43", upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post", upload_arguments: { folder_id: FOLDER_ID } }),
     null,
   );
+});
+
+function workerSlice(signature, after) {
+  const start = WORKER_SOURCE.indexOf(signature);
+  assert.ok(start >= 0, signature);
+  const from = after ? WORKER_SOURCE.indexOf(after, start) : start;
+  const end = WORKER_SOURCE.indexOf("\n}\n", from);
+  assert.ok(end > start, signature);
+  return WORKER_SOURCE.slice(start, end + "\n}\n".length);
+}
+
+function pinnedTransfer({ trustedUrl, pageUrl = "https://attacker.example/from-page" } = {}) {
+  const trusted = trustedUrl
+    ? { ok: true, upload_url: trustedUrl, upload_params: { key: "uploads/material" } }
+    : { ok: false, error: "canvas_file_upload_init_invalid" };
+  const script = [
+    "globalThis.__morrowPinnedTransfer = (() => {",
+    "const MAX_PRIVATE_FILE_BYTES = 1024 * 1024;",
+    "function executeCanvasCourseFileTransferInPage() {}",
+    "function executeCanvasUploadInitIsolated() {}",
+    "const COURSE_FILE_READ_TIMEOUT_MS = 30_000;",
+    canvasUploadUrlShape.toString(),
+    "function boundedCommandDeadline() { return Date.now() + 30_000; }",
+    "function commandDeadlineCurrent() { return true; }",
+    "async function courseFileStorageAccessEnabled() { return true; }",
+    "function canvasReviewedUploadTarget() { return { kind: 'file', uploadPath: '/api/v1/courses/" + COURSE_ID + "/files' }; }",
+    "async function storage() { return { courseAccessMode: 'selected' }; }",
+    "function canvasUploadFolderId() { return ''; }",
+    "function decimalId(value) { return /^[1-9][0-9]*$/.test(String(value)) ? String(value) : ''; }",
+    workerPlanSource(),
+    "function canvasUploadRedirectKept(response, uploadUrl, canvasOrigin) { if (!response || response.redirected !== true) return true; let finalUrl; try { finalUrl = new URL(response.url); } catch { return false; } if (finalUrl.protocol !== 'https:' || finalUrl.username || finalUrl.password || finalUrl.hash) return false; return finalUrl.origin === uploadUrl.origin || finalUrl.origin === canvasOrigin; }",
+    "function canvasUploadLocationKept() { return true; }",
+    "function observeCanvasUploadConfirmation() { return { result: Promise.resolve({ status: 201, confirmation: new URL('" + ORIGIN + "/api/v1/files/" + FILE_ID + "') }), close() {} }; }",
+    "async function boundedResponseBytes(response) { return new Uint8Array(await response.arrayBuffer()); }",
+    "async function sha256Bytes() { return " + JSON.stringify(SHA256) + "; }",
+    "function privateCanvasConfirmationUrl(value, canvasOrigin) { try { const url = new URL(value, canvasOrigin); return url.origin === canvasOrigin ? url : null; } catch { return null; } }",
+    "const trusted = " + JSON.stringify(trusted) + ";",
+    "const pageUrl = " + JSON.stringify(pageUrl) + ";",
+    "globalThis.chrome = { scripting: { executeScript: async ({ world }) => [{ result: world === 'ISOLATED' ? trusted : { ok: true, sent: false, data: { course_id: " + JSON.stringify(COURSE_ID) + ", upload_path: '/api/v1/courses/" + COURSE_ID + "/files', upload_url: pageUrl, upload_params: { key: 'page' } } } }] } };",
+    workerSlice("async function executeCanvasCourseFileTransfer(binding, args, expiresAt, privateAttachment) {", "uploadObserver?.close();"),
+    "return { executeCanvasCourseFileTransfer };",
+    "})();",
+  ].join("\n");
+  runInThisContext(script, { filename: "service-worker-pinned-upload.js" });
+  const value = globalThis.__morrowPinnedTransfer;
+  delete globalThis.__morrowPinnedTransfer;
+  return value;
+}
+
+test("file bytes follow only the upload URL from the trusted Canvas init", async () => {
+  const binding = { tabId: 3, origin: ORIGIN, courseId: COURSE_ID, principalId: "7" };
+  const attachment = { manifest: { filename: "proof.txt", size_bytes: BYTES.byteLength, sha256: SHA256 }, content_type: "text/plain", bytes_base64: Buffer.from(BYTES).toString("base64") };
+  const priorFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url?.href || url));
+    return { ok: true, status: 201, url: `${ORIGIN}/files/${FILE_ID}/download?download_frd=1`, arrayBuffer: async () => BYTES.buffer.slice(0) };
+  };
+  const runCase = (options) => pinnedTransfer(options).executeCanvasCourseFileTransfer(binding, { upload_tool: "canvas_upload_file" }, Date.now() + 30_000, attachment);
+  try {
+    const s3 = "https://instructure-uploads.s3.amazonaws.com/upload?X-Amz-Signature=opaque";
+    const instFs = "https://inst-fs-iad-prod.inscloudgate.net/files/upload?token=opaque";
+    requests.length = 0;
+    const pageOnly = await runCase({ pageUrl: s3 });
+    assert.equal(pageOnly.sent, false);
+    assert.equal(pageOnly.ok, false);
+    assert.deepEqual(requests, []);
+    requests.length = 0;
+    const attackerFromPage = await runCase({ pageUrl: "https://attacker.example/upload" });
+    assert.equal(attackerFromPage.ok, false);
+    assert.equal(attackerFromPage.sent, false);
+    assert.deepEqual(requests, []);
+    for (const attack of [
+      "https://user:pw@s3.amazonaws.com/upload",
+      "https://inst-fs-iad-prod.inscloudgate.net/upload#fragment",
+      "http://instructure-uploads.s3.amazonaws.com/upload",
+    ]) {
+      requests.length = 0;
+      const refused = await runCase({ trustedUrl: attack, pageUrl: s3 });
+      assert.equal(refused.ok, false, attack);
+      assert.equal(refused.sent, false, attack);
+      assert.equal(refused.error, "canvas_file_upload_url_refused", attack);
+      assert.deepEqual(requests, [], attack);
+    }
+    for (const trustedUrl of [`${ORIGIN}/upload?signature=opaque`, s3, instFs]) {
+      requests.length = 0;
+      const allowed = await runCase({ trustedUrl, pageUrl: "https://attacker.example/from-page" });
+      assert.equal(requests[0], trustedUrl, JSON.stringify(allowed));
+    }
+  } finally {
+    globalThis.fetch = priorFetch;
+  }
 });

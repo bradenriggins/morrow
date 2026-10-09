@@ -5,6 +5,75 @@
 export const MAX_CANVAS_HOT_SPOT_IMAGE_BYTES = 1024 * 1024;
 
 /**
+ * Asks Canvas for the Hot Spot media upload URL. Chrome runs this in the
+ * isolated world. The request goes only to the bound Canvas origin or that
+ * tenant's quiz host. The page's fetch cannot choose the host that receives
+ * the image.
+ */
+export async function executeCanvasHotSpotMediaInitIsolated(rawInput) {
+  let input = rawInput;
+  if (typeof rawInput === "string") {
+    try { input = JSON.parse(rawInput); } catch { return { ok: false, error: "canvas_hot_spot_upload_init_invalid" }; }
+  }
+  const fail = (error) => ({ ok: false, error });
+  const courseId = String(input?.courseId || "");
+  const assignmentId = String(input?.assignmentId || "");
+  if (!/^[1-9][0-9]{0,18}$/.test(courseId) || !/^[1-9][0-9]{0,18}$/.test(assignmentId)) {
+    return fail("canvas_hot_spot_binding_invalid");
+  }
+  let page;
+  let requested;
+  try {
+    page = new URL(String(location.origin || ""));
+    requested = new URL(String(input?.origin || ""));
+  } catch {
+    return fail("canvas_hot_spot_binding_invalid");
+  }
+  if (page.protocol !== "https:" || page.href !== `${page.origin}/`) return fail("canvas_hot_spot_binding_invalid");
+  if (requested.protocol !== "https:" || requested.username || requested.password || requested.hash
+    || requested.origin !== input.origin || requested.href !== `${requested.origin}/`) {
+    return fail("canvas_hot_spot_binding_invalid");
+  }
+  const tenant = page.hostname.toLowerCase().match(/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/)?.[1] || "";
+  const host = requested.hostname.toLowerCase();
+  const quizHost = Boolean(tenant)
+    && /^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i.test(host)
+    && host.split(".")[0] === tenant;
+  if (requested.origin !== page.origin && !quizHost) return fail("canvas_hot_spot_upload_url_refused");
+  const remaining = Number.isSafeInteger(input?.expiresAt) ? input.expiresAt - Date.now() : 0;
+  if (remaining <= 0) return fail("canvas_hot_spot_transfer_timeout");
+  const endpoint = new URL(
+    `/api/quiz/v1/courses/${encodeURIComponent(courseId)}/quizzes/${encodeURIComponent(assignmentId)}/items/media_upload_url`,
+    requested.origin,
+  );
+  if (endpoint.origin !== requested.origin) return fail("canvas_hot_spot_upload_url_refused");
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      redirect: "error",
+      referrerPolicy: "no-referrer",
+      headers: { Accept: "application/json+canvas-string-ids" },
+      signal: AbortSignal.timeout(Math.min(2_147_483_647, remaining)),
+    });
+  } catch {
+    return fail("canvas_hot_spot_upload_init_invalid");
+  }
+  let finalUrl;
+  try { finalUrl = new URL(response.url); } catch { return fail("canvas_hot_spot_upload_init_invalid"); }
+  if (!response.ok || response.redirected || finalUrl.origin !== requested.origin || finalUrl.username || finalUrl.password || finalUrl.hash) {
+    return fail("canvas_hot_spot_upload_init_invalid");
+  }
+  let body;
+  try { body = await response.json(); } catch { return fail("canvas_hot_spot_upload_init_invalid"); }
+  const uploadUrl = typeof body?.url === "string" ? body.url : "";
+  if (!uploadUrl) return fail("canvas_hot_spot_upload_url_missing");
+  return { ok: true, upload_url: uploadUrl };
+}
+
+/**
  * The unsigned image URL a New Quizzes Hot Spot item carries.
  *
  * Canvas answers the media upload request with one signed URL, and its own
@@ -362,20 +431,14 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
     const before = await currentMembership();
 
     if (input.mode === "initialize") {
-      const started = await canvasJson(`${quizPath}/items/media_upload_url`);
-      const uploadUrl = plainObject(started) && typeof started.url === "string" ? started.url : "";
-      if (!uploadUrl) throw new Error("canvas_hot_spot_upload_url_missing");
-      let signed;
-      try { signed = new URL(uploadUrl); } catch { throw new Error("canvas_hot_spot_upload_url_refused"); }
-      if (signed.protocol !== "https:" || signed.username || signed.password) throw new Error("canvas_hot_spot_upload_url_refused");
-      // Proves the trimmed form is a usable URL before any byte is sent.
-      unsignedImageUrl(uploadUrl);
+      // The media upload URL is read in the isolated world. This page read
+      // proves the quiz and the saved list, and does not name an upload host.
       return {
         schema: "morrow.canvas-new-quiz-hot-spot.v1",
         ok: true,
         sent: false,
         outcomeUnknown: false,
-        data: { course_id: courseId, assignment_id: assignmentId, item_count: before.length, upload_url: signed.href },
+        data: { course_id: courseId, assignment_id: assignmentId, item_count: before.length },
       };
     }
 

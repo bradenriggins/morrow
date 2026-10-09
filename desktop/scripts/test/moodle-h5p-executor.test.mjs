@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { launchTestChromium } from "./lib/chromium-launch.mjs";
+import { executeMoodleDraftUploadInPage } from "../../connector/extension/src/moodle-executor.js";
 import { executeMoodleH5pInPage } from "../../connector/extension/src/moodle-h5p-executor.js";
 
 const SESSION = "synthetic-session";
@@ -312,10 +313,22 @@ test("Moodle H5P executor creates one hidden activity from a reviewed package an
     await page.evaluate((wwwroot) => { globalThis.M = { cfg: { wwwroot, sesskey: "synthetic-session", userId: 3, courseId: 2 } }; }, origin);
     const binding = { origin, siteUrl: `${origin}/`, principalId: "3", courseId: COURSE_ID };
     const base = { mode: "execute", binding, expiresAt: Date.now() + 60_000 };
-    const run = (operation, argumentsValue, privateAttachment) => page.evaluate(
-      executeMoodleH5pInPage,
-      JSON.stringify({ ...base, operation, arguments: argumentsValue, ...(privateAttachment ? { privateAttachment } : {}) }),
-    );
+    const run = async (operation, argumentsValue, privateAttachment) => {
+      const input = { ...base, operation, arguments: argumentsValue, ...(privateAttachment ? { privateAttachment } : {}) };
+      if (!privateAttachment) return page.evaluate(executeMoodleH5pInPage, JSON.stringify(input));
+      const channel = `draft-${Math.random().toString(36).slice(2)}`;
+      const sesskey = await page.evaluate(() => globalThis.M?.cfg?.sesskey || "");
+      const listener = page.evaluate(executeMoodleDraftUploadInPage, JSON.stringify({
+        mode: "listen", channel, files: [privateAttachment], sesskey, expiresAt: input.expiresAt,
+      }));
+      await page.waitForFunction((name) => document.documentElement.getAttribute("data-morrow-draft-listener") === name, channel);
+      try {
+        return await page.evaluate(executeMoodleH5pInPage, JSON.stringify({ ...input, draftUploadChannel: channel }));
+      } finally {
+        await page.evaluate((name) => document.dispatchEvent(new CustomEvent("morrow-draft-upload-close", { detail: { channel: name } })), channel);
+        await listener;
+      }
+    };
     const attachment = (handle, manifest, bytes) => ({ schema: "morrow.private-file-attachment.v1", handle, manifest, bytes_base64: bytes.toString("base64") });
     const playerRoutes = () => requests.filter((entry) => /\/(?:mod\/h5pactivity\/(?:view|report)|h5p\/embed)\.php/.test(entry));
     const uploads = () => requests.filter((entry) => entry.startsWith("POST /repository/repository_ajax.php")).length;
