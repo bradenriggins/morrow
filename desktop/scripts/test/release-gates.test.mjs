@@ -542,6 +542,84 @@ test("source-origin validation fails closed until every staged file is reviewed"
   }
 });
 
+test("the committed source-origin ledger is unreviewed, and the old self-stamp is not a review", () => {
+  const desktop = resolve(import.meta.dirname, "../..");
+  const ledgerText = readFileSync(resolve(desktop, "config/source-origin-ledger.json"), "utf8");
+  assert.doesNotMatch(ledgerText, /codex-plan-convergence-review/);
+  assert.doesNotMatch(ledgerText, /"status": "reviewed"/);
+  const ledger = JSON.parse(ledgerText);
+  assert.equal(ledger.status, "unreviewed");
+  assert.ok(ledger.entries.length > 0);
+  assert.ok(ledger.entries.every((entry) => entry.reviewer === null));
+  assert.ok(ledger.entries.every((entry) => entry.beforeDigest === null || /^[0-9a-f]{64}$/.test(entry.beforeDigest)));
+  const head = execFileSync("git", ["-C", desktop, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const generated = validateSourceOriginLedger({
+    root: desktop,
+    commit: head,
+    ledgerData: ledgerText,
+    files: ledger.entries.map((entry) => ({ path: entry.path, sha256: entry.afterDigest, bytes: 1 })),
+  });
+  assert.equal(generated.ledgerStatus, "unreviewed");
+  assert.equal(generated.passed, false, "a freshly generated ledger is not a completed review");
+  assert.deepEqual(generated.invalid, []);
+  assert.deepEqual(generated.unexpected, []);
+
+  const root = mkdtempSync(resolve(tmpdir(), "morrow-origin-self-stamp-"));
+  try {
+    const packageBytes = Buffer.from('{"name":"morrow-test","version":"1.0.0"}\n');
+    writeFileSync(resolve(root, "package.json"), packageBytes);
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Morrow Test"], { cwd: root });
+    execFileSync("git", ["add", "package.json"], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "fixture"], { cwd: root });
+    const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    const entry = {
+      path: "package.json",
+      sourceCommit,
+      originalPath: "package.json",
+      ownership: "new",
+      dependencies: [],
+      testMapping: [],
+      reviewer: "codex-plan-convergence-review",
+      beforeDigest: null,
+      afterDigest: sha256(packageBytes),
+    };
+    writeFileSync(resolve(root, "ledger.json"), JSON.stringify({
+      schema: "morrow.source-origin-ledger.v1",
+      status: "reviewed",
+      candidateCommit: sourceCommit,
+      entries: [entry],
+    }));
+    const stamped = validateSourceOriginLedger({
+      root,
+      files: [{ path: "package.json", sha256: sha256(packageBytes), bytes: packageBytes.length }],
+      commit: sourceCommit,
+      ledgerPath: "ledger.json",
+    });
+    assert.equal(stamped.passed, false, "the generator's old reviewer name is not a completed review");
+    assert.deepEqual(stamped.invalid, ["package.json"]);
+
+    writeFileSync(resolve(root, "ledger.json"), JSON.stringify({
+      schema: "morrow.source-origin-ledger.v1",
+      status: "unreviewed",
+      candidateCommit: sourceCommit,
+      entries: [{ ...entry, reviewer: null }],
+    }));
+    const unreviewed = validateSourceOriginLedger({
+      root,
+      files: [{ path: "package.json", sha256: sha256(packageBytes), bytes: packageBytes.length }],
+      commit: sourceCommit,
+      ledgerPath: "ledger.json",
+    });
+    assert.equal(unreviewed.ledgerStatus, "unreviewed");
+    assert.equal(unreviewed.passed, false);
+    assert.deepEqual(unreviewed.invalid, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("candidate set receipts bind the final digest of every profile", (t) => {
   useDefaultReceiptPath(t);
   const root = mkdtempSync(resolve(tmpdir(), "morrow-release-set-"));

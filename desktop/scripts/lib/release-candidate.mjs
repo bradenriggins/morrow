@@ -457,6 +457,17 @@ function validDigest(value) {
   return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 }
 
+/** The generator used to write this name on every file. It is not a review. */
+const SOURCE_ORIGIN_SELF_STAMP = "codex-plan-convergence-review";
+
+function namedSourceReviewer(value) {
+  return typeof value === "string" && value.trim().length > 0 && value.trim() !== SOURCE_ORIGIN_SELF_STAMP;
+}
+
+function sourceReviewerShape(value) {
+  return value === null || value === "" || namedSourceReviewer(value);
+}
+
 /** A Node test log counts only when it reports passes and zero failures. */
 export function logTextShowsPass(text) {
   const plain = Buffer.isBuffer(text) ? text.toString("utf8") : String(text ?? "");
@@ -621,7 +632,7 @@ export function validateSourceOriginLedger({
       && ["new", "adapted", "generated"].includes(entry.ownership)
       && Array.isArray(entry.dependencies)
       && Array.isArray(entry.testMapping)
-      && typeof entry.reviewer === "string" && entry.reviewer.trim().length > 0
+      && sourceReviewerShape(entry.reviewer)
       && (entry.beforeDigest === null || validDigest(entry.beforeDigest))
       && exactCandidateDerivation(entry, file, derived.get(file.path), "afterDigest")
       && sourceOriginGitMatches(root, entry, file);
@@ -642,7 +653,8 @@ export function validateSourceOriginLedger({
       candidateCommitMatches = false;
     }
   }
-  const reviewed = ledger.status === "reviewed" && candidateCommitMatches;
+  const reviewed = ledger.status === "reviewed" && candidateCommitMatches
+    && entries.every((entry) => namedSourceReviewer(entry.reviewer));
   return {
     schema: "morrow.source-origin-validation.v1",
     ledgerPath,
