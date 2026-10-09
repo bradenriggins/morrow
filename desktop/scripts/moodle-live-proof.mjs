@@ -581,10 +581,29 @@ function unwrap(reply, runtime) {
 
 async function waitFor(probe, description, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = await probe();
-    if (value) return value;
-    await new Promise((done) => setTimeout(done, 100));
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    let timer;
+    // A probe that never settles must still lose to the deadline. Awaiting it
+    // first would hold the proof until the outer spawn is killed.
+    const attempt = Promise.resolve().then(() => probe()).then(
+      (value) => ({ kind: "value", value }),
+      (error) => ({ kind: "error", error }),
+    );
+    const outcome = await Promise.race([
+      attempt,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ kind: "timeout" }), remaining);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (outcome.kind === "timeout") break;
+    if (outcome.kind === "error") throw outcome.error;
+    if (outcome.value) return outcome.value;
+    const pause = Math.min(100, deadline - Date.now());
+    if (pause <= 0) break;
+    await new Promise((done) => setTimeout(done, pause));
   }
   throw new Error(`timed out waiting for ${description}`);
 }
@@ -598,11 +617,24 @@ async function waitFor(probe, description, timeoutMs = 30_000) {
  */
 async function approveThroughReviewPage(url, context, connector) {
   const reviewPage = await context.newPage();
+  const stepMs = 10_000;
+  reviewPage.setDefaultTimeout(stepMs);
+  reviewPage.setDefaultNavigationTimeout(stepMs);
   try {
-    await waitFor(() => connector.approvalPresence(), "the approval key from Morrow over the paired connection");
-    const presence = connector.approvalPresence();
+    // The first open has no proof, so the review server refuses it and sends the approval key
+    // on the paired connection. Waiting for that key before this open never receives a key
+    // the page itself announces. The form still needs the open proof on the next load.
+    await reviewPage.goto(url, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+    const presence = await waitFor(
+      () => connector.approvalPresence(),
+      "the approval key from Morrow over the paired connection",
+      stepMs,
+    );
     const openProof = await reviewApprovalProof(presence.key, new URL(url).pathname, "open");
-    const loaded = await reviewPage.goto(`${url}${url.includes("?") ? "&" : "?"}presence=${encodeURIComponent(openProof)}`);
+    const loaded = await reviewPage.goto(
+      `${url}${url.includes("?") ? "&" : "?"}presence=${encodeURIComponent(openProof)}`,
+      { waitUntil: "domcontentloaded" },
+    );
     const form = reviewPage.locator('form[action$="/approve"]');
     await form.waitFor();
     const html = await reviewPage.content();
@@ -610,6 +642,7 @@ async function approveThroughReviewPage(url, context, connector) {
     const unsigned = await reviewPage.request.post(`${url}/approve`, {
       form: { nonce },
       headers: { origin: new URL(url).origin, referer: url },
+      timeout: stepMs,
     });
     assert.equal(presence.origin, new URL(url).origin, "Morrow sent the approval key for a different review server");
     const approvePath = new URL(`${url}/approve`).pathname;
@@ -618,7 +651,10 @@ async function approveThroughReviewPage(url, context, connector) {
       body.set("presence", await reviewApprovalProof(presence.key, approvePath, body.get("nonce") || ""));
       await route.continue({ postData: body.toString() });
     }, { times: 1 });
-    const response = reviewPage.waitForResponse((candidate) => candidate.url() === `${url}/approve` && candidate.request().method() === "POST");
+    const response = reviewPage.waitForResponse(
+      (candidate) => candidate.url() === `${url}/approve` && candidate.request().method() === "POST",
+      { timeout: stepMs },
+    );
     // The approval's own answer is the event this waits for. The page it leads to names the change
     // with a live read, which waits while the approved change runs, and the proof waits for that
     // change to settle on its own.
@@ -1063,7 +1099,7 @@ async function main() {
 
 const HARNESS_BRIDGE = Object.freeze({ token: BRIDGE_TOKEN, runtimeRevision: RUNTIME_REVISION, extensionId: EXTENSION_ID });
 
-export { HARNESS_BRIDGE, buildChecklist, capabilitiesIn, closeHarnessResources, connectHarnessConnector, writeClass };
+export { HARNESS_BRIDGE, buildChecklist, capabilitiesIn, closeHarnessResources, connectHarnessConnector, waitFor, writeClass };
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
   const outcome = await main().catch((error) => {
