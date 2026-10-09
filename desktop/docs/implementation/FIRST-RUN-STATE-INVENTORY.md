@@ -612,16 +612,16 @@ stale name here.
 | `Open Canvas` | Plan and Edit settings | `connector/extension/settings/settings.js:446` |
 | `Open Moodle` | Plan and Edit settings | `connector/extension/settings/settings.js:447` |
 | `Withdraw consent` | Plan and Edit settings | `connector/extension/settings/settings.js:1721` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1252` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1270` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1236` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1227` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1229` |
-| `I checked it in Canvas: close this change` | Result page of a change Morrow could not settle | `packages/mcp-server/src/approval-server.ts:1234` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:1254` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:1254` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:1254` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:1254` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:1254` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:1272` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:1238` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:1229` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:1231` |
+| `I checked it in Canvas: close this change` | Result page of a change Morrow could not settle | `packages/mcp-server/src/approval-server.ts:1236` |
 
 Names a person reads as landmarks rather than presses:
 
