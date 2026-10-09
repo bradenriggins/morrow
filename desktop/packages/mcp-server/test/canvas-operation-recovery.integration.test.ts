@@ -12,7 +12,7 @@ import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { createFullMorrowServer } from "../src/full-server.js";
-import { bridgeSignedPresence } from "./fixtures/review-approval.js";
+import { bridgeSignedPresence, reviewDocumentHeaders } from "./fixtures/review-approval.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
 import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 
@@ -734,7 +734,7 @@ describe("Canvas unresolved-operation recovery", () => {
 
       // The person's page offers the close-out. A post without Morrow Bridge's signature over the
       // form, which it adds only after a real click in Chrome, closes nothing.
-      const page = await fetch(statusUrl);
+      const page = await fetch(statusUrl, { headers: reviewDocumentHeaders(morrow.approval, statusUrl) });
       const body = await page.text();
       expect(body).toContain("I checked it in Canvas: close this change");
       const nonce = /action="\/operations\/[^"]+\/close"><input type="hidden" name="nonce" value="([^"]+)"/.exec(body)?.[1];
@@ -769,7 +769,7 @@ describe("Canvas unresolved-operation recovery", () => {
         state: "closed_by_person",
         attention: ["closed_after_person_checked_saved_state", "no_readable_provider_result"],
       });
-      const closedPage = await (await fetch(statusUrl)).text();
+      const closedPage = await (await fetch(statusUrl, { headers: reviewDocumentHeaders(morrow.approval, statusUrl) })).text();
       expect(closedPage).toContain("Closed after your check");
       expect(closedPage).not.toContain("I checked it in Canvas: close this change");
 

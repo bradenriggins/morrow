@@ -233,9 +233,11 @@ async function readLinuxProcessStart(pid, procRoot = "/proc") {
   return linuxStartFromStat(statText, seconds * 1_000);
 }
 
-// extern_proc begins kinfo_proc, and its first union is the start timeval.
-// pid_t p_pid follows that union, two pointers, p_flag, and p_stat.
-const DARWIN_KINFO_PID_OFFSET = 40;
+// sysctl(KERN_PROC_PID) returns kinfo_proc. On LP64 macOS the exported
+// extern_proc does not start at byte 0: p_starttime is the timeval at 128,
+// and p_pid follows that union, two pointers, p_flag, and p_stat.
+const DARWIN_KINFO_START_OFFSET = 128;
+const DARWIN_KINFO_PID_OFFSET = DARWIN_KINFO_START_OFFSET + 40;
 const DARWIN_KINFO_MIN_BYTES = DARWIN_KINFO_PID_OFFSET + 4;
 
 /**
@@ -248,8 +250,8 @@ const DARWIN_KINFO_MIN_BYTES = DARWIN_KINFO_PID_OFFSET + 4;
 function parseDarwinKinfoStart(buffer, pid) {
   if (!Buffer.isBuffer(buffer) || buffer.length < DARWIN_KINFO_MIN_BYTES || !exactPid(pid)) return null;
   if (buffer.readInt32LE(DARWIN_KINFO_PID_OFFSET) !== pid) return null;
-  const seconds = Number(buffer.readBigInt64LE(0));
-  const microseconds = buffer.readInt32LE(8);
+  const seconds = Number(buffer.readBigInt64LE(DARWIN_KINFO_START_OFFSET));
+  const microseconds = buffer.readInt32LE(DARWIN_KINFO_START_OFFSET + 8);
   if (!Number.isSafeInteger(seconds) || seconds < 1_000_000_000 || seconds > 4_000_000_000) return null;
   if (!Number.isInteger(microseconds) || microseconds < 0 || microseconds > 999_999) return null;
   return {

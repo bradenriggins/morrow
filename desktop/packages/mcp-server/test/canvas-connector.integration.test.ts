@@ -84,6 +84,7 @@ async function approveBatch(server: LoopbackApprovalServer, url: string): Promis
   expect(cookie).toBeTruthy();
   const response = await fetch(`${url}/approve`, {
     method: "POST",
+    redirect: "manual",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
       cookie: cookie!,
@@ -92,7 +93,7 @@ async function approveBatch(server: LoopbackApprovalServer, url: string): Promis
     },
     body: new URLSearchParams({ nonce: nonce!, presence: bridgeSignedPresence(server, `${url}/approve`, nonce!) }),
   });
-  expect(response.status).toBe(200);
+  expect(response.status).toBe(303);
 }
 
 /** Calls morrow_operation_wait the way an assistant does, through the full MCP server. */
@@ -2024,9 +2025,9 @@ describe("Canvas connector gateway path", () => {
       const uncertainId = String((uncertain.batch as JsonObject).batchId);
       const uncertainUrl = String(uncertain.approvalUrl);
       await approveBatch(runtime.approval, uncertainUrl);
-      await expect.poll(async () => (await (await fetch(`${uncertainUrl}/status`)).json()).active).toBe(false);
+      await expect.poll(async () => (await (await fetch(`${uncertainUrl}/status`, { headers: reviewDocumentHeaders(runtime.approval, `${uncertainUrl}/status`) })).json()).active).toBe(false);
       expect(runtime.batchGet({ batchId: uncertainId }).batch).toMatchObject({ state: "paused", pendingChildren: 1 });
-      const uncertainView = await (await fetch(uncertainUrl)).text();
+      const uncertainView = await (await fetch(uncertainUrl, { headers: reviewDocumentHeaders(runtime.approval, uncertainUrl) })).text();
       expect(uncertainView).toContain("0 of 2 changes confirmed in Canvas");
       expect(uncertainView).toContain("<span data-operation-status>Needs checking</span>");
       expect(uncertainView).toContain("<span data-operation-status>Not started</span>");
@@ -2139,7 +2140,7 @@ describe("Canvas connector gateway path", () => {
       const batchId = String((created.batch as JsonObject).batchId);
       const approvalUrl = String(created.approvalUrl);
       await approveBatch(runtime.approval, approvalUrl);
-      await expect.poll(async () => (await (await fetch(`${approvalUrl}/status`)).json()).active).toBe(false);
+      await expect.poll(async () => (await (await fetch(`${approvalUrl}/status`, { headers: reviewDocumentHeaders(runtime.approval, `${approvalUrl}/status`) })).json()).active).toBe(false);
 
       expect(writeCommands).toBe(1);
       const [first] = runtime.batchResultsPage({ batchId, limit: 10 }).children as JsonObject[];
@@ -2230,7 +2231,7 @@ describe("Canvas connector gateway path", () => {
       const batchId = String((created.batch as JsonObject).batchId);
       const approvalUrl = String(created.approvalUrl);
       await approveBatch(runtime.approval, approvalUrl);
-      await expect.poll(async () => (await (await fetch(`${approvalUrl}/status`)).json()).active).toBe(false);
+      await expect.poll(async () => (await (await fetch(`${approvalUrl}/status`, { headers: reviewDocumentHeaders(runtime.approval, `${approvalUrl}/status`) })).json()).active).toBe(false);
 
       expect(writeCommands).toBe(1);
       const result = runtime.batchGet({ batchId });
@@ -2247,7 +2248,7 @@ describe("Canvas connector gateway path", () => {
         { childId: "course:42", state: "pending" },
       ]);
       expect(runtime.batchApprovalStatus(batchId)).toMatchObject({ states: { 0: "Needs checking", 1: "Not started" } });
-      const view = await (await fetch(approvalUrl)).text();
+      const view = await (await fetch(approvalUrl, { headers: reviewDocumentHeaders(runtime.approval, approvalUrl) })).text();
       expect(view).toContain("<span data-operation-status>Needs checking</span>");
       expect(view).not.toContain("<span data-operation-status>Did not finish</span>");
     } finally {

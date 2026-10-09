@@ -283,10 +283,11 @@ describe("reviewed Moodle file dispatch", () => {
       expect(cookie).toBeTruthy();
       const confirmed = await fetch(`${reviewUrl}/approve`, {
         method: "POST",
+        redirect: "manual",
         headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookie!, origin: new URL(reviewUrl).origin, referer: reviewUrl },
         body: new URLSearchParams({ nonce: nonce!, presence: bridgeSignedPresence(approval!, `${reviewUrl}/approve`, nonce!) }),
       });
-      expect(confirmed.status).toBe(200);
+      expect(confirmed.status).toBe(303);
       await expect.poll(() => runtime.operationGet(id).state).toBe("verified");
       expect(runtime.operationGet(id)).toMatchObject({ state: "verified" });
       expect(writes).toHaveLength(1);

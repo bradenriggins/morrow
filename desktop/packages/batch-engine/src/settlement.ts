@@ -578,8 +578,14 @@ export class BatchSourceSettlementStore {
         throw new Error("source task projection does not match the batch child task identity");
       }
       // A terminal settlement is final: a stale projection must not reopen it
-      // or replace its verification and counts.
-      if (BATCH_SOURCE_SETTLEMENT_TERMINAL_STATES.has(existing.state)) return existing;
+      // or replace a verified result with a later success claim. The one
+      // correction that still applies is an outer readback that disagrees
+      // with a success just recorded from the provider task itself.
+      const outerReadbackDisagrees = existing.state === "succeeded"
+        && settlementState === "inspection_required"
+        && verificationStatus === "unconfirmed";
+      const keepsDisagreement = existing.state === "inspection_required" && settlementState === "succeeded";
+      if ((BATCH_SOURCE_SETTLEMENT_TERMINAL_STATES.has(existing.state) && !outerReadbackDisagrees) || keepsDisagreement) return existing;
       this.database.prepare(`
         UPDATE gateway_batch_source_settlements
         SET state=?, task_status=?, task_outcome=?, verification_status=?,

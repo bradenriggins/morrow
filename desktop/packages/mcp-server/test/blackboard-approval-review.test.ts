@@ -9,6 +9,7 @@ import { deriveBlackboardSourceBindingId } from "../../blackboard-learn-api/src/
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { generateLoopbackTls } from "./fixtures/loopback-tls.js";
+import { reviewDocumentHeaders } from "./fixtures/review-approval.js";
 
 const TENANT_ID = "review-tenant";
 const COURSE_ID = "_22_1";
@@ -196,7 +197,7 @@ describe("Blackboard approval review page", () => {
       expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "awaiting_approval" });
 
       const reviewUrl = runtime.gateway.approvalUrl(id)!;
-      const review = await fetch(reviewUrl);
+      const review = await fetch(reviewUrl, { headers: reviewDocumentHeaders(runtime.approval, reviewUrl) });
       const page = await review.text();
       expect(review.status).toBe(200);
 
@@ -235,7 +236,7 @@ describe("Blackboard approval review page", () => {
       // Once the change is approved the page stops calling saved values current,
       // and still labels the change an edit of a named item.
       runtime.gateway.approveOperation(id);
-      const approved = await (await fetch(reviewUrl)).text();
+      const approved = await (await fetch(reviewUrl, { headers: reviewDocumentHeaders(runtime.approval, reviewUrl) })).text();
       expect(approved).toContain(`<dt>Item</dt><dd>${CURRENT_TITLE}</dd>`);
       expect(approved).toContain("Requested values are shown below. Earlier values are not available in this review.");
       expect(approved).not.toContain("<summary>Current content and values</summary>");
