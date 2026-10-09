@@ -6,7 +6,10 @@ const { PassThrough } = require("node:stream");
 const test = require("node:test");
 const {
   createBoundedCommandReader,
+  matchExactProcessStart,
+  parseDarwinKinfoStart,
   readBoundedCommandOutput,
+  readProcessStartObservation,
   readProcessStartTimes,
   terminatePidTree,
   terminateProcessTree,
@@ -87,6 +90,57 @@ test("Windows tree termination uses taskkill for the whole tree and force escala
     ["taskkill.exe", ["/PID", "4242", "/T", "/F"]],
   ]);
   assert.equal(launches.every(({ options }) => options.windowsHide === true && options.stdio === "ignore"), true);
+});
+
+function darwinKinfo(pid, startedAtMs) {
+  const buffer = Buffer.alloc(64);
+  const seconds = Math.floor(startedAtMs / 1_000);
+  buffer.writeBigInt64LE(BigInt(seconds), 0);
+  buffer.writeInt32LE((startedAtMs % 1_000) * 1_000, 8);
+  buffer.writeInt32LE(pid, 40);
+  return buffer;
+}
+
+test("a binary command result keeps bytes a text decode would change", async () => {
+  const output = await readBoundedCommandOutput(process.execPath, ["-e", "process.stdout.write(Buffer.from([0xff, 0x00, 0x80]))"], {
+    timeoutMs: 5_000,
+    binary: true,
+  });
+  assert.ok(Buffer.isBuffer(output));
+  assert.deepEqual([...output], [0xff, 0x00, 0x80]);
+});
+
+test("macOS kernel start time is fine enough to authorize a signal, and a one-second clock is not", async () => {
+  const pid = 4242;
+  const startedAt = Date.parse("2026-09-14T00:00:00.123Z");
+  const kernel = darwinKinfo(pid, startedAt);
+  assert.deepEqual(parseDarwinKinfoStart(kernel, pid), { at: startedAt, resolutionMs: 1 });
+  assert.equal(parseDarwinKinfoStart(kernel, pid + 1), null, "a struct whose pid is not the process we asked for is not an identity");
+  assert.equal(parseDarwinKinfoStart(Buffer.alloc(64), pid), null);
+  assert.equal(matchExactProcessStart(startedAt, { at: startedAt, resolutionMs: 1 }), true);
+  assert.equal(matchExactProcessStart(startedAt + 2, { at: startedAt, resolutionMs: 1 }), false);
+
+  const calls = [];
+  const observed = await readProcessStartObservation(pid, {
+    platform: "darwin",
+    processAlive: () => true,
+    readCommand: async (executable, args, options) => {
+      calls.push({ executable, args, binary: options.binary === true });
+      return executable === "/usr/sbin/sysctl" ? kernel : null;
+    },
+  });
+  assert.deepEqual(observed, { at: startedAt, resolutionMs: 1 });
+  assert.equal(matchExactProcessStart(startedAt, observed), true);
+  assert.deepEqual(calls, [{ executable: "/usr/sbin/sysctl", args: ["-b", `kern.proc.pid.${pid}`], binary: true }]);
+
+  const coarseAt = Date.parse("Mon Sep 14 00:00:00 2026");
+  const coarse = await readProcessStartObservation(pid, {
+    platform: "darwin",
+    processAlive: () => true,
+    readCommand: async (executable) => executable === "/bin/ps" ? `${pid} Mon Sep 14 00:00:00 2026\n` : null,
+  });
+  assert.equal(coarse.resolutionMs, 1_000);
+  assert.equal(matchExactProcessStart(coarseAt, coarse), null, "a whole-second clock still cannot authorize a signal");
 });
 
 test("a Windows process start query waits for a cold PowerShell start", async () => {

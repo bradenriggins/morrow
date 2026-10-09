@@ -522,9 +522,12 @@ describe("Blackboard configuration path", () => {
       expect(seen[0]).not.toBe(caller.signal);
       // The failed exchange settled the shared promise: the next read retries
       // it instead of wedging behind an exchange that never answered.
+      // The retry carries its own exchange timeout. This read passes no
+      // caller signal, so the content body takes a third 30 second bound
+      // and a hung body cannot wait forever.
       await expect(client.get(contentPath)).resolves.toEqual({ id: contentId });
       expect(tokens).toBe(2);
-      expect(timeouts).toEqual([30_000, 30_000]);
+      expect(timeouts).toEqual([30_000, 30_000, 30_000]);
     } finally {
       timeoutSpy.mockRestore();
     }

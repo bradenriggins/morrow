@@ -116,6 +116,7 @@ function createBoundedCommandReader(dependencies = {}) {
     const killGraceMs = options.killGraceMs ?? QUERY_KILL_GRACE_MS;
     const finalGraceMs = options.finalGraceMs ?? QUERY_FINAL_GRACE_MS;
     const includeStderr = options.includeStderr === true;
+    const binary = options.binary === true;
     if (typeof executable !== "string" || executable.length === 0 || !Array.isArray(argumentsValue)
       || argumentsValue.some((value) => typeof value !== "string")
       || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000
@@ -149,7 +150,10 @@ function createBoundedCommandReader(dependencies = {}) {
       else stop();
     };
     const onError = () => finish(null);
-    const onClose = (code) => finish(!stopping && code === 0 && bytes <= maxBytes ? Buffer.concat(output).toString("utf8") : null);
+    const onClose = (code) => {
+      const payload = Buffer.concat(output);
+      finish(!stopping && code === 0 && bytes <= maxBytes ? (binary ? payload : payload.toString("utf8")) : null);
+    };
     const finish = (value) => {
       if (settled) return;
       settled = true;
@@ -229,10 +233,45 @@ async function readLinuxProcessStart(pid, procRoot = "/proc") {
   return linuxStartFromStat(statText, seconds * 1_000);
 }
 
+// extern_proc begins kinfo_proc, and its first union is the start timeval.
+// pid_t p_pid follows that union, two pointers, p_flag, and p_stat.
+const DARWIN_KINFO_PID_OFFSET = 40;
+const DARWIN_KINFO_MIN_BYTES = DARWIN_KINFO_PID_OFFSET + 4;
+
+/**
+ * macOS `ps -o lstart` is whole seconds, which cannot separate two processes
+ * that started in the same second. `sysctl -b kern.proc.pid` returns the
+ * kernel start timeval instead. The pid stored in that struct must be the
+ * process we asked for; a layout this reader does not recognize is not an
+ * identity and authorizes no signal.
+ */
+function parseDarwinKinfoStart(buffer, pid) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < DARWIN_KINFO_MIN_BYTES || !exactPid(pid)) return null;
+  if (buffer.readInt32LE(DARWIN_KINFO_PID_OFFSET) !== pid) return null;
+  const seconds = Number(buffer.readBigInt64LE(0));
+  const microseconds = buffer.readInt32LE(8);
+  if (!Number.isSafeInteger(seconds) || seconds < 1_000_000_000 || seconds > 4_000_000_000) return null;
+  if (!Number.isInteger(microseconds) || microseconds < 0 || microseconds > 999_999) return null;
+  return {
+    at: seconds * 1_000 + Math.floor(microseconds / 1_000),
+    resolutionMs: 1,
+  };
+}
+
+async function readDarwinProcessStart(pid, readCommand) {
+  const output = await readCommand("/usr/sbin/sysctl", ["-b", `kern.proc.pid.${pid}`], {
+    timeoutMs: QUERY_TIMEOUT_MS,
+    maxBytes: QUERY_MAX_BYTES,
+    binary: true,
+  });
+  return parseDarwinKinfoStart(output, pid);
+}
+
 /**
  * The finest start instant this operating system will state for one live PID.
- * `resolutionMs` is 10 on Linux (proc starttime ticks), 1 on Windows, and
- * 1000 where the only clock is `ps -o lstart`.
+ * `resolutionMs` is 10 on Linux (proc starttime ticks), 1 on Windows and on
+ * macOS when the kernel start timeval is readable, and 1000 where the only
+ * clock is `ps -o lstart`. A 1000 ms clock cannot authorize a signal.
  */
 async function readProcessStartObservation(pid, {
   platform = process.platform,
@@ -244,6 +283,10 @@ async function readProcessStartObservation(pid, {
   if (platform === "linux") {
     const fromProc = await readLinuxProcessStart(pid, procRoot);
     if (fromProc) return fromProc;
+  }
+  if (platform === "darwin") {
+    const fromKernel = await readDarwinProcessStart(pid, readCommand);
+    if (fromKernel) return fromKernel;
   }
   const started = await readProcessStartTimes([pid], { platform, readCommand });
   if (!started) return null;
@@ -293,6 +336,7 @@ async function processMatchesExactStart(pid, recordedStartedAt, readObservation 
 module.exports = {
   WINDOWS_POWERSHELL_TIMEOUT_MS,
   createBoundedCommandReader,
+  parseDarwinKinfoStart,
   parseUnixProcessStartTimes,
   parseWindowsProcessStartTimes,
   processAlive,
