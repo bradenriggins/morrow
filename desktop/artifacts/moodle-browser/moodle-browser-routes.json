@@ -12,7 +12,7 @@
     "moodle-completion-executor.js": "cc5e88fba0add29c8a262b7c66cd7bb355d244c886e3335c549f8cc7bd7d02d4",
     "moodle-course-settings-executor.js": "d4028ee5b8d3dc76d8789f05cdb1fd887adb1350506d018cb803b4c6de907fb4",
     "moodle-enrolment-executor.js": "1456e9267dac2effc6e19d32667afab06cb6c47de10341c066c573176db12e7c",
-    "moodle-executor.js": "eb240a68202eeb8a327e1b9d26112e46388914681205c45d004c5f578e94aab8",
+    "moodle-executor.js": "3bbdf9cd3e303a4f3b924fa84e4613ff4e80226857721d2eb92846bcc48629ca",
     "moodle-forum-activity-summary-read.js": "dc2336fad5366af48ad2920e55d5747ea7401a6f1fd8aabc8bb25592f374610e",
     "moodle-forum-post-executor.js": "89ccc185c4fd54a6fa0c2be025590ac2c6bc26109bc0525f122b8f67161c7fed",
     "moodle-forum-read.js": "b92d7ecc6d50858a968a5201f24855bfca0718e3c5874d1b7f8e7c383af50098",
@@ -42,7 +42,7 @@
     "moodle-site-inventory-read.js": "3852c0ebcd2fe62f69b3be3b22e1ee1708bb7b8e208105b70d70948de28785de",
     "moodle-subsection-executor.js": "0bcd1b72fab1904e9603b82cb220c438f55cdf35560d59c929675e46ed45f7dc",
     "moodle-workshop-executor.js": "7eab3a80247564234f124d4c694c28d020a36e66e007e5f30421a877ac384f14",
-    "service-worker.js": "facbc7c586e91779b0b7889e6feb2d3fdc288ea77cc6ee6be741abb87ecf5858"
+    "service-worker.js": "a2f14cbc56936d724c9e1ba749baca14b9adadf999436b857364c85f188290a9"
   },
   "operations": {
     "moodle.ajax.core_backup.async_progress.backup.read.v1": {

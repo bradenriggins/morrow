@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "unreviewed",
-  "candidateCommit": "2c833b5a43c9bd280b1f95d4b8fd2a39b3329414",
+  "candidateCommit": "0ceb6311d26d128a7ddc595bc14dcd365ecde8fc",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -181,14 +181,14 @@
     },
     {
       "path": "artifacts/moodle-browser/moodle-browser-routes.json",
-      "sourceCommit": "1c4632b223896c674bfca1b18c115f85558b5100",
+      "sourceCommit": "0ceb6311d26d128a7ddc595bc14dcd365ecde8fc",
       "originalPath": "artifacts/moodle-browser/moodle-browser-routes.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": null,
-      "beforeDigest": "543dd293ea6edf586b75516b8be71dbd1db0a147b41c9c3346d3a554d2645b6a",
-      "afterDigest": "5b89da16effb3bdaac3bc10526e2a6358982f52756a45db0c9ce39f1d1997b3f"
+      "beforeDigest": "5b89da16effb3bdaac3bc10526e2a6358982f52756a45db0c9ce39f1d1997b3f",
+      "afterDigest": "2b4916a6b27368cf894d4b481cd2441436985268caed1f8e91c3ea405a050832"
     },
     {
       "path": "config/appendix-c-path-map.json",
@@ -2326,14 +2326,14 @@
     },
     {
       "path": "installer/shared/process-lifetime.cjs",
-      "sourceCommit": "2c833b5a43c9bd280b1f95d4b8fd2a39b3329414",
+      "sourceCommit": "0ceb6311d26d128a7ddc595bc14dcd365ecde8fc",
       "originalPath": "installer/shared/process-lifetime.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": null,
-      "beforeDigest": "faec8544ef4e71a060c3ac29cb6c64497719321cff7e62c8c86aed7926907991",
-      "afterDigest": "c8c586f452ffaa32542f9616d25dd7889174cb3becdc05eeb5edfa0297067e95"
+      "beforeDigest": "c8c586f452ffaa32542f9616d25dd7889174cb3becdc05eeb5edfa0297067e95",
+      "afterDigest": "a9563b787beb9cca33599a61dcb85260081e7b8e480718ffc5c7a8f7e19eb981"
     },
     {
       "path": "installer/shared/runtime-monitor.mjs",
