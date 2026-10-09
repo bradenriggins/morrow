@@ -81,6 +81,8 @@ async function createMacSmokeBinding({ diskImage, packageReceipt, source, runId 
   const receipt = JSON.parse(receiptBytes.toString("utf8"));
   if (receipt?.schema !== "morrow.desktop-installer.v1" || !/^\d+\.\d+\.\d+$/.test(receipt.version || "")
     || receipt.target !== "darwin-arm64" || receipt.source?.head !== source || receipt.source?.dirty !== false
+    || receipt.source?.rebuildSkipped === true
+    || receipt.source?.headIdentifiesDeliveredSource === false
     || receipt.payload?.releaseGraph?.schema !== "morrow.desktop-packager-admission.v1"
     || !/^[0-9a-f]{64}$/.test(receipt.payload?.releaseGraph?.sha256 || "")
     || (!isUnsignedPackageSigning(receipt.signing, "darwin-arm64") && !isSignedPackageSigning(receipt.signing, "darwin-arm64"))

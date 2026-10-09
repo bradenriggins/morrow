@@ -195,6 +195,16 @@ test("Windows smoke source identity comes from the retained package receipt", (t
     packageReceipt,
     installer,
   }), /not the expected verified release graph/);
+  const skipped = JSON.parse(readFileSync(packageReceipt, "utf8"));
+  skipped.source.rebuildSkipped = true;
+  skipped.source.headIdentifiesDeliveredSource = false;
+  writeFileSync(packageReceipt, JSON.stringify(skipped));
+  assert.throws(() => createWindowsSmokeBindingFromPackage({
+    runId: "1".repeat(32),
+    sourceCommit: "a".repeat(40),
+    packageReceipt,
+    installer,
+  }), /not the expected verified release graph/);
 });
 
 // The published Windows installer is built with --unsigned-release. docs/versioning.md runs this

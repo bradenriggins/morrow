@@ -282,13 +282,14 @@ function copyBridgeRelease(appRoot, extensionRoot, ledgerRoot = resolve(ROOT, "c
 /** The program and arguments that start `command` with no shell on this platform. */
 function startable(command, args, options) {
   if (command !== "pnpm") return { program: command, programArgs: args };
-  const pnpm = pnpmCommand({ env: options.env || process.env });
+  const pnpm = pnpmCommand({ env: options.env || process.env, release: options.releasePnpm === true });
   return { program: pnpm.command, programArgs: [...pnpm.args, ...args] };
 }
 
 function run(command, args, options = {}) {
   const { program, programArgs } = startable(command, args, options);
-  const result = spawnSync(program, programArgs, { cwd: ROOT, stdio: "inherit", ...options });
+  const { releasePnpm: _releasePnpm, ...spawnOptions } = options;
+  const result = spawnSync(program, programArgs, { cwd: ROOT, stdio: "inherit", ...spawnOptions });
   if (result.error) throw new Error(`${command} could not start: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`${command} failed with exit status ${result.status ?? 1}`);
 }
@@ -363,7 +364,8 @@ function runtimeDependencies(packagesByName) {
 
 function capture(command, args, options = {}) {
   const { program, programArgs } = startable(command, args, options);
-  const result = spawnSync(program, programArgs, { cwd: ROOT, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...options });
+  const { releasePnpm: _releasePnpm, ...spawnOptions } = options;
+  const result = spawnSync(program, programArgs, { cwd: ROOT, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...spawnOptions });
   if (result.error) throw new Error(`${command} could not start: ${result.error.message}`);
   if (result.status !== 0) {
     const detail = String(result.stderr || result.stdout || "").trim();
@@ -416,7 +418,7 @@ function assertDependencyMaterialization(value) {
   }
 }
 
-function materializeRuntimeDependencies(packages, workDirectory, sourceRoot = ROOT) {
+function materializeRuntimeDependencies(packages, workDirectory, sourceRoot = ROOT, { releasePnpm = false } = {}) {
   const directory = `${workDirectory}.runtime-dependencies-${process.pid}-${randomUUID()}`;
   mkdirSync(directory, { recursive: false, mode: 0o700 });
   try {
@@ -438,12 +440,12 @@ function materializeRuntimeDependencies(packages, workDirectory, sourceRoot = RO
     const rootManifest = packageManifest(directory);
     const packageManager = /^pnpm@(\d+\.\d+\.\d+)$/.exec(String(rootManifest.packageManager || ""));
     if (!packageManager) throw new Error("Root packageManager must pin one exact pnpm version.");
-    const observedVersion = capture("pnpm", ["--version"], { cwd: directory });
+    const observedVersion = capture("pnpm", ["--version"], { cwd: directory, releasePnpm });
     if (observedVersion !== packageManager[1]) {
       throw new Error(`Release dependency materialization requires ${rootManifest.packageManager}; found pnpm@${observedVersion || "unknown"}.`);
     }
     const flags = ["--prod", "--frozen-lockfile", "--offline", "--ignore-scripts", "--verify-store-integrity"];
-    capture("pnpm", ["install", ...flags], { cwd: directory, env: { ...process.env, CI: "true" } });
+    capture("pnpm", ["install", ...flags], { cwd: directory, env: { ...process.env, CI: "true" }, releasePnpm });
 
     const isolatedPackages = packages.map((entry) => {
       const source = resolve(directory, "packages", entry.directory);
@@ -836,9 +838,11 @@ function sameSourceCheckpoint(left, right) {
   return left.head === right.head && left.dirty === right.dirty && left.statusSha256 === right.statusSha256;
 }
 
-function rebuildWorkspaceReleaseOutputs(root = ROOT, execute = () => capture("pnpm", ["build"])) {
+function rebuildWorkspaceReleaseOutputs(root = ROOT, execute = () => capture("pnpm", ["build"]), { release = false } = {}) {
   const packages = workspacePackages(root);
-  if (process.env.MORROW_PACKAGER_SKIP_REBUILD === "1") {
+  // Release modes always compile. A local skip is only for a non-release run, and
+  // the receipt must say so instead of treating HEAD as the delivered source.
+  if (!release && process.env.MORROW_PACKAGER_SKIP_REBUILD === "1") {
     // The always-on script suite runs test files concurrently, so a test that
     // rebuilds here must not delete the shared packages/*/dist outputs out
     // from under the other files. The suite's build step already compiled them.
@@ -848,7 +852,7 @@ function rebuildWorkspaceReleaseOutputs(root = ROOT, execute = () => capture("pn
         throw new Error(`Compiled output is missing for ${entry.name}. Run pnpm build first.`);
       }
     }
-    return packages;
+    return { packages, rebuildSkipped: true };
   }
   for (const entry of packages) rmSync(resolve(entry.source, "dist"), { recursive: true, force: true });
   execute(packages);
@@ -858,17 +862,30 @@ function rebuildWorkspaceReleaseOutputs(root = ROOT, execute = () => capture("pn
       throw new Error(`Compiled output is missing after the release rebuild: ${entry.name}`);
     }
   }
-  return packages;
+  return { packages, rebuildSkipped: false };
 }
 
-async function preparePayload(target, destination, replace) {
+function payloadSourceRecord(checkpoint, rebuildSkipped) {
+  const skipped = rebuildSkipped === true;
+  return {
+    ...checkpoint,
+    rebuildSkipped: skipped,
+    headIdentifiesDeliveredSource: !skipped && checkpoint.dirty === false,
+    note: skipped
+      ? "The workspace rebuild was skipped, so the commit in head does not identify the delivered source. inputManifestSha256 is the binding record of every file sealed into this payload."
+      : "When dirty is true, the commit in head does not identify the delivered source by itself, and inputManifestSha256 is the binding record of every file sealed into this payload."
+  };
+}
+
+async function preparePayload(target, destination, replace, { release = false } = {}) {
   ensureEmptyDestination(destination, replace);
   const staging = `${destination}.staging-${process.pid}-${randomUUID()}`;
   const beforeBuild = sourceCheckpoint();
   let input;
   let materialization;
   try {
-    const packages = rebuildWorkspaceReleaseOutputs();
+    const rebuilt = rebuildWorkspaceReleaseOutputs(ROOT, () => capture("pnpm", ["build"], { releasePnpm: release }), { release });
+    const packages = rebuilt.packages;
     const checkpoint = sourceCheckpoint();
     if (!sameSourceCheckpoint(beforeBuild, checkpoint)) {
       throw new Error("Tracked source changed while Morrow rebuilt desktop release outputs.");
@@ -880,7 +897,7 @@ async function preparePayload(target, destination, replace) {
       resolve(ROOT, "connector", "extension"),
       bridgeReleaseManifest(resolve(ROOT, "connector", "extension"))
     );
-    materialization = materializeRuntimeDependencies(packages, staging);
+    materialization = materializeRuntimeDependencies(packages, staging, ROOT, { releasePnpm: release });
     const dependencies = materialization.dependencies;
     const archive = await nodeArchive(target, resolve(ROOT, "artifacts", "desktop-runtime-cache"));
     mkdirSync(staging, { recursive: false, mode: 0o700 });
@@ -918,13 +935,12 @@ async function preparePayload(target, destination, replace) {
         binarySha256: digest(expectedNodePathForTarget(destination, target))
       },
       source: {
-        ...checkpoint,
+        ...payloadSourceRecord(checkpoint, rebuilt.rebuildSkipped),
         inputManifestSha256: digestBytes(readFileSync(resolve(destination, "app/package-input-manifest.json"))),
         inputManifestFileCount: JSON.parse(readFileSync(resolve(destination, "app/package-input-manifest.json"), "utf8")).files.length,
         mcpRuntimeManifestSha256: digestBytes(readFileSync(resolve(destination, "app/mcp-runtime-manifest.json"))),
         dependencyMaterialization: JSON.parse(readFileSync(resolve(destination, "app/package-input-manifest.json"), "utf8")).dependencyMaterialization,
-        reproducibleFrom: "app/package-input-manifest.json",
-        note: "When dirty is true, the commit in head does not identify the delivered source by itself, and inputManifestSha256 is the binding record of every file sealed into this payload."
+        reproducibleFrom: "app/package-input-manifest.json"
       },
       containsMutableState: false,
       workspaceModulesMaterialized: true,
@@ -1087,17 +1103,19 @@ async function packageDesktop(request) {
   const payload = resolve(staging, "MorrowPayload");
   try {
     mkdirSync(staging, { recursive: false, mode: 0o700 });
+    const release = request.signedRelease === true || request.unsignedRelease === true;
     if (request.signedRelease) {
       const preflight = signedReleasePreflight({ target: request.target, version: VERSION });
       if (preflight.status !== "ready") throw new Error(`Signed release inputs are incomplete: ${preflight.missing.join("; ")}`);
       if (sourceCheckpoint().dirty) throw new Error("Signed public packaging requires a clean source checkout.");
     }
-    const payloadReceipt = await preparePayload(request.target, payload, false);
+    const payloadReceipt = await preparePayload(request.target, payload, false, { release });
     const releaseGraph = createPackagerAdmission({ payload, target: request.target });
     writePackagerAdmission(admissionPath, releaseGraph);
     const requestedSigning = request.signedRelease ? signedSigningState(request.target) : signingState(request.target, request.unsignedQa, request.unsignedRelease);
     const electronOutput = resolve(staging, "electron-output");
     run("pnpm", ["--dir", INSTALLER, "--ignore-workspace", `run`, TARGETS[request.target].electron[0]], {
+      releasePnpm: release,
       env: (request.signedRelease ? (env) => ({ ...env, MORROW_SIGNED_RELEASE: "1", CSC_IDENTITY_AUTO_DISCOVERY: "true" }) : unsignedBuilderEnvironment)({
         ...process.env,
         ...desktopTargetEnvironment(request.target),
@@ -1156,7 +1174,7 @@ async function main() {
     return;
   }
   try {
-    if (request.kind === "prepare") process.stdout.write(json(await preparePayload(request.target, request.payload, request.replace)));
+    if (request.kind === "prepare") process.stdout.write(json(await preparePayload(request.target, request.payload, request.replace, { release: false })));
     else await packageDesktop(request);
   } catch (error) { die(error instanceof Error ? error.message : String(error)); }
 }

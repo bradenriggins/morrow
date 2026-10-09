@@ -49,13 +49,18 @@ export function pnpmCommand({
   env = process.env,
   execPath = process.execPath,
   fileSystem = hostFileSystem,
+  release = false,
 } = {}) {
   if (platform !== "win32") return { command: "pnpm", args: [] };
-  const running = environmentValue(env, "NPM_EXECPATH");
-  if (typeof running === "string" && win32.isAbsolute(running) && fileSystem.isFile(running)) {
-    const name = win32.basename(running);
-    if (PNPM_ENTRY.test(name)) return { command: execPath, args: [running] };
-    if (PNPM_NATIVE.test(name)) return { command: running, args: [] };
+  // A release package starts the pnpm on PATH (the version packageManager pins).
+  // NPM_EXECPATH can name any absolute pnpm.js or pnpm.exe, so a release lookup ignores it.
+  if (!release) {
+    const running = environmentValue(env, "NPM_EXECPATH");
+    if (typeof running === "string" && win32.isAbsolute(running) && fileSystem.isFile(running)) {
+      const name = win32.basename(running);
+      if (PNPM_ENTRY.test(name)) return { command: execPath, args: [running] };
+      if (PNPM_NATIVE.test(name)) return { command: running, args: [] };
+    }
   }
   const extensions = String(environmentValue(env, "PATHEXT") || DEFAULT_PATHEXT)
     .split(";")

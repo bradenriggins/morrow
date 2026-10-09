@@ -53,12 +53,15 @@ for (const layout of ["standalone", "monorepo"]) {
       const origin = JSON.parse(readFileSync(join(desktop, "config/source-origin-ledger.json")));
       const rights = JSON.parse(readFileSync(join(desktop, "config/source-rights.manifest.json")));
       assert.equal(origin.candidateCommit, candidateCommit);
+      assert.equal(origin.status, "unreviewed");
       const architecture = origin.entries.find((entry) => entry.path === "ARCHITECTURE.md");
       assert.equal(architecture.sourceCommit, candidateCommit);
+      assert.equal(architecture.reviewer, null);
       assert.equal(architecture.beforeDigest, digest("Desktop source v1\n"));
       assert.equal(architecture.afterDigest, digest("Desktop source v2\n"));
       const source = origin.entries.find((entry) => entry.path === "packages/mcp-server/src/example.ts");
       assert.equal(source.sourceCommit, firstCommit);
+      assert.equal(source.beforeDigest, null);
       assert.deepEqual(source.testMapping, ["packages/mcp-server/test/example.test.ts"]);
       assert.equal(origin.entries.some((entry) => entry.path === "config/source-origin-ledger.json"), false);
       assert.equal(rights.files.find((entry) => entry.path === "ARCHITECTURE.md").sha256, architecture.afterDigest);

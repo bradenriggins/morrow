@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { bridgeReleaseManifest } from "../package-mcp-bundle.mjs";
-import { BRIDGE_VERSION, remoteRunnerRequired, verifyQaSource, verifySealedBridge, verifyRetainedPackageContract } from "./sealed-desktop-bridge.mjs";
+import { BRIDGE_SEAL, BRIDGE_VERSION, assertPackagedBridgeMatchesCheckout, qualifyRetainedCheckout, remoteRunnerRequired, verifyQaSource, verifySealedBridge, verifyRetainedPackageContract } from "./sealed-desktop-bridge.mjs";
 
 const extension = resolve(import.meta.dirname, "../../connector/extension");
 const releaseBytes = Buffer.from(`${JSON.stringify(bridgeReleaseManifest(extension), null, 2)}\n`);
@@ -29,6 +29,10 @@ test("the actual retained QA receipt admits its unsigned release classification 
 test("remote qualification validates the retained archive before extraction and launch", () => {
   const workflow = readFileSync(resolve(import.meta.dirname, "../../../.github/workflows/sealed-desktop-bridge.yml"), "utf8");
   assert.match(workflow, /on:\n  workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /37649115964/);
+  assert.doesNotMatch(workflow, /1ed0c70c82dc74b2a506e6ac0004bad29fbfa43a/);
+  assert.doesNotMatch(workflow, /\bdefault:/);
+  assert.match(workflow, /PACKAGE_SOURCE !== sha/);
   assert.doesNotMatch(workflow, /^  (push|pull_request|schedule):/m);
   assert.match(workflow, /permissions:\n  contents: read\n  actions: read/);
   assert.match(workflow, /timeout-minutes: 20/);
@@ -58,6 +62,19 @@ test("the native pairing harness refuses this local Mac and every unsupported ru
   assert.doesNotThrow(() => remoteRunnerRequired(environment, "darwin", "arm64"));
   assert.throws(() => remoteRunnerRequired(environment, "linux", "x64"));
   assert.throws(() => remoteRunnerRequired({ ...environment, GITHUB_WORKFLOW: "ci" }, "darwin", "arm64"));
+});
+
+test("the retained 1.0.14 receipt stays historical and is not proof of this checkout", () => {
+  const bytes = readFileSync(resolve(import.meta.dirname, "fixtures/sealed-qa-37649115964-package-receipt.json"));
+  const receipt = JSON.parse(bytes);
+  const version = JSON.parse(readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8")).version;
+  assert.equal(receipt.version, "1.0.14");
+  assert.notEqual(version, receipt.version);
+  assert.throws(() => qualifyRetainedCheckout(receipt, { version, head: receipt.source.head }), /retained_desktop_version_mismatch/);
+  assert.throws(() => qualifyRetainedCheckout({ ...receipt, version }, { version, head: "a".repeat(40) }), /retained_source_head_mismatch/);
+  const changedCheckout = Buffer.from(releaseBytes.toString("utf8").replace(`"version": "${BRIDGE_VERSION}"`, '"version": "9.9.9"'));
+  assert.equal(createHash("sha256").update(releaseBytes).digest("hex"), BRIDGE_SEAL);
+  assert.throws(() => assertPackagedBridgeMatchesCheckout(releaseBytes, changedCheckout), /packaged_bridge_does_not_match_checkout/);
 });
 
 test("the retained artifact requires its successful QA run and exact package source", () => {

@@ -4,13 +4,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createMacSmokeBinding, assertAppReceipt } from "./desktop-mac-smoke.mjs";
 import { electronAsarReleaseIdentity, readElectronAsarPackage } from "../lib/electron-asar-package.mjs";
 import { runOwnedProcess } from "../lib/owned-process.mjs";
+import { bridgeReleaseManifest } from "../package-mcp-bundle.mjs";
 
 export const BRIDGE_VERSION = "1.0.138";
 export const BRIDGE_SEAL = "b5761be70901506f68b281ed90cc2ec53b7e5007bb1196ec73966293df77937d";
+const DESKTOP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const EXTENSION_ID = "abeloclekioohahgedmjcdbpllfjfhko";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
@@ -25,6 +27,23 @@ export function verifyQaSource(record, source, qaRun) {
     || record.workflowName !== "desktop installer QA") throw new Error("successful_qa_source_binding_required");
 }
 
+export function qualifyRetainedCheckout(receipt, { version, head }) {
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error("checkout_desktop_version_required");
+  if (!/^[0-9a-f]{40}$/.test(head || "")) throw new Error("checkout_head_required");
+  if (receipt?.version !== version) throw new Error("retained_desktop_version_mismatch");
+  if (receipt?.source?.head !== head || receipt?.source?.dirty !== false) throw new Error("retained_source_head_mismatch");
+}
+
+export function checkoutBridgeReleaseBytes(extensionRoot = resolve(DESKTOP_ROOT, "connector/extension")) {
+  return Buffer.from(`${JSON.stringify(bridgeReleaseManifest(extensionRoot), null, 2)}\n`);
+}
+
+export function assertPackagedBridgeMatchesCheckout(packagedBytes, checkoutBytes) {
+  if (!Buffer.isBuffer(packagedBytes) || !Buffer.isBuffer(checkoutBytes) || sha256(packagedBytes) !== sha256(checkoutBytes)) {
+    throw new Error("packaged_bridge_does_not_match_checkout");
+  }
+}
+
 export function verifyRetainedPackageContract(receipt) {
   assert.equal(receipt.schema, "morrow.desktop-installer.v1", "retained_installer_schema_required");
   assert.equal(receipt.target, "darwin-arm64", "retained_native_target_required");
@@ -34,8 +53,8 @@ export function verifyRetainedPackageContract(receipt) {
   assert.equal(receipt.verification?.electronAsarAndBridge, true, "packaged_bridge_verification_required");
 }
 
-export async function verifySealedBridge(root, releaseBytes, { activeFolderMarker = false } = {}) {
-  if (sha256(releaseBytes) !== BRIDGE_SEAL) throw new Error("exact_bridge_release_seal_required");
+export async function verifySealedBridge(root, releaseBytes, { activeFolderMarker = false, expectedSeal = BRIDGE_SEAL } = {}) {
+  if (sha256(releaseBytes) !== expectedSeal) throw new Error("exact_bridge_release_seal_required");
   const release = JSON.parse(releaseBytes);
   if (release.schema !== "morrow.bridge-release.v1" || release.version !== BRIDGE_VERSION
     || release.extensionId !== EXTENSION_ID || !Array.isArray(release.files) || release.files.length === 0) {
@@ -125,6 +144,12 @@ async function main() {
   const binding = await createMacSmokeBinding({ diskImage, packageReceipt, source, runId: randomUUID().replaceAll("-", "") });
   const packageRecord = JSON.parse(await readFile(packageReceipt, "utf8"));
   verifyRetainedPackageContract(packageRecord);
+  const checkoutHead = String(process.env.GITHUB_SHA || "").toLowerCase();
+  if (source !== checkoutHead) throw new Error("package_source_is_not_checkout");
+  const checkoutVersion = JSON.parse(await readFile(resolve(DESKTOP_ROOT, "package.json"), "utf8")).version;
+  qualifyRetainedCheckout(packageRecord, { version: checkoutVersion, head: checkoutHead });
+  const checkoutBridge = checkoutBridgeReleaseBytes();
+  const checkoutSeal = sha256(checkoutBridge);
   const root = await realpath(await mkdtemp(join(tmpdir(), "morrow-sealed-bridge-")));
   const mount = join(root, "mounted");
   await mkdir(mount);
@@ -141,10 +166,11 @@ async function main() {
     const resources = join(app, "Contents", "Resources");
     const appPackage = readElectronAsarPackage(join(resources, "app.asar"));
     const installedPackage = electronAsarReleaseIdentity(appPackage, binding);
-    assert.equal(appPackage.morrow?.bridgeRelease?.manifestSha256, BRIDGE_SEAL, "asar_bridge_seal_mismatch");
+    assert.equal(appPackage.morrow?.bridgeRelease?.manifestSha256, checkoutSeal, "asar_bridge_seal_mismatch");
     const releaseRoot = join(resources, "MorrowPayload", "app", "bridge-release");
     const releaseBytes = await readFile(join(releaseRoot, "manifest.json"));
-    const bridgeIdentity = await verifySealedBridge(join(releaseRoot, "extension"), releaseBytes);
+    assertPackagedBridgeMatchesCheckout(releaseBytes, checkoutBridge);
+    const bridgeIdentity = await verifySealedBridge(join(releaseRoot, "extension"), releaseBytes, { expectedSeal: checkoutSeal });
     const testRoot = join(root, "contained");
     await mkdir(testRoot);
     const environment = { ...process.env, MORROW_INSTALLER_TEST_MODE: "1" };
@@ -168,7 +194,7 @@ async function main() {
     const bridgeFolder = ready.state.bridge.folderPath;
     assert.equal(typeof bridgeFolder, "string", "installed_bridge_folder_required");
     assert.ok(resolve(bridgeFolder).startsWith(`${resolve(testRoot)}/`), "bridge_folder_outside_containment");
-    await verifySealedBridge(bridgeFolder, releaseBytes, { activeFolderMarker: true });
+    await verifySealedBridge(bridgeFolder, releaseBytes, { activeFolderMarker: true, expectedSeal: checkoutSeal });
     stage = "exact_bridge_pairing";
     browser = await chromium.launchPersistentContext(join(root, "cft-profile"), { headless: false,
       args: [`--disable-extensions-except=${bridgeFolder}`, `--load-extension=${bridgeFolder}`, networkRules,
@@ -190,13 +216,13 @@ async function main() {
         .map((byte) => byte.toString(16).padStart(2, "0")).join("") }));
     assert.equal(observed.version, BRIDGE_VERSION, "loaded_bridge_version_mismatch");
     assert.equal(observed.workerSha256, bridgeIdentity.workerSha256, "loaded_bridge_worker_changed");
-    await verifySealedBridge(bridgeFolder, releaseBytes, { activeFolderMarker: true });
-    await verifySealedBridge(join(releaseRoot, "extension"), releaseBytes);
+    await verifySealedBridge(bridgeFolder, releaseBytes, { activeFolderMarker: true, expectedSeal: checkoutSeal });
+    await verifySealedBridge(join(releaseRoot, "extension"), releaseBytes, { expectedSeal: checkoutSeal });
     await createMacSmokeBinding({ diskImage, packageReceipt, source, runId: binding.runId });
     await mkdir(dirname(args["--receipt"]), { recursive: true });
     await writeFile(args["--receipt"], `${JSON.stringify({ schema: "morrow.sealed-desktop-bridge-proof.v1", status: "passed",
       qaRun, signing: packageRecord.signing, artifact: { id: artifactRecord.id, name: artifactRecord.name, digest: artifactRecord.digest,
-        sizeInBytes: artifactRecord.size_in_bytes }, binding, installedPackage, harnessSource: process.env.GITHUB_SHA, bridge: { ...bridgeIdentity, sealedManifestSha256: BRIDGE_SEAL,
+        sizeInBytes: artifactRecord.size_in_bytes }, binding, installedPackage, harnessSource: process.env.GITHUB_SHA, bridge: { ...bridgeIdentity, sealedManifestSha256: checkoutSeal,
         extensionId: EXTENSION_ID, loadedWorkerSha256: observed.workerSha256, filesUnchanged: true },
       readback: { gatewayReady: true, desktopBridgePaired: true, desktopBridgeLoadedInChrome: true, popupConnected: true },
       limits: ["unsigned QA package", "no signed-in provider or course", "no signing or notarization proof", "macOS Apple silicon only"] }, null, 2)}\n`, { flag: "wx", mode: 0o600 });

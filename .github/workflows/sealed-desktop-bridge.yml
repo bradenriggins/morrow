@@ -4,14 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       qa_run:
-        description: Successful desktop installer QA run holding the retained artifact
+        description: Successful desktop installer QA run for the checkout being qualified
         type: string
-        default: '37649115964'
         required: true
       package_source:
-        description: Exact source commit in the retained package receipt
+        description: Source commit of the retained package. It must be the checkout SHA.
         type: string
-        default: '1ed0c70c82dc74b2a506e6ac0004bad29fbfa43a'
         required: true
 
 permissions:
@@ -42,7 +40,7 @@ jobs:
           QA_RUN: ${{ inputs.qa_run }}
           PACKAGE_SOURCE: ${{ inputs.package_source }}
         run: |
-          node -e 'if (!/^[1-9][0-9]*$/.test(process.env.QA_RUN) || !/^[0-9a-f]{40}$/.test(process.env.PACKAGE_SOURCE)) process.exit(1)'
+          node -e 'const sha=String(process.env.GITHUB_SHA||"").toLowerCase(); if (!/^[1-9][0-9]*$/.test(process.env.QA_RUN) || !/^[0-9a-f]{40}$/.test(process.env.PACKAGE_SOURCE) || process.env.PACKAGE_SOURCE !== sha) process.exit(1)'
           gh run view "$QA_RUN" --repo "$GITHUB_REPOSITORY" --json databaseId,headSha,conclusion,workflowName > "$RUNNER_TEMP/qa-source.json"
           node --input-type=module -e 'import fs from "node:fs"; import {verifyQaSource} from "./scripts/test/sealed-desktop-bridge.mjs"; verifyQaSource(JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/qa-source.json")),process.env.PACKAGE_SOURCE,process.env.QA_RUN)'
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN/artifacts?per_page=100" > "$RUNNER_TEMP/qa-artifacts.json"

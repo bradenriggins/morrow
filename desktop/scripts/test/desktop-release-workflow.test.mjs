@@ -304,6 +304,11 @@ test("the Windows job upgrades the exact published 3720 artifact before its fina
   assert.match(upgrade, /\$uninstallSnapshot = Uninstall-CleanupSnapshot/);
   assert.match(upgrade, /if \(Test-UninstallComplete \$uninstallSnapshot\) \{ break \}/);
   assert.match(upgrade, /while \(\(Get-Date\) -lt \$cleanupDeadline\)/);
+  assert.match(upgrade, /function Run-Process\(\[string\] \$Path, \[string\[\]\] \$Arguments, \[int\] \$TimeoutMs, \[string\] \$Label\)/);
+  assert.match(upgrade, /\$InstallTimeoutMs = 240000/);
+  assert.match(upgrade, /\$ApplicationTimeoutMs = 300000/);
+  assert.match(upgrade, /taskkill\.exe \/PID \$process\.Id \/T \/F/);
+  assert.doesNotMatch(upgrade, /Stop-Process -Id \$process\.Id/);
   assert.ok(upgrade.indexOf("Run-Process $uninstaller") < upgrade.indexOf("$uninstallSnapshot = Uninstall-CleanupSnapshot"), "the harness must wait for the uninstaller before it checks cleanup");
   assert.ok(upgrade.indexOf("$uninstallSnapshot = Uninstall-CleanupSnapshot") < upgrade.indexOf("$retainedAfterUninstall = Compare-Files"), "the final retention read must wait for the complete cleanup predicate");
   assert.match(upgrade, /upgrade-uninstall-residue\.json/);

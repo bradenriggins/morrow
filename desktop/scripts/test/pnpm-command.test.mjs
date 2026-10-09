@@ -116,6 +116,25 @@ test("the lookup follows PATH first and PATHEXT within each folder, as Windows d
   );
 });
 
+test("a release lookup starts the pnpm on PATH and ignores NPM_EXECPATH", () => {
+  const evil = "C:\\evil\\pnpm.js";
+  const bin = "C:\\pnpm-home\\bin";
+  const entry = "C:\\pnpm-home\\node_modules\\pnpm\\bin\\pnpm.cjs";
+  const files = {
+    [evil]: "",
+    [`${bin}\\pnpm.cmd`]: pnpmShim(`"${entry}"`),
+    [entry]: "",
+  };
+  assert.deepEqual(
+    pnpmCommand({ platform: "win32", release: true, env: { NPM_EXECPATH: evil, PATH: bin }, execPath: NODE, fileSystem: windowsFiles(files) }),
+    { command: NODE, args: [entry] },
+  );
+  assert.deepEqual(
+    lookup({ NPM_EXECPATH: evil, PATH: "" }, { [evil]: "" }),
+    { command: NODE, args: [evil] },
+  );
+});
+
 test("a pnpm that is already running this script is started again", () => {
   const entry = "C:\\pnpm-home\\node_modules\\pnpm\\bin\\pnpm.cjs";
   assert.deepEqual(lookup({ npm_execpath: entry, PATH: "" }, { [entry]: "" }), { command: NODE, args: [entry] });
