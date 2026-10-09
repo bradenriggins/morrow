@@ -138,49 +138,22 @@
   askForNames();
 
   // The first navigation has no proof, so the server answers with no review and no nonce.
-  // Ask Morrow Bridge to sign this page, then load the review. A program that only knows the
-  // URL cannot make that signature.
+  // Ask Morrow Bridge to sign this page, then load that exact review as a navigation. Replacing
+  // the document here would run the page script a second time in this same page, and the streamed
+  // review would stay hidden. A program that only knows the URL cannot make that signature.
   const openReview = () => {
     if (typeof location.pathname !== "string" || !location.pathname) return;
     if (document.querySelector?.('input[name="nonce"]')) return;
     const path = location.pathname;
     Promise.resolve(chrome.runtime.sendMessage({ type: "morrow_review_approval_sign", approvePath: path, nonce: "open" }))
       .catch(() => null)
-      .then(async (response) => {
+      .then((response) => {
         if (!response?.ok || typeof response.presence !== "string" || document.querySelector?.('input[name="nonce"]')) return;
-        const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647, 8_000)));
-        const page = await fetch(location.href, {
-          credentials: "same-origin",
-          headers: { accept: "text/html", "x-morrow-review-presence": response.presence },
-          signal: requestSignal(),
-        }).catch(() => null);
-        if (!page?.ok) {
-          try { const canceled = page?.body?.cancel?.(); if (canceled && typeof canceled.catch === "function") canceled.catch(() => {}); } catch {}
-          return;
-        }
-        const reader = page.body?.getReader?.();
-        if (!reader) return;
-        const decoder = new TextDecoder("utf-8", { fatal: true });
-        let html = "";
-        let size = 0;
-        for (;;) {
-          const next = await reader.read();
-          if (next.done) break;
-          size += next.value.byteLength;
-          if (size > 2 * 1024 * 1024) { try { reader.cancel(); } catch {} return; }
-          html += decoder.decode(next.value, { stream: true });
-        }
-        html += decoder.decode();
-        const parsed = new DOMParser().parseFromString(html, "text/html");
-        if (!parsed.documentElement) return;
-        document.replaceChild(parsed.documentElement, document.documentElement);
-        for (const old of document.querySelectorAll("script[src]")) {
-          const script = document.createElement("script");
-          script.src = old.getAttribute("src");
-          if (old.defer) script.defer = true;
-          old.replaceWith(script);
-        }
-        askForNames();
+        const next = new URL(location.href);
+        next.searchParams.set("presence", response.presence);
+        next.hash = "";
+        if (next.href === location.href) return;
+        location.replace(next.href);
       });
   };
   openReview();

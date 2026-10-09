@@ -86,7 +86,9 @@ export function reviewPagePath(url, presence) {
   } catch {
     return null;
   }
-  if (!presence || parsed.origin !== presence.origin || parsed.search || parsed.hash || !REVIEW_PATH.test(parsed.pathname)) return null;
+  if (!presence || parsed.origin !== presence.origin || parsed.hash || !REVIEW_PATH.test(parsed.pathname)) return null;
+  // The open proof may be in the query. Any other query is not a review page.
+  if ([...parsed.searchParams.keys()].some((key) => key !== "presence")) return null;
   return parsed.pathname;
 }
 
@@ -222,11 +224,17 @@ export function handleReviewApprovalMessage(message, sender, sendResponse) {
 
 /** Registers the worker's navigation listener. Called once, when the worker module first runs. */
 export function installReviewApproval() {
-  chrome.webNavigation?.onCompleted?.addListener((details) => {
+  const readyReview = (details) => {
     if (details?.frameId !== 0 || !Number.isInteger(details.tabId) || details.tabId < 0) return;
     void storedPresence().then((presence) => {
       if (reviewPagePath(details.url, presence)) return injectInto(details.tabId);
       return undefined;
     });
-  }, { url: [{ schemes: ["http"], hostEquals: "127.0.0.1" }] });
+  };
+  const localReview = { url: [{ schemes: ["http"], hostEquals: "127.0.0.1" }] };
+  // Commit is early enough that the reload for the open proof is still the navigation a
+  // caller is waiting on. DOMContentLoaded and completion cover a commit that was too early.
+  chrome.webNavigation?.onCommitted?.addListener(readyReview, localReview);
+  chrome.webNavigation?.onDOMContentLoaded?.addListener(readyReview, localReview);
+  chrome.webNavigation?.onCompleted?.addListener(readyReview, localReview);
 }
