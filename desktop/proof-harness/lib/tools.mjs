@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { appendFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { SOURCE_BINDING as SB } from "../connect.mjs";
+import { outcomeFromChangePlan } from "./proof-rules.mjs";
 
 /** How long one change waits for the person to approve it in Chrome. */
 const APPROVAL_WAIT_MS = Number(process.env.MORROW_PROOF_APPROVAL_WAIT_MS) || 10 * 60_000;
@@ -143,7 +144,14 @@ export function makeTools(client, logPath) {
         : await callTool("morrow_capability_change", { name, arguments: { ...args, _morrow: { source_binding_id: SB, operation_id: operationId || `${label}-${Date.now()}` } } });
       const plan = planned?.structuredContent ?? {};
       entry.plan = { status: plan.status, code: plan.data?.code, text: (planned?.content?.[0]?.text || "").slice(0, 160) };
-      if (plan.status === "verified") { entry.outcome = "verified"; await log(`${label}: verified (no approval needed)`); return entry; }
+      const decided = outcomeFromChangePlan(plan, entry.plan.text);
+      if (decided) {
+        entry.outcome = decided.outcome;
+        entry.state = decided.state;
+        if (decided.verification !== undefined) entry.verification = decided.verification;
+        await log(`${label}: ${entry.outcome}`);
+        return entry;
+      }
       if (plan.operationId && ["applied_or_unknown", "awaiting_verification", "cancelled", "failed", "closed_by_person"].includes(plan.effectState)) {
         entry.operationId = plan.operationId;
         entry.state = plan.effectState;

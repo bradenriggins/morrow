@@ -4,6 +4,7 @@
 import { connect, SANDBOX, SOURCE_BINDING } from "./connect.mjs";
 import { makeTools } from "./lib/tools.mjs";
 import { loadLedger, recordRow } from "./ledger.mjs";
+import { absenceOf, listRead, rowByIdentity } from "./lib/proof-rules.mjs";
 
 const COURSE = SANDBOX.courseId;
 const mark = `${SANDBOX.mark}UNDO${String(Math.floor(Date.now() / 1000))}`;
@@ -17,8 +18,9 @@ try {
     course_id: COURSE, wiki_page_title: title, wiki_page_body: "<p>undo me</p>", wiki_page_published: false,
   });
   const before = await read("canvas_list_pages_courses", { course_id: COURSE, search_term: title });
-  const saved = (Array.isArray(before.data) ? before.data : [])[0];
-  if (!made.operationId || !saved) {
+  const prior = listRead(before);
+  const saved = prior.ok ? rowByIdentity(prior.rows, { title }) : null;
+  if (!prior.ok || !made.operationId || !saved) {
     recordRow(ledger, "morrow_operation_undo", { phase: 1, kind: "tool", verdict: "BLOCKED",
       reason: `The page this proof needs was not created (${made.outcome}), so undo could not be asked for.` });
     await log(`undo: blocked, create was ${made.outcome}`);
@@ -29,11 +31,14 @@ try {
       correction_arguments: { course_id: COURSE, url_or_id: String(saved.url), _morrow: { source_binding_id: SOURCE_BINDING } },
     }, 600_000).catch((error) => ({ threw: String(error).slice(0, 200) }));
     const after = await read("canvas_list_pages_courses", { course_id: COURSE, search_term: title });
-    const gone = (Array.isArray(after.data) ? after.data : []).length === 0;
+    const restored = absenceOf(after, { title, id: String(saved.url) });
+    const gone = restored.gone === true && restored.failed === false;
     const problem = answer?.structuredContent?.data?.code ?? answer?.threw ?? null;
     recordRow(ledger, "morrow_operation_undo", {
       phase: 1, kind: "tool", verdict: gone ? "PASS" : "FAIL",
-      ...(gone ? {} : { reason: `Morrow refused to correct a change it had verified: ${problem}. Canvas still holds the page.` }),
+      ...(gone ? {} : { reason: restored.failed
+        ? "The page list after undo did not answer, so absence is not proven."
+        : `Morrow refused to correct a change it had verified: ${problem}. Canvas still holds the page.` }),
       readback: { source: "canvas", pageGoneAfterUndo: gone, problem, operationId: made.operationId, createOutcome: made.outcome },
       sandbox: { courseId: COURSE, mark },
     });

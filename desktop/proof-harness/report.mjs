@@ -5,22 +5,27 @@
 // sandbox; running them showed otherwise for many. So coverage is reported against what was
 // attempted and what the evidence says, not against the prediction.
 import { readFileSync, writeFileSync } from "node:fs";
+import { operationIsProven } from "./lib/proof-rules.mjs";
 
 const manifest = JSON.parse(readFileSync(new URL("manifest.json", import.meta.url), "utf8"));
 const ledger = JSON.parse(readFileSync(new URL("ledger.json", import.meta.url), "utf8"));
 const rows = manifest.operations;
 const evidence = ledger.rows ?? {};
 
-const PROVEN = rows.filter((row) => row.classification === "PROVEN");
+const PROVEN = rows.filter((row) => operationIsProven(row, evidence[row.id]));
 const DEFECTS = Object.values(evidence).filter((row) => row.verdict === "FAIL");
 const attempted = rows.filter((row) => Boolean(evidence[row.id]));
 const neverAttempted = rows.filter((row) => !evidence[row.id]);
 
 const byClassification = {};
 for (const row of rows) {
-  byClassification[row.classification] = byClassification[row.classification] ?? { count: 0, reason: row.reason ?? "" };
-  byClassification[row.classification].count += 1;
-  if (!byClassification[row.classification].reason && row.reason) byClassification[row.classification].reason = row.reason;
+  const name = row.classification === "PROVEN" && !operationIsProven(row, evidence[row.id]) ? "NO-READBACK" : row.classification;
+  const reason = name === "NO-READBACK" && row.classification === "PROVEN"
+    ? "Canvas has no read that shows the saved result of this change."
+    : (row.reason ?? "");
+  byClassification[name] = byClassification[name] ?? { count: 0, reason };
+  byClassification[name].count += 1;
+  if (!byClassification[name].reason && reason) byClassification[name].reason = reason;
 }
 
 const scenarioRows = Object.values(evidence).filter((row) => row.kind === "scenario");

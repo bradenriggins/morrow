@@ -6,6 +6,7 @@
 // says why.
 import { readFileSync, writeFileSync } from "node:fs";
 import { loadLedger } from "./ledger.mjs";
+import { classificationFromPass } from "./lib/proof-rules.mjs";
 
 const manifestPath = new URL("manifest.json", import.meta.url);
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -40,6 +41,14 @@ for (const row of manifest.operations) {
   const evidence = ledger.rows[row.id];
   if (!evidence) continue;
   if (evidence.verdict === "PASS") {
+    const next = classificationFromPass(evidence);
+    if (next.classification !== "PROVEN") {
+      row.classification = next.classification;
+      row.reason = next.reason;
+      row.proof = next.proof;
+      changed += 1;
+      continue;
+    }
     if (row.classification !== "PROVEN") { row.classification = "PROVEN"; delete row.reason; changed += 1; }
     row.proof = "PROVEN";
     continue;

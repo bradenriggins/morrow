@@ -10,6 +10,7 @@ import { makeDisposables, removeDisposables } from "./lib/disposables.mjs";
 import { settleOperation } from "./lib/settle.mjs";
 import { loadLedger, recordRow, summarize } from "./ledger.mjs";
 import { SANDBOX } from "./connect.mjs";
+import { addressPoolForWrite, classifyWriteEvidence, preexistingTarget } from "./lib/proof-rules.mjs";
 
 const logPath = new URL("run-writes.log", import.meta.url);
 const ledger = loadLedger();
@@ -117,8 +118,8 @@ function exactArguments(operation, made, mark) {
       late_policy_late_submission_deduction_enabled: false,
       late_policy_late_submission_interval: "day",
     },
-    // A flag is set to a state Canvas names, never to a word.
-    canvas_set_feature_flag_courses: { state: "off" },
+    // An existing feature flag is not turned off. This sweep has no flag of its own.
+    canvas_set_feature_flag_courses: {},
     canvas_remove_feature_flag_courses: {},
     // A column's data is a list of records, one per person, and this sweep has
     // no person's grade to write. The column itself is proven instead.
@@ -281,60 +282,16 @@ const { log, read, change, callTool } = makeTools(client, logPath);
  * One write's evidence. PASS only where the effect was read back from Canvas itself; a change
  * Canvas has no read for is BLOCKED with that reason, never counted as proven.
  */
-const VERDICTS = {
-  verified: "PASS",
-  // Not proven, and not a defect either: the harness could not build the argument, Morrow held
-  // the change behind one already waiting on the same target, or Canvas has no read for it.
-  excluded: "BLOCKED",
-  unreachable: "BLOCKED",
-  not_planned: "BLOCKED",
-  sent_unchecked: "BLOCKED",
-  applied_or_unknown: "BLOCKED",
-  approval_withheld: "BLOCKED",
-  approved: "BLOCKED",
-  unsettled: "BLOCKED",
-  closed_by_person: "BLOCKED",
-  cancelled: "BLOCKED",
-  refused: "BLOCKED",
-  // A defect: Morrow threw, or its own readback disagreed with what it settled.
-  threw: "FAIL",
-  mismatch: "FAIL",
-  failed: "FAIL",
-};
-
-/**
- * Why a change that did not complete was not proven. A queue conflict and an argument the harness
- * cannot build are limits of this run; they are recorded as such rather than as defects, because a
- * FAIL that is not a defect hides the ones that are.
- */
-function blockedReason(entry) {
-  const detail = String(entry.text ?? entry.detail ?? "");
-  if (/waiting for approval|existing request/i.test(detail)) {
-    return "Morrow held this change behind one already waiting on the same target; this run did not settle it.";
-  }
-  if (/input is invalid|Check this input/i.test(detail)) {
-    return `This harness could not build the argument shape the route requires: ${/Check this input: ([^.]+)\./.exec(detail)?.[1] ?? "see detail"}.`;
-  }
-  return "";
-}
 const record = (toolName, entry) => {
-  const state = String(entry.state ?? entry.outcome ?? "unknown");
-  const confirmed = state !== "verified" || entry.verification === undefined || entry.verification === "verified";
-  const queued = blockedReason(entry);
-  // A change Canvas confirmed is proven, whatever an earlier planning attempt said: the queue
-  // reason only explains a change that did not complete.
-  const verdict = !confirmed ? "FAIL"
-    : state === "verified" ? "PASS"
-    : queued ? "BLOCKED"
-    : (VERDICTS[state] ?? "FAIL");
+  const judged = classifyWriteEvidence(entry);
+  const verdict = judged.verdict;
+  const state = judged.state;
   recordRow(ledger, toolName, {
     phase: 1,
     kind: "write",
     verdict,
-    ...(confirmed ? {} : { reason: `Morrow settled this change as ${state} while its own readback said ${entry.verification}.` }),
-    ...(confirmed && queued && state !== "verified" ? { reason: queued } : {}),
     state,
-    ...(entry.reason ? { reason: entry.reason } : {}),
+    ...(entry.reason ? { reason: entry.reason } : judged.reason ? { reason: judged.reason } : {}),
     ...(entry.path ? { path: entry.path } : {}),
     ...(entry.missing ? { missing: entry.missing } : {}),
     ...(entry.attention ? { attention: entry.attention } : {}),
@@ -347,8 +304,15 @@ const record = (toolName, entry) => {
 };
 
 let cleanup = [];
+let preexistingIds = new Set();
 try {
-  const disposables = await makeDisposables(mark, { read, change, log });
+  let preexisting = {};
+  try {
+    preexisting = JSON.parse(readFileSync(new URL("seed-pool.json", import.meta.url), "utf8"));
+  } catch { /* nothing pre-existing is addressable either way */ }
+  preexistingIds = new Set(["page_id", "url_or_id", "module_id", "feature", "outcome_group_id"]
+    .map((key) => preexisting[key]).filter((value) => value != null && value !== "").map((value) => String(value)));
+  const disposables = await makeDisposables(mark, { read, change, log, preexistingIds });
   cleanup = disposables.cleanup;
   // Only the course this sweep is bound to and the objects this sweep made. An
   // id read from the course itself is never addressed by a change here, so no
@@ -357,17 +321,7 @@ try {
   // no account, and nothing the course already held.
   // The signed-in person is the person every route that names one addresses
   // here. A route that names anyone else is refused before it is filled.
-  const addressable = { course_id: COURSE, user_id: "self", ...disposables.made };
-  // Objects the course already holds, read from Canvas by the seed harvest. A
-  // change that alters one of them is proven against a real record, which is
-  // what this course exists for. A change that removes one is not: a removal is
-  // only ever attempted against an object this sweep made itself, so the course
-  // keeps everything it held before.
-  let existing = {};
-  try {
-    existing = JSON.parse(readFileSync(new URL("seed-pool.json", import.meta.url), "utf8"));
-  } catch { /* the sweep still runs on what it makes itself */ }
-  const alterable = { ...existing, ...addressable };
+  const addressable = addressPoolForWrite({ course_id: COURSE, user_id: "self", ...disposables.made });
   // A change that removes an object runs after every change that needs it. In
   // name order alone the sweep deleted its own page, topic and assignment first
   // and then addressed them, and Morrow rightly withheld approval for a change
@@ -387,10 +341,8 @@ try {
     const excluded = exclusion(operation);
     if (excluded) { record(operation.toolName, { state: "excluded", reason: excluded, path: operation.path }); continue; }
 
-    // The object a route names by `id` is this sweep's own object of that family.
-    // A removal addresses only what this sweep made; anything else may also
-    // address what the course already holds.
-    const own = { ...(removes(operation) ? addressable : alterable) };
+    // Create, update, and delete name only an id this run created.
+    const own = { ...addressable };
     // A submission belongs to the person who made it, and the signed-in teacher
     // made none. Morrow names a person in this course by the learner token it
     // gives across its privacy boundary, never by a raw Canvas id, so that token
@@ -411,6 +363,15 @@ try {
     const filled = fillArguments(operation, own, exactArguments(operation, own, mark));
     if (filled.missing) {
       record(operation.toolName, { state: "unreachable", missing: filled.missing, path: operation.path });
+      continue;
+    }
+    const leaked = preexistingTarget(filled.args, preexisting, addressable);
+    if (leaked) {
+      record(operation.toolName, {
+        state: "unreachable",
+        reason: `This sweep does not change the pre-existing ${leaked.key} ${leaked.id}.`,
+        path: operation.path,
+      });
       continue;
     }
     const entry = await change(`sweep.${operation.toolName}`, operation.toolName, filled.args);
@@ -459,7 +420,7 @@ try {
   // Nothing this run made is left in the sandbox. Each removal is recorded, so the ledger says
   // the course was returned to what it held before.
   if (cleanup.length) {
-    const removed = await removeDisposables(cleanup, { change, log }).catch((error) => ({ error: String(error).slice(0, 200) }));
+    const removed = await removeDisposables(cleanup, { change, log, preexistingIds }).catch((error) => ({ error: String(error).slice(0, 200) }));
     const leftBehind = removed?.leftBehind ?? [];
     recordRow(ledger, `cleanup:${mark}`, {
       phase: 1, kind: "cleanup",

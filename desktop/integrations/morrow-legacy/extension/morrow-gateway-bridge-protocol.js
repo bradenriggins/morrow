@@ -6,7 +6,7 @@ export const BRIDGE_MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 export const BRIDGE_RECONNECT_MIN_MS = 1000;
 export const BRIDGE_RECONNECT_MAX_MS = 30000;
 export const BRIDGE_KEEPALIVE_MS = 20000;
-export const LEGACY_BRIDGE_OVERLAY_DIGEST = 'c08c88dee4a3f526109b03a1f88341beb6277d7b41dcd57d47f8972dd0a6bf15';
+export const LEGACY_BRIDGE_OVERLAY_DIGEST = '5415922fc91242d552f6a4374d9df67a89aa007a40a4b11ed2c8f902cba98621';
 
 export const BRIDGE_SCHEMA = Object.freeze({
   authenticate: 'morrow.bridge.authenticate.v1',

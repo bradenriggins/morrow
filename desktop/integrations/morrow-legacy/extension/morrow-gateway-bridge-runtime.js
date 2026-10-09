@@ -28,7 +28,7 @@ import {
   bridgeError,
 } from './morrow-gateway-bridge-protocol.js';
 
-export const LEGACY_BRIDGE_OVERLAY_DIGEST = 'c08c88dee4a3f526109b03a1f88341beb6277d7b41dcd57d47f8972dd0a6bf15';
+export const LEGACY_BRIDGE_OVERLAY_DIGEST = '5415922fc91242d552f6a4374d9df67a89aa007a40a4b11ed2c8f902cba98621';
 
 const TOOL_BY_NAME = new Map(
   [...TOOL_DEFINITIONS, ...ADMIN_TOOL_DEFINITIONS]
@@ -100,6 +100,9 @@ async function invokeRead(command, signal) {
   if (toolName !== 'morrow_legacy_private_roster') admittedCapability(toolName, false);
   const input = exactCommandInput(command);
   const binding = resolveMorrowBridgeBinding(String(command.sourceBindingId || '').trim(), input);
+  // One connected course must not read a different course. stage_write already
+  // rejects this mismatch; a read does the same before any Canvas request.
+  resolveMorrowBridgeCourseId(input, binding);
   const built = await buildMorrowBridgeCommandRuntime(binding);
   const runtime = runtimeWithCommandSignal(built.runtime, signal);
   throwIfAborted(signal);
