@@ -4,6 +4,7 @@
 import { connect, SANDBOX } from "./connect.mjs";
 import { makeTools } from "./lib/tools.mjs";
 import { loadLedger, recordRow } from "./ledger.mjs";
+import { listRead } from "./lib/proof-rules.mjs";
 
 const COURSE = SANDBOX.courseId;
 // This harness's own marks only. Another lane's fixtures (MORROW_QA_, MORROW_TEST_) are not
@@ -52,7 +53,12 @@ const found = async () => {
   const left = [];
   for (const place of PLACES) {
     const answer = await read(place.list[0], place.list[1]);
-    const rows = Array.isArray(answer.data) ? answer.data : [];
+    const listed = listRead(answer);
+    if (!listed.ok) {
+      left.push({ place: place.key, id: null, name: null, unreadable: true, removable: false, remove: null });
+      continue;
+    }
+    const rows = listed.rows;
     for (const row of rows) {
       if (!MARK.test(String(place.name(row) ?? ""))) continue;
       const identifier = String(row.url ?? row.id ?? "");
@@ -81,10 +87,14 @@ try {
   }
   // Read the course again. What it still holds is what this harness really left.
   const after = await found();
-  const stillRemovable = after.filter((entry) => entry.removable !== false);
+  const stillRemovable = after.filter((entry) => entry.removable !== false && entry.unreadable !== true);
+  const unreadable = after.filter((entry) => entry.unreadable === true);
   recordRow(ledger, "cleanup:verified-against-canvas", {
-    phase: 1, kind: "cleanup", verdict: stillRemovable.length === 0 ? "PASS" : "FAIL",
-    ...(stillRemovable.length ? { reason: `${stillRemovable.length} object(s) this harness made remain: ${stillRemovable.map((row) => `${row.place}:${row.name}`).join(", ")}.` } : {}),
+    phase: 1, kind: "cleanup", verdict: stillRemovable.length === 0 && unreadable.length === 0 ? "PASS" : "FAIL",
+    ...((unreadable.length || stillRemovable.length) ? { reason: [
+      unreadable.length ? `${unreadable.length} collection(s) did not answer, so absence is not proven: ${unreadable.map((row) => row.place).join(", ")}.` : "",
+      stillRemovable.length ? `${stillRemovable.length} object(s) this harness made remain: ${stillRemovable.map((row) => `${row.place}:${row.name}`).join(", ")}.` : "",
+    ].filter(Boolean).join(" ") } : {}),
     ...(after.length > stillRemovable.length
       ? { carriesAMarkedTitleButWasNotMadeHere: after.filter((row) => row.removable === false).map((row) => ({ place: row.place, id: row.id, title: row.name })) }
       : {}),

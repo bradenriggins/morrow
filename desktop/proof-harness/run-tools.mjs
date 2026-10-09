@@ -7,6 +7,7 @@ import { makeTools } from "./lib/tools.mjs";
 import { loadLedger, recordRow, summarize } from "./ledger.mjs";
 import { extraRunners } from "./lib/tool-runners-extra.mjs";
 import { fixtureRunners } from "./lib/tool-runners-fixtures.mjs";
+import { absenceOf, listRead, rowByIdentity } from "./lib/proof-rules.mjs";
 
 const COURSE = SANDBOX.courseId;
 const mark = `${SANDBOX.mark}T${String(Math.floor(Date.now() / 1000))}`;
@@ -54,7 +55,9 @@ const RUNNERS = {
   }, 900_000) }),
   morrow_check_new_quiz: async () => {
     const quizzes = await read("canvas_list_new_quizzes", { course_id: COURSE });
-    const first = (Array.isArray(quizzes.data) ? quizzes.data : [])[0];
+    const quizRows = listRead(quizzes);
+    if (!quizRows.ok) return { ok: false, detail: { readFailed: true } };
+    const first = quizRows.rows[0];
     if (!first) return { blocked: "The sandbox course holds no New Quiz to check." };
     return { answer: await callTool("morrow_check_new_quiz", { source_binding_id: SOURCE_BINDING, course_id: COURSE, quiz_id: String(first.id) }, 600_000) };
   },
@@ -66,7 +69,9 @@ const RUNNERS = {
     state.operationId = made.operationId ?? null;
     state.pageUrl = null;
     const pages = await read("canvas_list_pages_courses", { course_id: COURSE, search_term: `${mark} lifecycle` });
-    const saved = (Array.isArray(pages.data) ? pages.data : [])[0];
+    const listed = listRead(pages);
+    const saved = listed.ok ? rowByIdentity(listed.rows, { title: `${mark} lifecycle` }) : null;
+    if (!listed.ok) return { ok: false, detail: { outcome: made.outcome, operationId: state.operationId, readFailed: true } };
     if (saved) state.pageUrl = String(saved.url);
     return { ok: made.outcome === "verified", detail: { outcome: made.outcome, operationId: state.operationId, savedInCanvas: Boolean(saved) } };
   },
@@ -93,11 +98,12 @@ const RUNNERS = {
       correction_arguments: { course_id: COURSE, url_or_id: state.pageUrl, _morrow: { source_binding_id: SOURCE_BINDING } },
     }, 600_000);
     const pages = await read("canvas_list_pages_courses", { course_id: COURSE, search_term: `${mark} lifecycle` });
-    const still = (Array.isArray(pages.data) ? pages.data : []).length;
+    const restored = absenceOf(pages, { id: state.pageUrl, title: `${mark} lifecycle` });
+    const still = restored.failed ? null : (restored.gone ? 0 : 1);
     if (answered(answer) && still === 0) state.pageUrl = null;
     const problem = answer?.structuredContent?.data?.code ?? null;
     return {
-      ok: answered(answer) && still === 0,
+      ok: answered(answer) && still === 0 && restored.failed === false,
       answer,
       detail: { pagesStillNamedThat: still, statesTheCorrection: true, problem,
         note: problem ? "Morrow refused to build the correction for a change it had verified." : undefined },

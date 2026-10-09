@@ -7,7 +7,7 @@ import { getCanvasSession } from './providers/canvas/session-registry.js';
 import { classifyOperationResult } from './chat-task-manager/helpers.js';
 import { bridgeError, getMorrowGatewayBridgeConfig } from './morrow-gateway-bridge-protocol.js';
 
-export const LEGACY_BRIDGE_OVERLAY_DIGEST = 'c08c88dee4a3f526109b03a1f88341beb6277d7b41dcd57d47f8972dd0a6bf15';
+export const LEGACY_BRIDGE_OVERLAY_DIGEST = '5415922fc91242d552f6a4374d9df67a89aa007a40a4b11ed2c8f902cba98621';
 
 export function normalizeMorrowBridgeExactId(value) {
   const text = String(value ?? '').trim();

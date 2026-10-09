@@ -1,10 +1,9 @@
 // Objects this sweep makes for itself, so a write is proved against something the
 // sweep created and never against content the course already held. Each one is
 // stamped with the sweep's mark, and the sweep removes every one it made.
-import { SANDBOX } from "../connect.mjs";
-import { OPERATIONS } from "./catalog.mjs";
+import { deletionAllowed } from "./proof-rules.mjs";
 
-const COURSE = SANDBOX.courseId;
+const COURSE = process.env.MORROW_PROOF_COURSE || "89585";
 
 export function disposablePlan(mark) {
   return [
@@ -93,12 +92,6 @@ export function disposablePlan(mark) {
       args: { course_id: COURSE, name: `${mark} tool`, privacy_level: "anonymous", consumer_key: "morrow-sweep-key", shared_secret: "morrow-sweep-secret", url: "https://example.edu/morrow-sweep-lti" },
       list: { tool: "canvas_list_external_tools_courses", args: { course_id: COURSE } }, match: (row) => String(row.name || "").includes(mark), id: (row) => String(row.id),
       remove: { tool: "canvas_delete_external_tool_courses", args: (id) => ({ course_id: COURSE, external_tool_id: id }) } },
-    // Canvas names a course feature by a word, not a number, and the course
-    // already has its own list of them.
-    { key: "feature", tool: null,
-      readOnlySeed: { tool: "canvas_list_features_courses", args: { course_id: COURSE } }, match: (row) => Boolean(row && row.feature), id: (row) => String(row.feature) },
-    { key: "outcome_group_id", tool: null,
-      readOnlySeed: { tool: "canvas_get_all_outcome_groups_for_context_courses", args: { course_id: COURSE } }, match: () => true, id: (row) => String(row.id) },
     { key: "grading_standard_id", tool: "canvas_create_new_grading_standard_courses",
       args: { course_id: COURSE, title: `${mark} standard`, grading_scheme_entry_name: ["A", "F"], grading_scheme_entry_value: [90, 0] },
       list: { tool: "canvas_list_grading_standards_available_in_context_courses", args: { course_id: COURSE } }, match: (row) => String(row.title || "").includes(mark), id: (row) => String(row.id),
@@ -107,7 +100,7 @@ export function disposablePlan(mark) {
 }
 
 /** Creates one of each disposable and returns the ids the sweep may address. */
-export async function makeDisposables(mark, { read, change, log }) {
+export async function makeDisposables(mark, { read, change, log, preexistingIds } = {}) {
   const made = {};
   const cleanup = [];
   const plan = disposablePlan(mark);
@@ -117,13 +110,10 @@ export async function makeDisposables(mark, { read, change, log }) {
       if (log) await log(`disposable ${entry.key}: skipped, needs ${(entry.needs || []).join(" ")}`);
       continue;
     }
-    // Some kinds are not made: the course already has one, and this sweep only
-    // needs its id to address it. Nothing is created and nothing is removed.
+    // A course's existing feature flag, outcome group, page, or module is never
+    // copied into the set this run may change.
     if (entry.readOnlySeed) {
-      const listed = await read(entry.readOnlySeed.tool, entry.readOnlySeed.args);
-      const found = (Array.isArray(listed.data) ? listed.data : []).find(entry.match);
-      if (found) made[`${entry.context ? `${entry.context}:` : ""}${entry.key}`] = entry.id(found);
-      else if (log) await log(`disposable ${entry.key}: the course has none to address`);
+      if (log) await log(`disposable ${entry.key}: not copied from the course`);
       continue;
     }
     const created = await change(`disposable.${entry.key}`, entry.tool, entry.argsFrom ? entry.argsFrom(made) : entry.args);
@@ -138,6 +128,10 @@ export async function makeDisposables(mark, { read, change, log }) {
     // is named without searching a listing the course has filled for years.
     if (entry.idFromArgs) {
       const id = entry.idFromArgs(made);
+      if (!deletionAllowed(id, preexistingIds)) {
+        if (log) await log(`disposable ${entry.key}: ${id} already existed, so this run will not adopt it`);
+        continue;
+      }
       const scope = entry.context ? `${entry.context}:` : "";
       made[`${scope}${entry.key}`] = id;
       if (entry.alsoKey) made[`${scope}${entry.alsoKey}`] = id;
@@ -148,7 +142,8 @@ export async function makeDisposables(mark, { read, change, log }) {
     // The course already holds years of content, so the object this sweep just
     // made can be past the end of its listing. A listing that can be searched is
     // asked for this sweep's own mark instead of being read page by page.
-    const searchable = OPERATIONS.find((candidate) => candidate.toolName === listing.tool)
+    const operations = (await import("./catalog.mjs")).OPERATIONS;
+    const searchable = operations.find((candidate) => candidate.toolName === listing.tool)
       ?.parameters?.some((parameter) => parameter.inputName === "search_term");
     const listed = await read(listing.tool, {
       ...listing.args,
@@ -159,6 +154,10 @@ export async function makeDisposables(mark, { read, change, log }) {
     const row = rowsValue.find(entry.match);
     if (!row) { if (log) await log(`disposable ${entry.key}: created but not found in its listing`); continue; }
     const id = entry.id(row);
+    if (!deletionAllowed(id, preexistingIds)) {
+      if (log) await log(`disposable ${entry.key}: ${id} already existed, so this run will not adopt it`);
+      continue;
+    }
     const scope = entry.context ? `${entry.context}:` : "";
     made[`${scope}${entry.key}`] = id;
     if (entry.alsoKey) made[`${scope}${entry.alsoKey}`] = id;
@@ -169,10 +168,15 @@ export async function makeDisposables(mark, { read, change, log }) {
 }
 
 /** Removes every object this sweep made, through Morrow. */
-export async function removeDisposables(cleanup, { change, log }) {
+export async function removeDisposables(cleanup, { change, log, preexistingIds } = {}) {
   // Each removal is reported, so a run can state what it left behind instead of assuming none.
   const removedEach = [];
   for (const entry of [...cleanup].reverse()) {
+    if (!deletionAllowed(entry.id, preexistingIds)) {
+      removedEach.push({ key: entry.key, id: entry.id, outcome: "refused_preexisting" });
+      if (log) await log(`disposable remove ${entry.key}: refused, ${entry.id} was not created by this run`);
+      continue;
+    }
     const removed = await change(`disposable.remove.${entry.key}`, entry.remove.tool, entry.remove.args(entry.id, entry.made || {}));
     removedEach.push({ key: entry.key, id: entry.id, outcome: removed.outcome });
     if (log && removed.outcome !== "verified") await log(`disposable remove ${entry.key}: ${removed.outcome}`);

@@ -1,5 +1,7 @@
 // The controls the first pass had no exercise for: batches, the planners, and the rest. Each is
 // given something this run made, so nothing the course already held is altered.
+import { absenceOf, listRead, rowByIdentity } from "./proof-rules.mjs";
+
 export function extraRunners({ COURSE, SOURCE_BINDING, mark, state, callTool, read, change, plan }) {
   const answered = (value) => Boolean(value) && value.isError !== true
     && (value.structuredContent !== undefined || (value.content ?? []).length > 0);
@@ -11,7 +13,8 @@ export function extraRunners({ COURSE, SOURCE_BINDING, mark, state, callTool, re
     const made = await plan("tools.quiz.create", "morrow_plan_new_quiz_create", { course_id: COURSE, quiz: { title } });
     if (made.outcome !== "verified") return null;
     const quizzes = await read("canvas_list_new_quizzes", { course_id: COURSE });
-    const saved = (Array.isArray(quizzes.data) ? quizzes.data : []).find((row) => String(row.title) === title);
+    const quizRows = listRead(quizzes);
+    const saved = quizRows.ok ? rowByIdentity(quizRows.rows, { title }) : null;
     state.quizId = saved ? String(saved.id) : null;
     return state.quizId;
   };
@@ -149,8 +152,10 @@ export function extraRunners({ COURSE, SOURCE_BINDING, mark, state, callTool, re
     morrow_plan_new_quiz_assignment_group_order: async () => {
       const quizId = await proofQuiz();
       const groups = await read("canvas_list_assignment_groups", { course_id: COURSE });
-      const group = (Array.isArray(groups.data) ? groups.data : [])[0];
-      if (!quizId || !group) return { blocked: "This run has no quiz, or the course holds no assignment group." };
+      const groupRows = listRead(groups);
+      if (!groupRows.ok) return { blocked: "The assignment group list did not answer, so this run will not change one." };
+      const group = groupRows.rows.find((row) => String(row.name || "").includes(mark));
+      if (!quizId || !group) return { blocked: "This run has not created an assignment group, so it will not reorder one the course already holds." };
       const made = await plan("tools.quiz.group.order", "morrow_plan_new_quiz_assignment_group_order", {
         course_id: COURSE, quiz_id: quizId, assignment_group_id: String(group.id), position: 1,
       });
@@ -174,8 +179,10 @@ export function extraRunners({ COURSE, SOURCE_BINDING, mark, state, callTool, re
     morrow_plan_new_quiz_module_placement: async () => {
       const quizId = await proofQuiz();
       const modules = await read("canvas_list_modules", { course_id: COURSE });
-      const module = (Array.isArray(modules.data) ? modules.data : [])[0];
-      if (!quizId || !module) return { blocked: "This run has no quiz, or the course holds no module to place it in." };
+      const moduleRows = listRead(modules);
+      if (!moduleRows.ok) return { blocked: "The module list did not answer, so this run will not change a module." };
+      const module = moduleRows.rows.find((row) => String(row.name || "").includes(mark));
+      if (!quizId || !module) return { blocked: "This run has not created a module, so it will not place a quiz in a module the course already holds." };
       const made = await plan("tools.quiz.placement", "morrow_plan_new_quiz_module_placement", {
         course_id: COURSE, quiz_id: quizId, module_id: String(module.id), position: 1,
       });
@@ -189,8 +196,9 @@ export function extraRunners({ COURSE, SOURCE_BINDING, mark, state, callTool, re
       if (made.outcome === "verified") state.quizId = null;
       // Canvas is asked whether the quiz is gone.
       const quizzes = await read("canvas_list_new_quizzes", { course_id: COURSE });
-      const still = (Array.isArray(quizzes.data) ? quizzes.data : []).some((row) => String(row.id) === quizId);
-      return { ok: made.outcome === "verified" && !still, detail: { outcome: made.outcome, stillInCanvas: still } };
+      const gone = absenceOf(quizzes, { id: quizId });
+      if (gone.failed) return { ok: false, detail: { outcome: made.outcome, stillInCanvas: null, readFailed: true } };
+      return { ok: made.outcome === "verified" && gone.gone, detail: { outcome: made.outcome, stillInCanvas: !gone.gone } };
     },
   };
 }

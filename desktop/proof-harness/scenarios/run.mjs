@@ -2,7 +2,9 @@
 // shows the result. Every object a scenario makes is removed before it reports.
 import { connect, SANDBOX } from "../connect.mjs";
 import { makeTools } from "../lib/tools.mjs";
+import { absenceOf } from "../lib/proof-rules.mjs";
 import { loadLedger, recordRow, summarize } from "../ledger.mjs";
+import { runCompareScenario, runPrivacyScenario, runQuizScenario, runUndoScenario } from "./cases.mjs";
 
 const COURSE = SANDBOX.courseId;
 const mark = `${SANDBOX.mark}S${String(Math.floor(Date.now() / 1000))}`;
@@ -11,19 +13,6 @@ const only = (process.env.PROOF_SCENARIO || "").split(",").map((name) => name.tr
 const ledger = loadLedger();
 const { client, close } = await connect("morrow-proof-scenarios");
 const { log, read, change, plan, callTool } = makeTools(client, new URL("../run-scenarios.log", import.meta.url));
-
-/** A learner identity that reached a result untokenized fails the scenario that read it. */
-const RAW_IDENTITY = /"(?:user_id|sis_user_id|login_id|integration_id|email|primary_email|short_name|sortable_name)"\s*:/;
-const EMAIL = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
-function privacyFindings(value) {
-  const text = JSON.stringify(value ?? null);
-  const findings = [];
-  if (RAW_IDENTITY.test(text)) findings.push("a raw learner identity field reached the result");
-  if (EMAIL.test(text)) findings.push("an email address reached the result");
-  return findings;
-}
-/** How many rows name a person by the token Morrow addresses them with. */
-const tokenized = (rows) => rows.filter((row) => typeof row?.learnerToken === "string" && row.learnerToken !== "").length;
 
 const scenarios = [];
 const scenario = (definition) => scenarios.push(definition);
@@ -90,11 +79,14 @@ scenario({
     // The same readback the scenario above trusts, asked about a page that was never created.
     const wanted = `${mark} Page That Was Never Made`;
     const pages = await read("canvas_list_pages_courses", { course_id: COURSE, search_term: wanted });
-    const absent = (Array.isArray(pages.data) ? pages.data : []).some((row) => String(row.title) === wanted);
+    const check = absenceOf(pages, { title: wanted });
+    if (check.failed) {
+      return { verdict: "FAIL", reason: "The page list did not answer, so absence is not proven.", readback: { source: "canvas", readFailed: true } };
+    }
     return {
-      verdict: absent ? "FAIL" : "PASS",
-      reason: absent ? "The readback claimed a page exists that was never created." : undefined,
-      readback: { source: "canvas", foundPageThatWasNeverMade: absent },
+      verdict: check.gone ? "PASS" : "FAIL",
+      reason: check.gone ? undefined : "The readback claimed a page exists that was never created.",
+      readback: { source: "canvas", foundPageThatWasNeverMade: !check.gone },
     };
   },
 });
@@ -103,20 +95,7 @@ scenario({
   id: "new-quiz-authoring-chain",
   intent: "Build me a quiz on cell structure, add a question, set a time limit, and check it.",
   async run(context) {
-    const title = `${mark} Cell Structure`;
-    const made = await plan("scenario.quiz.create", "morrow_plan_new_quiz_create", { course_id: COURSE, quiz: { title } });
-    if (made.outcome !== "verified") {
-      return { verdict: made.outcome === "approval_withheld" ? "BLOCKED" : "FAIL",
-        reason: `Morrow did not complete the quiz creation: ${made.outcome}.`, detail: made.approvalSentence };
-    }
-    const quizzes = await read("canvas_list_new_quizzes", { course_id: COURSE });
-    const saved = (Array.isArray(quizzes.data) ? quizzes.data : []).find((row) => String(row.title) === title);
-    if (!saved) return { verdict: "FAIL", reason: "Canvas does not list the quiz Morrow reported as saved." };
-    return {
-      verdict: "PASS",
-      readback: { source: "canvas", quiz: String(saved.id), title: String(saved.title) },
-      cleanupTarget: { tool: "canvas_delete_assignment", args: { course_id: COURSE, id: String(saved.id) } },
-    };
+    return runQuizScenario({ plan, read, courseId: COURSE, mark: context.mark });
   },
 });
 
@@ -125,31 +104,7 @@ scenario({
   intent: "Create a study guide for each student below 75% on last week's quiz, based on what they missed. Show me the drafts and the reasoning.",
   privacy: true,
   async run() {
-    const assignments = await read("canvas_list_assignments_assignments", { course_id: COURSE });
-    const first = (Array.isArray(assignments.data) ? assignments.data : [])[0];
-    if (!first) return { verdict: "BLOCKED", reason: "The sandbox course holds no assignment to read scores from." };
-    const submissions = await read("canvas_list_assignment_submissions_courses", { course_id: COURSE, assignment_id: String(first.id) });
-    const findings = [...privacyFindings(submissions.data), ...privacyFindings(assignments.data)];
-    if (findings.length) return { verdict: "FAIL", reason: findings.join("; ") };
-    const rows = Array.isArray(submissions.data) ? submissions.data : [];
-    if (!submissions.ok) return { verdict: "BLOCKED", reason: `Canvas did not answer the submission read: ${submissions.code ?? "unknown"}.`, privacy: { tokenized: true } };
-    if (rows.length === 0) {
-      return { verdict: "BLOCKED", reason: "No learner has attempted an assignment in the sandbox course, so there is no score to personalize from.",
-        privacy: { tokenized: true, checkedPaths: ["canvas_list_assignments_assignments", "canvas_list_assignment_submissions_courses"] } };
-    }
-    // Positive evidence: the submissions name their learners, and they name them by token.
-    const named = tokenized(rows);
-    if (named === 0) {
-      return { verdict: "FAIL",
-        reason: "The submissions carry no learner token, so this scenario proved nothing about the privacy boundary.",
-        readback: { source: "canvas", submissions: rows.length, tokenizedIdentities: 0 } };
-    }
-    return {
-      verdict: "PASS",
-      readback: { source: "canvas", submissions: rows.length, tokenizedIdentities: named,
-        rawIdentityFieldsFound: 0, evidence: "every learner in this chain is named by a Morrow learner token" },
-      privacy: { tokenized: true, checkedPaths: ["canvas_list_assignments_assignments", "canvas_list_assignment_submissions_courses"] },
-    };
+    return runPrivacyScenario({ read, courseId: COURSE });
   },
 });
 
@@ -157,29 +112,15 @@ scenario({
   id: "undo-after-partial-failure",
   intent: "That last change went wrong. Put it back.",
   async run(context) {
-    const listed = await callTool("morrow_operation_list", { course_id: COURSE });
-    const operations = listed?.structuredContent?.operations ?? listed?.structuredContent?.data?.operations ?? [];
-    return {
-      verdict: Array.isArray(operations) ? "PASS" : "FAIL",
-      readback: { source: "morrow-journal", operationsListed: Array.isArray(operations) ? operations.length : 0 },
-      note: "The journal answers; undo of a specific operation is proven in the write phase against an operation this harness made.",
-    };
+    return runUndoScenario({ change, read, callTool, courseId: COURSE, mark: context.mark, binding: context.binding });
   },
 });
 
 scenario({
   id: "cross-course-compare",
   intent: "Compare this course with my other section and tell me what is missing.",
-  async run(context) {
-    const listed = await read("canvas_list_your_courses", {});
-    const rows = Array.isArray(listed.data) ? listed.data : [];
-    const visible = Array.isArray(rows) ? rows.length : 0;
-    if (visible < 2) {
-      return { verdict: "BLOCKED",
-        reason: `This connection sees ${visible} course, so there is no second course to compare against.`,
-        readback: { source: "canvas", coursesVisible: visible } };
-    }
-    return { verdict: "PASS", readback: { source: "canvas", coursesVisible: visible } };
+  async run() {
+    return runCompareScenario({ read, courseId: COURSE });
   },
 });
 

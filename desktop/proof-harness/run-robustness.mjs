@@ -4,6 +4,7 @@
 import { connect, SANDBOX, SOURCE_BINDING } from "./connect.mjs";
 import { makeTools } from "./lib/tools.mjs";
 import { loadLedger, recordRow, summarize } from "./ledger.mjs";
+import { judgeStaleSnapshot } from "./lib/proof-rules.mjs";
 
 const COURSE = SANDBOX.courseId;
 const mark = `${SANDBOX.mark}R${String(Math.floor(Date.now() / 1000))}`;
@@ -39,9 +40,8 @@ check("stale-snapshot-is-refused", "A change pinned to a snapshot that no longer
     arguments: { course_id: COURSE, bank_id: "1", title: `${mark} never`,
       expected_snapshot: { bank_sha256: "0".repeat(64) }, _morrow: { source_binding_id: SOURCE_BINDING } },
   });
-  const held = answer?.structuredContent ?? {};
-  const refused = answer?.isError === true || String(held.status ?? "") !== "verified";
-  return { verdict: refused ? "PASS" : "FAIL", readback: { status: held.status ?? null, code: held.code ?? null } };
+  const judged = judgeStaleSnapshot(answer);
+  return { verdict: judged.verdict, ...(judged.verdict === "PASS" ? {} : { reason: "The change was not refused before dispatch with the stale-snapshot refusal." }), readback: judged.readback };
 });
 
 check("oversized-result-is-paged-not-truncated", "A large read answers through a result handle rather than a cut-off body", async () => {
