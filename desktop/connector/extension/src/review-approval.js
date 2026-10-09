@@ -91,18 +91,21 @@ export function reviewPagePath(url, presence) {
 }
 
 /**
- * Signs one approval, or one close-out of a change Morrow could not settle, for the content
- * script in a review tab. Refuses a sender that is not this extension's own content script in the
- * top frame of a review page at the presence origin, and a path that is not that same page's
- * approve form or, on a single change's page, its close form.
+ * Signs one approval, one cancel, or one close-out of a change Morrow could not settle, for the
+ * content script in a review tab. Also signs the open of that same page, nonce "open", so the
+ * review server can return the page. Refuses a sender that is not this extension's own content
+ * script in the top frame of a review page at the presence origin.
  */
 export async function signReviewApproval(message, sender, presence, extensionId) {
   if (!presence) return { ok: false, code: "review_approval_key_missing" };
   const pagePath = contentScriptReviewPath(sender, presence, extensionId);
   if (!pagePath) return { ok: false, code: "review_approval_sender_refused" };
-  const signable = message?.approvePath === `${pagePath}/approve`
+  const opening = message?.approvePath === pagePath && message?.nonce === "open";
+  const signable = opening
+    || message?.approvePath === `${pagePath}/approve`
+    || message?.approvePath === `${pagePath}/cancel`
     || (pagePath.startsWith("/operations/") && message?.approvePath === `${pagePath}/close`);
-  if (!signable || typeof message.nonce !== "string" || !NONCE.test(message.nonce)) {
+  if (!signable || typeof message.nonce !== "string" || (!opening && !NONCE.test(message.nonce))) {
     return { ok: false, code: "review_approval_request_invalid" };
   }
   return { ok: true, presence: await reviewApprovalProof(presence.key, message.approvePath, message.nonce) };

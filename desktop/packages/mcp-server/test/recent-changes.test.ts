@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonObject } from "@morrow/contracts";
 import { LoopbackApprovalServer, type ApprovalOperationController } from "../src/approval-server.js";
+import { reviewDocumentHeaders } from "./fixtures/review-approval.js";
 
 /**
  * A controller whose `operationReviewContext` throws if it is ever called. `/recent` names an
@@ -190,7 +191,8 @@ describe("GET /recent", () => {
     const server = new LoopbackApprovalServer(controller);
     try {
       const baseUrl = await server.start();
-      const resultPage = await (await fetch(`${baseUrl}/operations/${encodeURIComponent("op:recent-1234")}`)).text();
+      const resultUrl = `${baseUrl}/operations/${encodeURIComponent("op:recent-1234")}`;
+      const resultPage = await (await fetch(resultUrl, { headers: reviewDocumentHeaders(server, resultUrl) })).text();
       const match = resultPage.match(/<a href="\/recent\?entry=([A-Za-z0-9_-]+)">See recent changes<\/a>/);
       expect(match).toBeTruthy();
       const exchanged = await fetch(`${baseUrl}/recent?entry=${encodeURIComponent(match![1])}`, { redirect: "manual" });
@@ -225,8 +227,8 @@ describe("one-time /recent codes", () => {
       for (const id of ids) {
         const path = `${baseUrl}/operations/${encodeURIComponent(id)}`;
         for (let load = 0; load < 3; load += 1) {
-          await (await fetch(path)).text();
-          await (await fetch(`${path}/status`)).json();
+          await (await fetch(path, { headers: reviewDocumentHeaders(server, path) })).text();
+          await (await fetch(`${path}/status`, { headers: reviewDocumentHeaders(server, `${path}/status`) })).json();
         }
       }
       const opened = await fetch(`${baseUrl}/recent?entry=${encodeURIComponent(code)}`, { redirect: "manual" });
@@ -241,16 +243,16 @@ describe("one-time /recent codes", () => {
     try {
       const baseUrl = await server.start();
       const path = `${baseUrl}/operations/${encodeURIComponent("op:recent-1234")}`;
-      const first = linkIn(await (await fetch(path)).text());
-      const reloaded = linkIn(await (await fetch(path)).text());
-      const polled = linkIn(String(((await (await fetch(`${path}/status`)).json()) as JsonObject).html));
+      const first = linkIn(await (await fetch(path, { headers: reviewDocumentHeaders(server, path) })).text());
+      const reloaded = linkIn(await (await fetch(path, { headers: reviewDocumentHeaders(server, path) })).text());
+      const polled = linkIn(String(((await (await fetch(`${path}/status`, { headers: reviewDocumentHeaders(server, `${path}/status`) })).json()) as JsonObject).html));
       expect(first).toBeTruthy();
       expect(reloaded).toBe(first);
       expect(polled).toBe(first);
 
       expect((await fetch(`${baseUrl}/recent?entry=${first}`, { redirect: "manual" })).status).toBe(303);
       expect((await fetch(`${baseUrl}/recent?entry=${first}`, { redirect: "manual" })).status).toBe(409);
-      const next = linkIn(await (await fetch(path)).text());
+      const next = linkIn(await (await fetch(path, { headers: reviewDocumentHeaders(server, path) })).text());
       expect(next).toBeTruthy();
       expect(next).not.toBe(first);
     } finally {
@@ -262,8 +264,10 @@ describe("one-time /recent codes", () => {
     const server = verifiedServer(["op:recent-1234", "op:recent-5678"]);
     try {
       const baseUrl = await server.start();
-      const one = linkIn(await (await fetch(`${baseUrl}/operations/${encodeURIComponent("op:recent-1234")}`)).text());
-      const two = linkIn(await (await fetch(`${baseUrl}/operations/${encodeURIComponent("op:recent-5678")}`)).text());
+      const oneUrl = `${baseUrl}/operations/${encodeURIComponent("op:recent-1234")}`;
+      const twoUrl = `${baseUrl}/operations/${encodeURIComponent("op:recent-5678")}`;
+      const one = linkIn(await (await fetch(oneUrl, { headers: reviewDocumentHeaders(server, oneUrl) })).text());
+      const two = linkIn(await (await fetch(twoUrl, { headers: reviewDocumentHeaders(server, twoUrl) })).text());
       expect(one).toBeTruthy();
       expect(two).toBeTruthy();
       expect(one).not.toBe(two);

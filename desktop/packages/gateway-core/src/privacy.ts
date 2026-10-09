@@ -1438,10 +1438,11 @@ const IDENTITY_CONTAINER_KEYS = new Map<string, IdentityRecordKind>([
 // spelling lets the next spelling through. The normalized set repeats the same
 // names without separators, because the regex boundaries cannot see the word
 // break in `apiKey` or `consumerKey`.
-const SECRET_FIELD = /(?:^|_)(?:authorization|bearer|token|csrf|cookie|secret|credential|jwt|password|api_key|consumer_key|private_key|signature)(?:$|_)/i;
+const SECRET_FIELD = /(?:^|_)(?:authorization|bearer|token|csrf|cookie|secret|credential|jwt|password|api_key|consumer_key|private_key|session_key|wstoken|signature)(?:$|_)/i;
 const SECRET_FIELD_NORMALIZED = new Set([
-  "authorization", "bearer", "accesstoken", "refreshtoken", "sessiontoken", "token", "csrf", "cookie",
-  "secret", "credential", "jwt", "password", "apikey", "consumerkey", "privatekey", "signature",
+  "authorization", "bearer", "accesstoken", "refreshtoken", "sessiontoken", "token", "csrf", "csrftoken", "cookie",
+  "secret", "clientsecret", "apisecret", "credential", "jwt", "password", "userpassword", "apikey", "consumerkey", "privatekey",
+  "sessionkey", "bearertoken", "wstoken", "signature",
   "privateattachment", "bytesbase64",
 ]);
 
@@ -1778,8 +1779,19 @@ function containsSensitiveText(value: string): boolean {
   // every course a random uuid, and one of them reading `99bncSRfVsDh...`
   // refused an entire account audit. `bearer` likewise needs a credential after
   // it, or the words "bearer of" in a course page would take the page with them.
-  return /(?:data:[^,;]{0,200};base64,|(?<![a-z0-9])bearer\s+[A-Za-z0-9._~+/-]{8,}|(?<![a-z0-9])cookie=|(?<![a-z0-9])csrf(?![a-z0-9])|(?<![a-z0-9])token=|<[^>]+(?:hidden|display\s*:\s*none))/i
+  return /(?:data:[^,;]{0,200};base64,|(?<![a-z0-9])bearer\s+[A-Za-z0-9._~+/-]{8,}|(?<![a-z0-9])cookie=|(?<![a-z0-9])csrf(?![a-z0-9])|(?<![a-z0-9])token=|wstoken=|sesskey=|verifier=|<[^>]+(?:hidden|display\s*:\s*none))/i
     .test(normalizedIdentityTextView(value).text);
+}
+
+/**
+ * Removes addresses and refuses credential text before a value that skipped the
+ * full output projection can leave. A Moodle webservice URL, a Canvas file
+ * verifier, or a session key is not course prose.
+ */
+export function scrubSensitiveCourseText(value: string): string {
+  const output = withoutUnrosteredAddresses(value);
+  if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
+  return output;
 }
 
 /**

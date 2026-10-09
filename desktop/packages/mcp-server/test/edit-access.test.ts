@@ -3,6 +3,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { JsonObject } from "@morrow/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { LoopbackApprovalServer, reviewApprovalProof, type ReviewApprovalPresence } from "../src/approval-server.js";
+import { reviewDocumentHeaders } from "./fixtures/review-approval.js";
 import { EditAccessReviews } from "../src/edit-access-review.js";
 import { registerOperationTools } from "../src/operation-tools.js";
 import { EditCategoryUnavailableError, type BrowserEditAccessPrepared, type BrowserEditAccessResult, type GatewayRuntime } from "../src/runtime.js";
@@ -122,6 +123,7 @@ async function owner(expiresAt: number | undefined = undefined, connectionNames:
     client,
     prepare,
     apply,
+    approval,
     baseUrl: () => baseUrl!,
     key: () => presence[0]!.key,
     async close() {
@@ -149,7 +151,8 @@ async function waitFor(test: Owner, editAccessId: string, maxWaitSeconds = 5): P
 
 /** What a person's browser does: open the review, then post its form. `presence` is the Bridge's part. */
 async function reviewForm(test: Owner, path: string): Promise<{ body: string; nonce: string; cookie: string }> {
-  const page = await fetch(`${test.baseUrl()}${path}`);
+  const pageUrl = `${test.baseUrl()}${path}`;
+  const page = await fetch(pageUrl, { headers: reviewDocumentHeaders(test.approval, pageUrl) });
   const body = await page.text();
   return {
     body,
@@ -351,7 +354,7 @@ describe("Edit asked for in a conversation", () => {
       const requested = await requestEdit(test);
       const path = new URL(String(requested.approvalUrl)).pathname;
       const { nonce, cookie } = await reviewForm(test, path);
-      expect((await post(test, path, "cancel", { nonce }, cookie)).status).toBe(303);
+      expect((await post(test, path, "cancel", { nonce, presence: reviewApprovalProof(test.key(), `${path}/cancel`, nonce) }, cookie)).status).toBe(303);
       expect(await waitFor(test, String(requested.editAccessId))).toMatchObject({ ok: false, state: "declined", outcome: "not_sent" });
       expect(test.apply).not.toHaveBeenCalled();
     } finally {

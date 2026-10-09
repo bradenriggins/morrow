@@ -1,4 +1,6 @@
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
+import { scrubSensitiveCourseText } from "@morrow/gateway-core";
+import { sanitizeCourseHtml } from "./approval-preview.js";
 
 export const MOODLE_LESSON_PAGE_LIST_OPERATION = "moodle.form.lesson.pages.read.v1";
 export const MOODLE_LESSON_PAGE_LIST_TOOL = "moodle_list_lesson_pages";
@@ -164,7 +166,16 @@ function exactText(value: unknown, maximum: number, error: string): string {
 function richText(value: unknown, error: string): string {
   if (typeof value !== "string" || value.length > MAX_RICH_TEXT || value.includes("\u0000")) invalid(error);
   if (EMBEDDED_FILE.test(value)) invalid(error);
-  return value;
+  const sanitized = sanitizeCourseHtml(value);
+  if (sanitized.length > MAX_RICH_TEXT) invalid(error);
+  return scrubSensitiveCourseText(sanitized);
+}
+
+function publishedTitle(value: unknown, error: string): string {
+  const title = exactText(value, MAX_TITLE, error);
+  const sanitized = sanitizeCourseHtml(title);
+  if (sanitized.length > MAX_TITLE || !sanitized) invalid(error);
+  return scrubSensitiveCourseText(sanitized);
 }
 
 function pageType(value: JsonObject, error: string): { id: number; name: string; kind: "question" | "content" | "structure" } {
@@ -208,7 +219,7 @@ function pageSummary(value: unknown, position: number, error: string): MoodleLes
   return {
     page_id: positiveId(value.page_id, error),
     position,
-    title: exactText(value.title, MAX_TITLE, error),
+    title: publishedTitle(value.title, error),
     page_type: type.name,
     page_type_id: type.id,
     page_kind: type.kind,
@@ -344,7 +355,7 @@ export function projectMoodleLessonPage(
     page_id: expected.pageId,
     position,
     page_count: pageCount,
-    title: exactText(value.title, MAX_TITLE, error),
+    title: publishedTitle(value.title, error),
     page_type: type.name,
     page_type_id: type.id,
     page_kind: type.kind,

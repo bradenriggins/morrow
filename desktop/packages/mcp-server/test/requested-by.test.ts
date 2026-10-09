@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { normalizeRequestedBy, type JsonObject } from "@morrow/contracts";
 import { ProviderEffectBroker } from "@morrow/operation-journal";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
+import { reviewDocumentHeaders } from "./fixtures/review-approval.js";
 import { registerBatchTools } from "../src/batch-tools.js";
 import { BatchWindowScheduler } from "../src/batch-window-scheduler.js";
 import type { MorrowRuntime } from "../src/morrow-runtime.js";
@@ -65,7 +66,8 @@ describe("requesting assistant identity", () => {
     });
     try {
       const url = await approval.start();
-      const page = await (await fetch(`${url}/operations/op%3Arequested-by-1234`)).text();
+      const pageUrl = `${url}/operations/op%3Arequested-by-1234`;
+      const page = await (await fetch(pageUrl, { headers: reviewDocumentHeaders(approval, pageUrl) })).text();
       expect(page).toContain("Asked for by Claude Code 2.1.0, working in biology-101.");
       expect(page).toContain("This is the name that assistant reported, not proof of identity.");
       expect(page).not.toContain(workspaceRoot);
@@ -99,7 +101,8 @@ describe("requesting assistant identity", () => {
     });
     try {
       const url = await approval.start();
-      const page = await (await fetch(`${url}/batches/bat%3Arequested-by-1234`)).text();
+      const pageUrl = `${url}/batches/bat%3Arequested-by-1234`;
+      const page = await (await fetch(pageUrl, { headers: reviewDocumentHeaders(approval, pageUrl) })).text();
       // An unstated version is left out rather than guessed at.
       expect(page).toContain("Asked for by Codex, working in biology-101.");
       expect(page).not.toContain("Codex unstated");

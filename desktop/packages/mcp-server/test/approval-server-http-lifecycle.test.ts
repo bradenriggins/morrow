@@ -1,7 +1,7 @@
 import { request, type ClientRequest } from "node:http";
 import { describe, expect, it } from "vitest";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
-import { bridgeSignedPresence } from "./fixtures/review-approval.js";
+import { bridgeSignedPresence, reviewDocumentHeaders } from "./fixtures/review-approval.js";
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
   let resolve!: () => void;
@@ -54,13 +54,13 @@ describe("approval HTTP shutdown", () => {
     try {
       const baseUrl = await approval.start();
       const reviewUrl = `${baseUrl}/operations/${encodeURIComponent(operationId)}`;
-      const review = await fetch(reviewUrl);
+      const review = await fetch(reviewUrl, { headers: reviewDocumentHeaders(approval, reviewUrl) });
       const html = await review.text();
       const cookie = review.headers.get("set-cookie")?.split(";", 1)[0];
       expect(cookie).toBeTruthy();
 
       holdReview = true;
-      const pendingReview = fetch(reviewUrl);
+      const pendingReview = fetch(reviewUrl, { headers: reviewDocumentHeaders(approval, reviewUrl) });
       await reviewStarted.promise;
       const loading = await pendingReview;
       expect(loading.status).toBe(200);
@@ -132,7 +132,7 @@ describe("approval HTTP streaming", () => {
     try {
       const baseUrl = await approval.start();
       const reviewUrl = `${baseUrl}/operations/${encodeURIComponent(operationId)}`;
-      const pending = fetch(reviewUrl);
+      const pending = fetch(reviewUrl, { headers: reviewDocumentHeaders(approval, reviewUrl) });
       await readStarted.promise;
       const page = await pending;
       expect(page.status).toBe(200);

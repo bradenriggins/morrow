@@ -62,7 +62,10 @@ test("signs the close form of the change's own page, and no other action", async
   const closePath = `${pagePath}/close`;
   assert.deepEqual(await signReviewApproval({ approvePath: closePath, nonce }, sender, presence, EXTENSION_ID),
     { ok: true, presence: serverProof(presence.key, closePath, nonce) });
-  for (const path of [`${pagePath}/cancel`, `${pagePath}/status`, "/operations/op%3Aother/close"]) {
+  const cancelPath = `${pagePath}/cancel`;
+  assert.deepEqual(await signReviewApproval({ approvePath: cancelPath, nonce }, sender, presence, EXTENSION_ID),
+    { ok: true, presence: serverProof(presence.key, cancelPath, nonce) });
+  for (const path of [`${pagePath}/status`, "/operations/op%3Aother/close", "/operations/op%3Aother/cancel"]) {
     assert.equal((await signReviewApproval({ approvePath: path, nonce }, sender, presence, EXTENSION_ID)).code, "review_approval_request_invalid", path);
   }
   const batchPage = "/batches/batch-1234";
@@ -131,6 +134,10 @@ function reviewTab(response, sendImpl = null) {
   container.append(form);
   const cancel = new HTMLFormElement("form");
   cancel.setAttribute("action", `${pagePath}/cancel`);
+  const cancelNonce = new Element("input");
+  cancelNonce.name = "nonce";
+  cancelNonce.value = nonce;
+  cancel.append(cancelNonce);
   const messages = [];
   const nameRequests = [];
   const context = {
@@ -184,11 +191,20 @@ test("never asks the Bridge to sign a submit that a script started", async () =>
   assert.deepEqual(tab.posted, []);
 });
 
-test("leaves every other form alone", async () => {
+test("leaves a form that is not approve, cancel, or close alone", async () => {
   const tab = reviewTab({ ok: true, presence: "signed-value" });
+  tab.cancel.setAttribute("action", `${pagePath}/export`);
   const event = await tab.submit(tab.cancel, { isTrusted: true });
   assert.equal(event.prevented, false);
   assert.deepEqual(tab.messages, []);
+});
+
+test("signs a person's own click on the cancel form for /cancel", async () => {
+  const tab = reviewTab({ ok: true, presence: "signed-cancel" });
+  const event = await tab.submit(tab.cancel, { isTrusted: true });
+  assert.equal(event.prevented, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(tab.messages)), [{ type: "morrow_review_approval_sign", approvePath: `${pagePath}/cancel`, nonce }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(tab.posted)), [{ nonce, presence: "signed-cancel" }]);
 });
 
 test("signs a person's own click on the close form, and says a failed close closed nothing", async () => {

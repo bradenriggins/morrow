@@ -1064,6 +1064,49 @@ describe("privacy output boundary", () => {
     }
   });
 
+  it("scrubs Moodle and Canvas credential spellings that access_token already stops", () => {
+    const context = learnerPrivacy();
+    const descriptor = { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive" as const, freeText: "allow" as const };
+    const value = {
+      course: { id: "42", name: "Biology" },
+      session_key: "sess-live-91",
+      sessionKey: "sess-live-91",
+      wstoken: "ws-live-77",
+      csrfToken: "csrf-live-12",
+      clientSecret: "client-live-33",
+      apiSecret: "api-live-44",
+      bearerToken: "bearer-live-55",
+      userPassword: "password-live-66",
+    };
+    const leaked = ["sess-live-91", "ws-live-77", "csrf-live-12", "client-live-33", "api-live-44", "bearer-live-55", "password-live-66"];
+    const projected = normalize({ structuredContent: value }, { ...context, descriptor });
+    expect(projected.structuredContent).toEqual({ course: { id: "42", name: "Biology" } });
+    const egress = redactLearnerEgress(value, {
+      learnerRoster: context.learnerRoster!, learnerVault: context.learnerVault!, learnerScope: context.learnerScope!,
+    });
+    expect(egress).toEqual({ course: { id: "42", name: "Biology" } });
+    for (const credential of leaked) {
+      expect(JSON.stringify(projected), credential).not.toContain(credential);
+      expect(JSON.stringify(egress), credential).not.toContain(credential);
+    }
+    const webservice = "https://moodle.example.edu/webservice/rest/server.php?wstoken=ws-live-77&wsfunction=core_course_get_contents";
+    for (const note of [
+      webservice,
+      "https://moodle.example.edu/course/view.php?id=42&sesskey=sess-live-91",
+      "https://school.instructure.com/courses/42/files/9/download?verifier=file-live-88",
+      "remember token=file-live-88 for the quiz",
+    ]) {
+      const refused = projectOutput({ content: [{ type: "text", text: note }] }, { ...context, descriptor });
+      expect(refused, note).toMatchObject({ isError: true, structuredContent: { code: "privacy_sensitive_text_refused" } });
+      expect(JSON.stringify(refused), note).not.toContain("ws-live-77");
+      expect(JSON.stringify(refused), note).not.toContain("sess-live-91");
+      expect(JSON.stringify(refused), note).not.toContain("file-live-88");
+      expect(() => redactLearnerEgress({ note }, {
+        learnerRoster: context.learnerRoster!, learnerVault: context.learnerVault!, learnerScope: context.learnerScope!,
+      }), note).toThrow("privacy_sensitive_text_refused");
+    }
+  });
+
   it("redacts roster aliases and removes unknown learner-shaped fields in course data", () => {
     const vault = new LearnerVault(":memory:");
     const result = normalize({

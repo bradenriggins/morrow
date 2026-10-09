@@ -241,25 +241,34 @@ function commandHandler(socket: WebSocket, handler: (command: BridgeCommand) => 
 }
 
 describe("LoopbackBridgeServer", () => {
-  it("commits a large binding inventory only after the last ordered part", async () => {
+  it("rejects a large binding inventory that omits catalogDigest instead of replacing the live set", async () => {
     const server = new LoopbackBridgeServer({ token, expectedRuntimeRevision: revision, expectedCatalogDigest: digest, allowedExtensionIds: [extensionId], port: 0 });
     servers.push(server);
     const socket = await connect(server);
     const generation = server.health().generation;
     const bindings = Array.from({ length: 12_001 }, (_, index) => ({ sourceBindingId: `canvas-course-${index}`, provider: "canvas", courseId: String(index + 1), courseName: "Course ".padEnd(500, "x"), runtimeVerified: true }));
     expect(Buffer.byteLength(JSON.stringify(bindings))).toBeGreaterThan(MAX_BRIDGE_MESSAGE_BYTES);
+    let closed: Promise<unknown[]> | undefined;
     for (let index = 0; index < bindings.length; index += 500) {
       const complete = index + 500 >= bindings.length;
       const message = JSON.stringify({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation, bindings: bindings.slice(index, index + 500), syncId: "large-inventory-0001", part: index / 500, complete, sentAt: Date.now() });
       expect(Buffer.byteLength(message)).toBeLessThan(MAX_BRIDGE_MESSAGE_BYTES);
+      if (complete) closed = once(socket, "close") as Promise<unknown[]>;
       socket.send(message);
-      await new Promise(done => setTimeout(done, 10));
-      if (!complete) expect(server.listBindings()).toHaveLength(1);
+      if (!complete) {
+        await new Promise(done => setTimeout(done, 10));
+        expect(server.listBindings()).toHaveLength(1);
+      }
     }
-    await vi.waitFor(() => expect(server.listBindings()).toHaveLength(12_001));
-    socket.send(JSON.stringify({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation, bindings: [], syncId: "replacement-0001", part: 0, complete: false, sentAt: Date.now() }));
-    await new Promise(done => setTimeout(done, 10));
-    expect(server.listBindings()).toHaveLength(12_001);
+    const [code, reason] = await closed! as [number, Buffer];
+    expect(code).toBe(4403);
+    expect(reason.toString()).toBe("bridge_bindings_digest_mismatch");
+    expect(server.listBindings()).toHaveLength(1);
+    expect(server.health().lastMismatch).toMatchObject({
+      reason: "bridge_bindings_digest_mismatch",
+      receivedCatalogDigest: null,
+      expectedCatalogDigest: digest,
+    });
   });
 
   it("refuses a missing or duplicate inventory part before it can replace the scope", async () => {
@@ -1535,6 +1544,7 @@ describe("LoopbackBridgeServer", () => {
         courseId: "42",
         courseName: "Course 42",
         origin: "https://school.instructure.com",
+        catalogDigest: digest,
         runtimeVerified: true,
       }],
       sentAt: Date.now(),
@@ -1784,7 +1794,7 @@ describe("a request for a closed course proves the course again before admission
         expect(command.sourceBindingId).toBe("canvas-course-42");
         expect(command.toolName).toBeUndefined();
         expect(command.arguments).toBeUndefined();
-        socket.send(serializeBridgeMessage({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: command.generation, bindings: [{ ...unverifiedCourse, runtimeVerified: true }], sentAt: Date.now() }));
+        socket.send(serializeBridgeMessage({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: command.generation, bindings: [{ ...unverifiedCourse, catalogDigest: digest, runtimeVerified: true }], sentAt: Date.now() }));
         answer(socket, command, true, { recovered: true });
       } else answer(socket, command, true, { pages: [] });
     });
@@ -1820,7 +1830,7 @@ describe("a request for a closed course proves the course again before admission
     const seen = listen(socket, (command) => {
       if (command.kind === "binding_recover") {
         setTimeout(() => {
-          socket.send(serializeBridgeMessage({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: command.generation, bindings: [{ ...unverifiedCourse, runtimeVerified: true }], sentAt: Date.now() }));
+          socket.send(serializeBridgeMessage({ schema: BRIDGE_SCHEMAS.bindings, protocolVersion: BRIDGE_PROTOCOL_VERSION, generation: command.generation, bindings: [{ ...unverifiedCourse, catalogDigest: digest, runtimeVerified: true }], sentAt: Date.now() }));
           answer(socket, command, true, { recovered: true });
         }, 50);
       } else answer(socket, command, true, { pages: [] });

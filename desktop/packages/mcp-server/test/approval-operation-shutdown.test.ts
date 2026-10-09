@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { sha256Json, type JsonObject } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
-import { bridgeSignedPresence } from "./fixtures/review-approval.js";
+import { bridgeSignedPresence, reviewDocumentHeaders } from "./fixtures/review-approval.js";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 
@@ -25,7 +25,7 @@ function snapshot(operationId: string, state: string): JsonObject {
 
 async function approve(server: LoopbackApprovalServer, baseUrl: string, operationId: string): Promise<void> {
   const reviewUrl = `${baseUrl}/operations/${encodeURIComponent(operationId)}`;
-  const review = await fetch(reviewUrl);
+  const review = await fetch(reviewUrl, { headers: reviewDocumentHeaders(server, reviewUrl) });
   const html = await review.text();
   const nonce = /name="nonce" value="([A-Za-z0-9_-]+)"/.exec(html)?.[1];
   const cookie = review.headers.get("set-cookie")?.split(";", 1)[0];
