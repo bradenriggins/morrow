@@ -501,13 +501,16 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
     }
     let executed;
     try {
-      executed = await page.evaluate(executeMoodleInPage, JSON.stringify({
+      // page.evaluate has no Playwright timeout. A course read that never returns would
+      // keep the proof process alive until the test kills it, with no receipt error.
+      const remainingMs = Math.max(1_000, Math.min(45_000, expiresAt() - Date.now()));
+      executed = await withDeadline(page.evaluate(executeMoodleInPage, JSON.stringify({
         mode: "execute",
         operation,
         arguments: command.arguments || {},
         binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId },
         expiresAt: expiresAt(),
-      }));
+      })), remainingMs, "the page executor did not finish");
     } catch (error) {
       result(command, false, null, { schema: "morrow.bridge.problem.v1", code: "browser_execution_interrupted", message: safeError(error).slice(0, 300), recoverable: false });
       return;
@@ -579,6 +582,14 @@ function unwrap(reply, runtime) {
   return value;
 }
 
+function withDeadline(promise, timeoutMs, description) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(description)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function waitFor(probe, description, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -615,8 +626,19 @@ async function waitFor(probe, description, timeoutMs = 30_000) {
  * paired connection, and it signs only the form that a click on the Approve button in Chrome sends.
  * It first proves that the same form posted by a program, without that signature, is refused.
  */
-async function approveThroughReviewPage(url, context, connector) {
-  const reviewPage = await context.newPage();
+async function approveThroughReviewPage(url, connector) {
+  // The review page's own load reads the course through the course page. Doing
+  // that navigation in the course browser stalls the read it is waiting on, and
+  // the proof sits until the test kills it. The review is a different site, so
+  // it gets its own browser.
+  const reviewBrowser = await chromium.launch({
+    headless: true,
+    executablePath: chromium.executablePath(),
+    timeout: 30_000,
+    args: ["--disable-dev-shm-usage"],
+  });
+  const reviewContext = await reviewBrowser.newContext({ ignoreHTTPSErrors: true });
+  const reviewPage = await reviewContext.newPage();
   const stepMs = 10_000;
   reviewPage.setDefaultTimeout(stepMs);
   reviewPage.setDefaultNavigationTimeout(stepMs);
@@ -637,7 +659,7 @@ async function approveThroughReviewPage(url, context, connector) {
     );
     const form = reviewPage.locator('form[action$="/approve"]');
     await form.waitFor();
-    const html = await reviewPage.content();
+    const html = await withDeadline(reviewPage.content(), stepMs, "the review page did not finish loading");
     const nonce = await form.locator('input[name="nonce"]').inputValue();
     const unsigned = await reviewPage.request.post(`${url}/approve`, {
       form: { nonce },
@@ -661,7 +683,7 @@ async function approveThroughReviewPage(url, context, connector) {
     await form.getByRole("button").first().click({ noWaitAfter: true });
     return { reviewStatus: loaded?.status() ?? 0, unsignedApproveStatus: unsigned.status(), approveStatus: (await response).status(), html };
   } finally {
-    await reviewPage.close().catch(() => undefined);
+    await withDeadline(reviewBrowser.close(), stepMs, "the review browser did not close").catch(() => undefined);
   }
 }
 
@@ -749,6 +771,14 @@ async function runProof(options) {
     writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
   };
   save("started");
+  // A stuck browser call has no Playwright timeout. Leave a receipt instead of
+  // waiting until the test process is killed with nothing recorded.
+  const watchdog = setTimeout(() => {
+    receipt.status = "failed";
+    receipt.error = `the proof did not finish at ${receipt.stage}`;
+    try { save(receipt.stage); } catch { /* the failure still ends the process */ }
+    process.exit(1);
+  }, 120_000);
 
   let fixture;
   let browser;
@@ -769,15 +799,32 @@ async function runProof(options) {
     const catalogDigest = bridgeCatalogDigest();
 
     browser = target === "fixture"
-      ? await chromium.launch({ headless: true, executablePath: chromium.executablePath() })
+      ? await chromium.launch({
+        headless: true,
+        executablePath: chromium.executablePath(),
+        timeout: 30_000,
+        args: ["--disable-dev-shm-usage"],
+      })
       : null;
     context = browser
       ? await browser.newContext({ ignoreHTTPSErrors: true })
-      : await chromium.launchPersistentContext(chromeProfile, { headless: false, executablePath: chromium.executablePath() });
+      : await chromium.launchPersistentContext(chromeProfile, {
+        headless: false,
+        executablePath: chromium.executablePath(),
+        timeout: 30_000,
+        args: ["--disable-dev-shm-usage"],
+      });
+    context.setDefaultTimeout(20_000);
+    context.setDefaultNavigationTimeout(20_000);
     const page = context.pages()[0] || await context.newPage();
-    await page.goto(`${siteBase}/course/view.php?id=${courseId}`);
+    await page.goto(`${siteBase}/course/view.php?id=${courseId}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
     // The open page is the authority on the site, the principal and the course.
-    const probe = await page.evaluate(executeMoodleInPage, JSON.stringify({ mode: "probe" }));
+    // evaluate itself never times out, so a page that does not answer would hold the process.
+    const probe = await withDeadline(
+      page.evaluate(executeMoodleInPage, JSON.stringify({ mode: "probe" })),
+      15_000,
+      "the open course page did not answer",
+    );
     assert.equal(probe?.ok, true, `the open page is not a signed-in Moodle course page: ${JSON.stringify(probe)}`);
     const { origin, siteUrl, principalId, courseName } = probe.profile;
     assert.equal(origin, new URL(siteBase).origin, "the open page belongs to a different Moodle site");
@@ -888,7 +935,7 @@ async function runProof(options) {
     save("awaiting_approval");
     assert.equal(notDispatched.isError, true, "an unapproved change was dispatched");
 
-    const approved = await approveThroughReviewPage(approvalUrl, context, connector);
+    const approved = await approveThroughReviewPage(approvalUrl, connector);
     assert.equal(approved.unsignedApproveStatus, 403, `an approval without the Bridge signature was not refused (HTTP ${approved.unsignedApproveStatus})`);
     assert.ok(approved.approveStatus >= 200 && approved.approveStatus < 400, `the approval was refused (HTTP ${approved.approveStatus})`);
     receipt.requestReview.unsignedApprovalRefused = approved.unsignedApproveStatus === 403;
@@ -947,6 +994,7 @@ async function runProof(options) {
     save("completed");
     process.stdout.write(`${receiptPath}\n`);
   } catch (error) {
+    clearTimeout(watchdog);
     receipt.status = "failed";
     receipt.error = safeError(error);
     // A course read that fails for a missing binding names no cause of its own. Whether Morrow
@@ -956,6 +1004,7 @@ async function runProof(options) {
     process.exitCode = 1;
     process.stderr.write(`${receipt.error}\n${receiptPath}\n`);
   } finally {
+    clearTimeout(watchdog);
     abandoned = await closeHarnessResources([
       ["bridge connection", connector],
       ["assistant client", client],
