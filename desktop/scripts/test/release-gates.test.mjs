@@ -553,11 +553,18 @@ test("the committed source-origin ledger is unreviewed, and the old self-stamp i
   assert.ok(ledger.entries.every((entry) => entry.reviewer === null));
   assert.ok(ledger.entries.every((entry) => entry.beforeDigest === null || /^[0-9a-f]{64}$/.test(entry.beforeDigest)));
   const head = execFileSync("git", ["-C", desktop, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  if (typeof ledger.candidateCommit === "string" && ledger.candidateCommit !== head) {
+  const commitPresent = (revision) => {
     try {
-      execFileSync("git", ["-C", desktop, "cat-file", "-e", `${ledger.candidateCommit}^{commit}`], { stdio: "ignore" });
+      execFileSync("git", ["-C", desktop, "cat-file", "-e", `${revision}^{commit}`], { stdio: "ignore" });
+      return true;
     } catch {
-      execFileSync("git", ["-C", desktop, "fetch", "--depth=1", "origin", ledger.candidateCommit], { stdio: "ignore" });
+      return false;
+    }
+  };
+  if (typeof ledger.candidateCommit === "string" && ledger.candidateCommit !== head) {
+    const parent = `${ledger.candidateCommit}^`;
+    if (!commitPresent(ledger.candidateCommit) || !commitPresent(parent)) {
+      execFileSync("git", ["-C", desktop, "fetch", "--depth=2", "origin", ledger.candidateCommit], { stdio: "ignore" });
     }
   }
   const generated = validateSourceOriginLedger({
