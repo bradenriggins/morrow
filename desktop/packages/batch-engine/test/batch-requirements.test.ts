@@ -454,6 +454,52 @@ describe("BAT durable batch requirements", () => {
     store.close();
   });
 
+  it("does not claim a child when no rate budget remains", async () => {
+    const waiting = new DurableBatchStore({ path: ":memory:", encryptionKey: randomBytes(32) });
+    const waitingBatch = readBatch(waiting, 2);
+    const waited: number[] = [];
+    const waitingDispatched: string[] = [];
+    const waitedResult = await runBatchWindow(waiting, waitingBatch.batch.batchId, async ({ child }) => {
+      waitingDispatched.push(child.childId);
+      return { state: "succeeded", resultDigest: sha256Json({ childId: child.childId }) };
+    }, {
+      expectedCatalogDigest: catalogDigest,
+      expectedCourseSetDigest: waitingBatch.manifest.courseSet.digest,
+      expectedProfileDigest: profileDigest,
+      maxChildren: 2,
+      ratePolicy: { requestCost: 1, rateLimitRemaining: 0, retryAfterMs: 250 },
+      random: () => 0,
+      sleep: async (milliseconds) => { waited.push(milliseconds); },
+    });
+    expect(waitingDispatched).toEqual([]);
+    expect(waited).toEqual([250]);
+    expect(waitedResult).toMatchObject({ processed: 0, effectiveConcurrency: 0, backoffMs: 250 });
+    expect(waitedResult.batch.pendingChildren).toBe(2);
+    waiting.close();
+
+    const blocked = new DurableBatchStore({ path: ":memory:", encryptionKey: randomBytes(32) });
+    const blockedBatch = readBatch(blocked, 2);
+    const blockedDispatched: string[] = [];
+    let slept = false;
+    const blockedResult = await runBatchWindow(blocked, blockedBatch.batch.batchId, async ({ child }) => {
+      blockedDispatched.push(child.childId);
+      return { state: "succeeded", resultDigest: sha256Json({ childId: child.childId }) };
+    }, {
+      expectedCatalogDigest: catalogDigest,
+      expectedCourseSetDigest: blockedBatch.manifest.courseSet.digest,
+      expectedProfileDigest: profileDigest,
+      maxChildren: 2,
+      ratePolicy: { requestCost: 1, rateLimitRemaining: 0 },
+      random: () => 0,
+      sleep: async () => { slept = true; },
+    });
+    expect(blockedDispatched).toEqual([]);
+    expect(slept).toBe(false);
+    expect(blockedResult).toMatchObject({ processed: 0, effectiveConcurrency: 0, backoffMs: 0 });
+    expect(blockedResult.batch.pendingChildren).toBe(2);
+    blocked.close();
+  });
+
   it("stops an automatic window during retry backoff without dispatching claimed work", async () => {
     const store = new DurableBatchStore({ path: ":memory:", encryptionKey: randomBytes(32) });
     const created = readBatch(store, 2);

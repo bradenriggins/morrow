@@ -147,6 +147,8 @@ interface FixtureOptions {
   readonly replaceGrading?: boolean;
   /** Replace the selected person's initial grade with an official provider shape. */
   readonly initialGrade?: JsonObject;
+  /** Drop a score or grade text the PATCH did not set, as a site that replaces the whole grade. */
+  readonly clearOmittedGradeOverride?: boolean;
 }
 
 async function harness(options: FixtureOptions = {}) {
@@ -206,7 +208,14 @@ async function harness(options: FixtureOptions = {}) {
       void body(request).then((raw) => {
         const requested = JSON.parse(raw) as JsonObject;
         patches.push(requested);
-        if (!options.ignoreGradePatch) savedGrade = { ...savedGrade, ...requested, status: "Graded" };
+        if (!options.ignoreGradePatch) {
+          savedGrade = { ...savedGrade, ...requested, status: "Graded" };
+          if (options.clearOmittedGradeOverride) {
+            for (const field of ["score", "text"] as const) {
+              if (!Object.hasOwn(requested, field)) delete savedGrade[field];
+            }
+          }
+        }
         json(response, savedGrade);
       });
       return;
@@ -670,6 +679,30 @@ describe("Blackboard gradebook columns and attempts", () => {
       verified: true,
     });
     expect(verified).not.toHaveProperty("diagnostics");
+  });
+
+  it("does not verify a grade change that clears an override the change did not set", async () => {
+    const fixture = await harness({ clearOmittedGradeOverride: true });
+    const reference = await studentReference(fixture);
+    const patch = { score: 18 };
+    const planDigest = await planDigestOf(fixture, "blackboard_plan_gradebook_grade_patch", patch, { learner_reference: reference });
+    const result = structured(await fixture.call(
+      "blackboard_apply_reviewed_gradebook_grade_patch",
+      applyArguments(patch, planDigest, { learner_reference: reference }),
+    ));
+    expect(result).toMatchObject({
+      ok: false,
+      resultState: "applied_or_unknown",
+      problem: { code: "blackboard_content_mismatch" },
+    });
+    expect(fixture.patchRequests()).toEqual([`PATCH ${gradePath}`]);
+    expect(fixture.patchBodies()).toEqual([patch]);
+
+    const verified = structured(await fixture.call("blackboard_verify_gradebook_grade_patch", {
+      learner_reference: reference,
+      patch,
+    }));
+    expect(verified).toMatchObject({ ok: true, verified: false });
   });
 
   it("refuses a score changed between the plan and the dispatch, and sends no PATCH", async () => {

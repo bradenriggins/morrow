@@ -1621,7 +1621,9 @@ export class DurableBatchStore {
 
   claimPending(batchIdValue: string, limitValue: number): readonly BatchChildRecord[] {
     const batchId = exactName(batchIdValue, "batch id");
-    const limit = Math.max(1, Math.min(Math.trunc(limitValue), 500));
+    const requested = Math.trunc(Number(limitValue));
+    if (!Number.isFinite(requested) || requested < 1) return [];
+    const limit = Math.min(requested, 500);
     return this.transaction(() => {
       const batch = this.getBatch(batchId);
       if (batch.state !== "running") return [];

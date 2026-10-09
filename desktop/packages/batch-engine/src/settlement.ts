@@ -577,6 +577,9 @@ export class BatchSourceSettlementStore {
       if (!existing.sourceTaskId || existing.sourceTaskId !== taskId) {
         throw new Error("source task projection does not match the batch child task identity");
       }
+      // A terminal settlement is final: a stale projection must not reopen it
+      // or replace its verification and counts.
+      if (BATCH_SOURCE_SETTLEMENT_TERMINAL_STATES.has(existing.state)) return existing;
       this.database.prepare(`
         UPDATE gateway_batch_source_settlements
         SET state=?, task_status=?, task_outcome=?, verification_status=?,

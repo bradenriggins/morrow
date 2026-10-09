@@ -43,7 +43,7 @@ function createReadBatch(store: DurableBatchStore) {
   });
 }
 
-function createWriteBatch(store: DurableBatchStore, sourceOperationId: string) {
+function createWriteBatch(store: DurableBatchStore, sourceOperationId: string, withDependent = false) {
   return store.create({
     name: "Interrupted staged write",
     mode: "stage_writes",
@@ -60,7 +60,19 @@ function createWriteBatch(store: DurableBatchStore, sourceOperationId: string) {
         course_id: "9",
         _morrow: { source_binding_id: "canvas:9" },
       },
-    }],
+    }, ...(withDependent ? [{
+      childId: "course:10",
+      publicToolName: "edit_page",
+      sourceId: "morrow-legacy",
+      sourceToolName: "edit_page",
+      readOnly: false,
+      sourceOperationId: `${sourceOperationId}-next`,
+      dependencyChildIds: ["course:9"],
+      arguments: {
+        course_id: "10",
+        _morrow: { source_binding_id: "canvas:10" },
+      },
+    }] : [])],
   });
 }
 
@@ -145,12 +157,12 @@ describe("recoverBatchState", () => {
     }
   });
 
-  it("recovers a known staged task from the gateway journal without resending it", async () => {
+  it("leaves an unconfirmed staged task unsettled and does not run its dependent", async () => {
     const fixture = await workspace("recover-task");
     try {
       const sourceOperationId = "operation:recover-task-0001";
       const store = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
-      const created = createWriteBatch(store, sourceOperationId);
+      const created = createWriteBatch(store, sourceOperationId, true);
       store.beginRun(created.batch.batchId, catalogDigest);
       expect(store.claimPending(created.batch.batchId, 1)).toHaveLength(1);
 
@@ -160,6 +172,7 @@ describe("recoverBatchState", () => {
       journal.recordResponse(prepared.operationId, {
         upstreamResultDigest: sha256Text("staged-response"),
         normalizedResultDigest: sha256Text("normalized-staged-response"),
+        responseSucceeded: true,
         sourceResultState: "awaiting_confirmation",
         sourceTaskId: "task:recover-9",
       });
@@ -174,26 +187,37 @@ describe("recoverBatchState", () => {
         mode: "apply_safe",
       });
       expect(recovered).toMatchObject({
-        stateAfter: "paused",
-        sourceTasksRecovered: 1,
-        inspectionRequired: 0,
+        stateAfter: "inspection_required",
+        sourceTasksRecovered: 0,
+        inspectionRequired: 1,
         providerDispatches: 0,
       });
       expect(recovered.children[0]).toMatchObject({
-        action: "source_task_recovered",
+        action: "inspection_required",
         applied: true,
-        sourceTaskId: "task:recover-9",
-      });
-
-      const finalStore = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
-      expect(finalStore.get(created.batch.batchId).children[0]).toMatchObject({
-        state: "succeeded",
         sourceTaskId: "task:recover-9",
         sourceResultState: "awaiting_confirmation",
       });
+
+      const finalStore = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
+      expect(finalStore.get(created.batch.batchId).children).toEqual([
+        expect.objectContaining({
+          childId: "course:9",
+          state: "unknown",
+          sourceTaskId: "task:recover-9",
+          sourceResultState: "awaiting_confirmation",
+        }),
+        expect.objectContaining({ childId: "course:10", state: "pending" }),
+      ]);
       expect(finalStore.getBatch(created.batch.batchId)).toMatchObject({
-        state: "paused",
+        state: "inspection_required",
         terminalAt: null,
+      });
+      expect(finalStore.beginRun(created.batch.batchId, catalogDigest).state).toBe("inspection_required");
+      expect(finalStore.claimPending(created.batch.batchId, 2)).toEqual([]);
+      expect(finalStore.get(created.batch.batchId).children[1]).toMatchObject({
+        childId: "course:10",
+        state: "pending",
       });
       finalStore.close();
     } finally {
@@ -232,18 +256,21 @@ describe("recoverBatchState", () => {
         mode: "apply_safe",
       });
       expect(recovered.children[0]).toMatchObject({
-        action: "source_task_recovered",
+        action: "inspection_required",
         applied: true,
         gatewayOperationId: outerOperationId,
         gatewayOperationState: "approved",
+        sourceTaskId: "task:recover-binding",
+        sourceResultState: "awaiting_confirmation",
       });
 
       const finalStore = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
       expect(finalStore.get(created.batch.batchId).children[0]).toMatchObject({
-        state: "succeeded",
+        state: "unknown",
         gatewayOperationId: outerOperationId,
         gatewayOperationState: "approved",
         sourceTaskId: "task:recover-binding",
+        sourceResultState: "awaiting_confirmation",
       });
       finalStore.close();
     } finally {
@@ -350,6 +377,7 @@ describe("recoverBatchState", () => {
       journal.recordResponse(prepared.operationId, {
         upstreamResultDigest: sha256Text("staged-response"),
         normalizedResultDigest: sha256Text("normalized-staged-response"),
+        responseSucceeded: true,
         sourceResultState: "completed",
         sourceTaskId: "task:recover-settled",
       });
@@ -463,6 +491,124 @@ describe("recoverBatchState", () => {
     } finally {
       await rm(failedFixture.directory, { recursive: true, force: true });
       await rm(unknownFixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a failed recorded task failed and does not run a later child", async () => {
+    const fixture = await workspace("recover-recorded-failed");
+    try {
+      const sourceOperationId = "operation:recover-recorded-failed-1";
+      const store = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
+      const created = createWriteBatch(store, sourceOperationId, true);
+      store.beginRun(created.batch.batchId, catalogDigest);
+      expect(store.claimPending(created.batch.batchId, 1)).toHaveLength(1);
+      const journal = new GatewayOperationJournal({ path: fixture.path });
+      const prepared = prepareGatewayOperation(journal, sourceOperationId);
+      journal.markDispatched(prepared.operationId);
+      journal.recordResponse(prepared.operationId, {
+        upstreamResultDigest: sha256Text("failed-staged-response"),
+        normalizedResultDigest: sha256Text("normalized-failed-staged-response"),
+        responseSucceeded: false,
+        sourceResultState: "failed",
+        sourceTaskId: "task:recover-failed",
+      });
+      journal.close();
+      store.close();
+
+      const recoveredStore = recoverRunningChild(fixture.path, fixture.key);
+      recoveredStore.close();
+      const recovered = recoverBatchState({
+        path: fixture.path,
+        batchId: created.batch.batchId,
+        mode: "apply_safe",
+      });
+      expect(recovered.children[0]).toMatchObject({
+        action: "recorded_result_failed",
+        applied: true,
+        sourceTaskId: "task:recover-failed",
+        sourceResultState: "failed",
+      });
+      expect(recovered.sourceTasksRecovered).toBe(0);
+
+      const finalStore = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
+      expect(finalStore.get(created.batch.batchId).children[0]).toMatchObject({
+        state: "failed",
+        sourceTaskId: "task:recover-failed",
+        sourceResultState: "failed",
+      });
+      finalStore.beginRun(created.batch.batchId, catalogDigest);
+      expect(finalStore.claimPending(created.batch.batchId, 2)).toEqual([]);
+      expect(finalStore.get(created.batch.batchId).children[1]).toMatchObject({
+        childId: "course:10",
+        state: "unknown",
+        gatewayOperationState: "dependency_unverified",
+      });
+      finalStore.close();
+    } finally {
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an issued task id when a later pre-send failure is the newest journal row", async () => {
+    const fixture = await workspace("recover-later-presend");
+    try {
+      const sourceOperationId = "operation:recover-later-presend-1";
+      let now = Date.parse("2026-03-01T00:00:00.000Z");
+      const store = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
+      const created = createWriteBatch(store, sourceOperationId);
+      store.beginRun(created.batch.batchId, catalogDigest);
+      expect(store.claimPending(created.batch.batchId, 1)).toHaveLength(1);
+      const journal = new GatewayOperationJournal({ path: fixture.path, now: () => new Date(now) });
+      const prepared = prepareGatewayOperation(journal, sourceOperationId);
+      journal.markDispatched(prepared.operationId);
+      journal.recordResponse(prepared.operationId, {
+        upstreamResultDigest: sha256Text("issued-staged-response"),
+        normalizedResultDigest: sha256Text("normalized-issued-staged-response"),
+        responseSucceeded: true,
+        sourceResultState: "awaiting_confirmation",
+        sourceTaskId: "task:issued-earlier",
+      });
+      now += 60_000;
+      const retryRequest = { course_id: "9", _morrow: { operation_id: sourceOperationId }, retry: 1 };
+      journal.prepare({
+        publicToolName: "edit_page",
+        sourceId: "morrow-legacy",
+        sourceToolName: "edit_page",
+        catalogDigest,
+        requestDigest: sha256Json(retryRequest),
+        forwardedRequestDigest: sha256Json(retryRequest),
+        sourceOperationId,
+        idempotencyKey: `${sourceOperationId}:retry`,
+        readOnly: false,
+      });
+      journal.close();
+      const restarted = new GatewayOperationJournal({ path: fixture.path, now: () => new Date(now) });
+      restarted.close();
+      store.close();
+
+      const recoveredStore = recoverRunningChild(fixture.path, fixture.key);
+      recoveredStore.close();
+      const recovered = recoverBatchState({
+        path: fixture.path,
+        batchId: created.batch.batchId,
+        mode: "apply_safe",
+      });
+      expect(recovered.children[0]).toMatchObject({
+        action: "inspection_required",
+        applied: true,
+        sourceTaskId: "task:issued-earlier",
+        sourceResultState: "awaiting_confirmation",
+      });
+      const finalStore = new DurableBatchStore({ path: fixture.path, encryptionKey: fixture.key });
+      expect(finalStore.get(created.batch.batchId).children[0]).toMatchObject({
+        state: "unknown",
+        sourceTaskId: "task:issued-earlier",
+        sourceResultState: "awaiting_confirmation",
+      });
+      expect(finalStore.get(created.batch.batchId).children[0]?.state).not.toBe("failed");
+      finalStore.close();
+    } finally {
+      await rm(fixture.directory, { recursive: true, force: true });
     }
   });
 });

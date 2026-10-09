@@ -225,8 +225,11 @@ function windowRate(
 ): { concurrency: number; backoffMs: number } {
   const policy = { ...manifest.ratePolicy, ...override };
   let concurrency = batch.concurrency;
-  if (policy.requestCost && policy.rateLimitRemaining !== undefined) {
-    concurrency = Math.min(concurrency, Math.max(1, Math.floor(policy.rateLimitRemaining / policy.requestCost)));
+  if (policy.rateLimitRemaining === 0) {
+    concurrency = 0;
+  } else if (policy.requestCost && policy.rateLimitRemaining !== undefined) {
+    const affordable = Math.floor(policy.rateLimitRemaining / policy.requestCost);
+    concurrency = Math.min(concurrency, Math.max(0, affordable));
   }
   const retryAfterMs = policy.retryAfterMs || 0;
   const jitterRatio = policy.jitterRatio ?? 0.1;
