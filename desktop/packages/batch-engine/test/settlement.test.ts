@@ -226,6 +226,26 @@ describe("BatchSourceSettlementStore", () => {
       verificationStatus: "mismatch",
       resultCounts: { done: 1 },
     });
+    expect(store.applyTaskProjection("bat:test-stale", "course:1", {
+      taskId: "task-1",
+      status: "completed",
+      outcome: "inspection_required",
+      terminal: false,
+      verificationStatus: "unconfirmed",
+      resultCounts: { done: 1, unconfirmed: 1 },
+    })).toMatchObject({
+      state: "inspection_required",
+      verificationStatus: "unconfirmed",
+    });
+    expect(store.applyTaskProjection("bat:test-stale", "course:1", {
+      taskId: "task-1",
+      status: "completed",
+      outcome: "succeeded",
+      terminal: true,
+      verificationStatus: "verified",
+      resultCounts: { done: 1 },
+    })).toMatchObject({ state: "inspection_required", verificationStatus: "unconfirmed" });
+
     expect(store.applyTaskProjection("bat:test-stale", "course:2", {
       taskId: "task-2",
       status: "completed",

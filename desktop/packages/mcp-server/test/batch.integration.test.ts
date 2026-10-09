@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import type { DatabaseSync } from "node:sqlite";
-import { bridgeSignedPresence } from "./fixtures/review-approval.js";
+import { bridgeSignedPresence, reviewDocumentHeaders } from "./fixtures/review-approval.js";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1176,7 +1176,7 @@ describe("MorrowRuntime durable batches", () => {
       const database = (runtime.gateway as unknown as { effects: { database: DatabaseSync } }).effects.database;
       const refusedId = ids[1]!.replaceAll("'", "''");
       database.exec(`CREATE TEMP TRIGGER refuse_second_grant BEFORE UPDATE OF state ON provider_effect_operations WHEN NEW.operation_id='${refusedId}' AND NEW.state='approved' BEGIN SELECT RAISE(ABORT, 'review fixture disk failure'); END`);
-      const page = await fetch(reviewUrl);
+      const page = await fetch(reviewUrl, { headers: reviewDocumentHeaders(runtime.approval, reviewUrl) });
       const body = await page.text();
       const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1] || "";
       const cookie = page.headers.get("set-cookie")?.split(";", 1)[0] || "";
@@ -1235,7 +1235,7 @@ describe("MorrowRuntime durable batches", () => {
       } finally {
         clock.mockRestore();
       }
-      const approvalBody = await (await fetch(String(created.approvalUrl))).text();
+      const approvalBody = await (await fetch(String(created.approvalUrl), { headers: reviewDocumentHeaders(runtime.approval, String(created.approvalUrl)) })).text();
       expect(approvalBody).toContain("Course 41");
       expect(approvalBody).toContain("Course 42");
       // A planned batch is both a review still open and an approved group not yet started, so the

@@ -93,11 +93,11 @@ test("Windows tree termination uses taskkill for the whole tree and force escala
 });
 
 function darwinKinfo(pid, startedAtMs) {
-  const buffer = Buffer.alloc(64);
+  const buffer = Buffer.alloc(648);
   const seconds = Math.floor(startedAtMs / 1_000);
-  buffer.writeBigInt64LE(BigInt(seconds), 0);
-  buffer.writeInt32LE((startedAtMs % 1_000) * 1_000, 8);
-  buffer.writeInt32LE(pid, 40);
+  buffer.writeBigInt64LE(BigInt(seconds), 128);
+  buffer.writeInt32LE((startedAtMs % 1_000) * 1_000, 136);
+  buffer.writeInt32LE(pid, 168);
   return buffer;
 }
 
@@ -116,7 +116,11 @@ test("macOS kernel start time is fine enough to authorize a signal, and a one-se
   const kernel = darwinKinfo(pid, startedAt);
   assert.deepEqual(parseDarwinKinfoStart(kernel, pid), { at: startedAt, resolutionMs: 1 });
   assert.equal(parseDarwinKinfoStart(kernel, pid + 1), null, "a struct whose pid is not the process we asked for is not an identity");
-  assert.equal(parseDarwinKinfoStart(Buffer.alloc(64), pid), null);
+  assert.equal(parseDarwinKinfoStart(Buffer.alloc(648), pid), null);
+  const legacyLayout = Buffer.alloc(648);
+  legacyLayout.writeBigInt64LE(BigInt(Math.floor(startedAt / 1_000)), 0);
+  legacyLayout.writeInt32LE(pid, 40);
+  assert.equal(parseDarwinKinfoStart(legacyLayout, pid), null, "a start time at byte 0 is not the kinfo_proc export");
   assert.equal(matchExactProcessStart(startedAt, { at: startedAt, resolutionMs: 1 }), true);
   assert.equal(matchExactProcessStart(startedAt + 2, { at: startedAt, resolutionMs: 1 }), false);
 

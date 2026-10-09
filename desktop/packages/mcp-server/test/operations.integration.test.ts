@@ -461,7 +461,7 @@ describe("outer provider effects", () => {
       const structured = planned.structuredContent as { receipts?: { approvalUrl?: unknown } };
       const url = structured.receipts?.approvalUrl;
       expect(typeof url).toBe("string");
-      const view = await fetch(url as string);
+      const view = await fetch(url as string, { headers: reviewDocumentHeaders(runtime.approval, url as string) });
       const body = await view.text();
       expect(body).toContain('<article class="card">');
       expect(body).toContain('<header class="hero"><h1>');
@@ -478,12 +478,13 @@ describe("outer provider effects", () => {
       expect(refused.status).toBe(409);
       expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "awaiting_approval" });
 
-      const refreshed = await fetch(url as string);
+      const refreshed = await fetch(url as string, { headers: reviewDocumentHeaders(runtime.approval, url as string) });
       const refreshedBody = await refreshed.text();
       const validNonce = /name="nonce" value="([^"]+)"/.exec(refreshedBody)?.[1];
       const validCookie = refreshed.headers.get("set-cookie")?.split(";", 1)[0];
       const approval = await fetch(`${url}/approve`, {
         method: "POST",
+        redirect: "manual",
         headers: {
           "content-type": "application/x-www-form-urlencoded",
           cookie: validCookie!,
@@ -492,10 +493,9 @@ describe("outer provider effects", () => {
         },
         body: new URLSearchParams({ nonce: validNonce!, presence: bridgeSignedPresence(runtime.approval, `${url}/approve`, validNonce!) }),
       });
-      expect(approval.status).toBe(200);
-      expect(await approval.text()).not.toContain("Continue");
+      expect(approval.status).toBe(303);
       await expect.poll(() => runtime.gateway.operationGet(id).state).toBe("verified");
-      const settled = await fetch(url as string);
+      const settled = await fetch(url as string, { headers: reviewDocumentHeaders(runtime.approval, url as string) });
       const settledBody = await settled.text();
       expect(settledBody).toContain("Canvas saved the change. Morrow checked the result.");
       expect(settledBody).not.toContain('<button class="approve"');
