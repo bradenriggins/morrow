@@ -1427,13 +1427,13 @@ function presenceRequiredPage(reviewPath: string, purpose: "approve" | "edit-acc
 }
 
 const OPERATIONS_LIST_PROOF_NONCE = "list";
+/** The nonce Morrow Bridge uses when it signs the open of a review page, before that page has a form nonce. */
+export const REVIEW_OPEN_NONCE = "open";
 
-/**
- * A local client that set Host and nothing a browser or fetch client sends.
- * It has not opened the review page.
- */
-function hostOnlyClient(request: IncomingMessage): boolean {
-  return !request.headers.accept && !request.headers["user-agent"] && !request.headers["sec-fetch-dest"];
+function presentedReviewProof(request: IncomingMessage, url: URL): string {
+  const header = request.headers["x-morrow-review-presence"];
+  if (typeof header === "string" && header) return header;
+  return url.searchParams.get("presence") || "";
 }
 
 function recentChangesRefusal(title: string, detail: string): string {
@@ -1725,8 +1725,12 @@ export class LoopbackApprovalServer {
         else sendJson(response, 404, { schema: "morrow.problem.v1", code: "not_found" });
         return;
       }
-      if (method === "GET" && (!target.action || target.action === "status") && hostOnlyClient(request)) {
-        sendJson(response, 403, { schema: "morrow.problem.v1", code: "approval_presence_required" });
+      if (method === "GET" && (!target.action || target.action === "status") && !this.reviewDocumentAdmitted(request, url, `${target.kind}:${target.id}`)) {
+        if (target.action === "status" || !String(request.headers.accept || "").includes("text/html")) {
+          sendJson(response, 403, { schema: "morrow.problem.v1", code: "approval_presence_required" });
+        } else {
+          sendHtml(response, 403, presenceRequiredPage(`/${target.kind}/${encodeURIComponent(target.id)}`));
+        }
         return;
       }
       if (method === "GET" && (!target.action || target.action === "status") && target.kind === "edit-access") {
@@ -1969,6 +1973,28 @@ export class LoopbackApprovalServer {
         sendHtml(response, 409, pageShell("Review unavailable", '<section class="outcome"><h1>Review unavailable</h1><p>This review may have expired or the request may have changed. Return to your assistant and ask Morrow to check its current status.</p><p>Do not repeat the change until Morrow checks the saved result.</p></section>'));
       } else sendJson(response, 409, { schema: "morrow.problem.v1", code: "approval_action_refused", message });
     }
+  }
+
+  /** A review document or its status poll. The open proof or a cookie from a proven open is required. */
+  private reviewDocumentAdmitted(request: IncomingMessage, url: URL, nonceKey: string): boolean {
+    const pagePath = url.pathname.replace(/\/status$/u, "");
+    return exactSecret(presentedReviewProof(request, url), reviewApprovalProof(this.presenceKey, pagePath, REVIEW_OPEN_NONCE))
+      || this.hasLiveReviewCookie(request, nonceKey);
+  }
+
+  private hasLiveReviewCookie(request: IncomingMessage, nonceKey: string): boolean {
+    for (const part of String(request.headers.cookie || "").split(";")) {
+      const trimmed = part.trim();
+      const separator = trimmed.indexOf("=");
+      if (separator < 0) continue;
+      const name = trimmed.slice(0, separator);
+      const value = trimmed.slice(separator + 1);
+      if (!name.startsWith("morrow_approval_")) continue;
+      const grant = this.nonces.get(value);
+      if (!grant || grant.targetKey !== nonceKey || grant.expiresAt <= Date.now()) continue;
+      if (exactSecret(value, name.slice("morrow_approval_".length)) && exactSecret(cookieValue(request, name), value)) return true;
+    }
+    return false;
   }
 
   async close(): Promise<void> {

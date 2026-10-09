@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonObject } from "@morrow/contracts";
 import { LoopbackApprovalServer, type ApprovalOperationController } from "../src/approval-server.js";
+import { reviewDocumentHeaders } from "./fixtures/review-approval.js";
 
 /**
  * The review server is plain local HTTP. Any program on this computer can read it, and that
@@ -101,7 +102,7 @@ describe("student names and the local review server", () => {
         for (const body of bodies) {
           for (const name of REAL_NAMES) expect(body, `${state}: ${body.slice(0, 160)}`).not.toContain(name);
         }
-        expect(bodies.join("\n")).toContain("Student A1");
+        expect(bodies.join("\n")).not.toContain("Student A1");
       } finally { await review.close(); }
     }
   });
@@ -111,7 +112,8 @@ describe("student names and the local review server", () => {
     const review = server("awaiting_approval", { "Student A1": "Jane <Doe>" }, shared);
     const baseUrl = await review.start();
     try {
-      const body = await (await fetch(`${baseUrl}/operations/${encodeURIComponent(operationId)}`)).text();
+      const pageUrl = `${baseUrl}/operations/${encodeURIComponent(operationId)}`;
+      const body = await (await fetch(pageUrl, { headers: reviewDocumentHeaders(review, pageUrl) })).text();
       expect(body).toContain("Extension for Student A1 &lt;b&gt;");
       expect(body).not.toContain("Jane");
       expect(shared).toEqual([{ path: `/operations/${operationId}`, names: { "Student A1": "Jane <Doe>" } }]);
@@ -123,7 +125,8 @@ describe("student names and the local review server", () => {
     const verified = server("verified", { "Student A1": "Jane Doe" }, verifiedShared);
     const verifiedUrl = await verified.start();
     try {
-      const status = await (await fetch(`${verifiedUrl}/operations/${encodeURIComponent(operationId)}/status`)).text();
+      const statusUrl = `${verifiedUrl}/operations/${encodeURIComponent(operationId)}/status`;
+      const status = await (await fetch(statusUrl, { headers: reviewDocumentHeaders(verified, statusUrl) })).text();
       expect(status).not.toContain("Jane");
       expect(verifiedShared).toEqual([{ path: `/operations/${operationId}`, names: { "Student A1": "Jane Doe" } }]);
     } finally { await verified.close(); }
@@ -131,7 +134,8 @@ describe("student names and the local review server", () => {
     const cancelled = server("cancelled", { "Student A1": "Jane Doe" }, cancelledShared);
     const cancelledUrl = await cancelled.start();
     try {
-      await (await fetch(`${cancelledUrl}/operations/${encodeURIComponent(operationId)}`)).text();
+      const cancelledPage = `${cancelledUrl}/operations/${encodeURIComponent(operationId)}`;
+      await (await fetch(cancelledPage, { headers: reviewDocumentHeaders(cancelled, cancelledPage) })).text();
       expect(cancelledShared).toEqual([{ path: `/operations/${operationId}`, names: null }]);
     } finally { await cancelled.close(); }
   });
@@ -141,7 +145,8 @@ describe("student names and the local review server", () => {
     const review = server("awaiting_approval", undefined, shared);
     const baseUrl = await review.start();
     try {
-      const body = await (await fetch(`${baseUrl}/operations/${encodeURIComponent(operationId)}`)).text();
+      const pageUrl = `${baseUrl}/operations/${encodeURIComponent(operationId)}`;
+      const body = await (await fetch(pageUrl, { headers: reviewDocumentHeaders(review, pageUrl) })).text();
       expect(body).toContain("Extension for Student A1");
       expect(shared).toEqual([{ path: `/operations/${operationId}`, names: null }]);
     } finally { await review.close(); }

@@ -12,6 +12,7 @@ import { parseGatewayConfig } from "../src/config.js";
 import { GatewayRuntime } from "../src/runtime.js";
 import { createMorrowServer } from "../src/server.js";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
+import { reviewDocumentHeaders } from "./fixtures/review-approval.js";
 import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
 import { bridgeSignedPresence } from "./fixtures/review-approval.js";
@@ -266,7 +267,7 @@ describe("reviewed Moodle file dispatch", () => {
       expect(writes).toHaveLength(0);
       writeFileSync(join(directory, input.file_path), "changed after review preparation");
       const reviewUrl = runtime.approvalUrl(id)!;
-      const review = await fetch(reviewUrl);
+      const review = await fetch(reviewUrl, { headers: reviewDocumentHeaders(approval!, reviewUrl) });
       const reviewHtml = await review.text();
       expect(review.status).toBe(200);
       expect(reviewHtml).toContain("Biology");

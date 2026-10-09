@@ -1,6 +1,7 @@
 import { request, type ClientRequest } from "node:http";
 import { describe, expect, it } from "vitest";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
+import { reviewDocumentHeaders } from "./fixtures/review-approval.js";
 import { bridgeSignedPresence } from "./fixtures/review-approval.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -49,7 +50,8 @@ describe("approval maintenance admission", () => {
     let rejected: ReturnType<typeof streamPost> | null = null;
     try {
       const baseUrl = await approval.start();
-      const review = await fetch(`${baseUrl}/operations/${encodeURIComponent(snapshot.operationId)}`);
+      const reviewUrl = `${baseUrl}/operations/${encodeURIComponent(snapshot.operationId)}`;
+      const review = await fetch(reviewUrl, { headers: reviewDocumentHeaders(approval, reviewUrl) });
       const html = await review.text();
       const nonce = /name="nonce" value="([A-Za-z0-9_-]+)"/.exec(html)?.[1];
       const cookie = review.headers.get("set-cookie")?.split(";")[0];

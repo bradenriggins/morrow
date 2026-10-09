@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runInNewContext } from "node:vm";
 import type { JsonObject } from "@morrow/contracts";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
-import { bridgeSignedPresence } from "./fixtures/review-approval.js";
+import { bridgeSignedPresence, reviewDocumentHeaders } from "./fixtures/review-approval.js";
 
 const operationId = "op:platform-copy-1234";
 const encodedId = encodeURIComponent(operationId);
@@ -47,8 +47,9 @@ function approvalServer(
 }
 
 /** Reads the review page and returns the nonce and cookie an approval post needs. */
-async function reviewPage(baseUrl: string, id = operationId): Promise<{ body: string; nonce: string; cookie: string }> {
-  const response = await fetch(`${baseUrl}/operations/${encodeURIComponent(id)}`);
+async function reviewPage(server: LoopbackApprovalServer, baseUrl: string, id = operationId): Promise<{ body: string; nonce: string; cookie: string }> {
+  const pageUrl = `${baseUrl}/operations/${encodeURIComponent(id)}`;
+  const response = await fetch(pageUrl, { headers: reviewDocumentHeaders(server, pageUrl) });
   const body = await response.text();
   return {
     body,
@@ -142,11 +143,11 @@ function rememberApprovalServer(
 }
 
 /** Polls a review's page for `text`, without hammering the loopback server. */
-async function pollForText(url: string, text: string, timeoutMs = 2_000): Promise<string> {
+async function pollForText(server: LoopbackApprovalServer, url: string, text: string, timeoutMs = 2_000): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   let html = "";
   do {
-    html = await (await fetch(url)).text();
+    html = await (await fetch(url, { headers: reviewDocumentHeaders(server, url) })).text();
     if (html.includes(text)) return html;
     await new Promise((resolve) => setTimeout(resolve, 25));
   } while (Date.now() < deadline);
@@ -201,8 +202,8 @@ describe("approval page copy", () => {
     const server = trackedApprovalServer(approvals);
     try {
       const baseUrl = await server.start();
-      const first = await reviewPage(baseUrl);
-      const second = await reviewPage(baseUrl);
+      const first = await reviewPage(server, baseUrl);
+      const second = await reviewPage(server, baseUrl);
       expect(first.nonce).not.toBe(second.nonce);
       expect(first.cookie.split("=", 1)[0]).not.toBe(second.cookie.split("=", 1)[0]);
       await expect(submitApproval(server, baseUrl, first.nonce, first.cookie)).resolves.toMatchObject({ status: 303 });
@@ -217,8 +218,8 @@ describe("approval page copy", () => {
     const server = trackedApprovalServer(approvals);
     try {
       const baseUrl = await server.start();
-      const first = await reviewPage(baseUrl);
-      const second = await reviewPage(baseUrl);
+      const first = await reviewPage(server, baseUrl);
+      const second = await reviewPage(server, baseUrl);
       await expect(submitApproval(server, baseUrl, first.nonce, second.cookie)).resolves.toMatchObject({ status: 409 });
       expect(approvals.count).toBe(0);
       await expect(submitApproval(server, baseUrl, second.nonce, second.cookie)).resolves.toMatchObject({ status: 303 });
@@ -233,9 +234,9 @@ describe("approval page copy", () => {
     const server = manyReviewServer(approved);
     try {
       const baseUrl = await server.start();
-      const first = await reviewPage(baseUrl, operationId);
+      const first = await reviewPage(server, baseUrl, operationId);
       const others = [];
-      for (let index = 0; index < 128; index += 1) others.push(await reviewPage(baseUrl, `${operationId}-other-${index}`));
+      for (let index = 0; index < 128; index += 1) others.push(await reviewPage(server, baseUrl, `${operationId}-other-${index}`));
       await expect(submitApproval(server, baseUrl, first.nonce, first.cookie, operationId)).resolves.toMatchObject({ status: 303 });
       expect(approved).toEqual([operationId]);
       expect(others.at(-2)?.nonce).not.toBe("");
@@ -249,7 +250,7 @@ describe("approval page copy", () => {
     const server = approvalServer(moodleSnapshot("applied_or_unknown"));
     try {
       const baseUrl = await server.start();
-      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`)).text();
+      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`, { headers: reviewDocumentHeaders(server, `${baseUrl}/operations/${encodedId}`) })).text();
       expect(page).toContain("<h1>Result unconfirmed</h1>");
       expect(page).toContain("Moodle may have received the changes.");
       expect(page).toContain("open the item in Moodle and confirm it yourself");
@@ -280,7 +281,7 @@ describe("approval page copy", () => {
     ]);
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain(`This marks the submission as ${state}. It does not change the student&#39;s grade.`);
       expect(body).toContain("Morrow cannot check the saved read status. Confirm it in Canvas after Morrow sends the request.");
       expect(body).not.toContain("This changes grades. Check each student and score.");
@@ -333,7 +334,7 @@ describe("approval page copy", () => {
     });
     try {
       const baseUrl = await server.start();
-      const body = await (await fetch(`${baseUrl}/batches/${batchId}`)).text();
+      const body = await (await fetch(`${baseUrl}/batches/${batchId}`, { headers: reviewDocumentHeaders(server, `${baseUrl}/batches/${batchId}`) })).text();
       expect(body).toContain("Morrow will apply all 2 changes. It will check the results it can in Canvas. Confirm the submission read status in Canvas yourself.");
       expect(body).not.toContain("check each result in Canvas");
       expect(body).toContain("This changes grades. Check each student and score.");
@@ -355,7 +356,7 @@ describe("approval page copy", () => {
     const server = approvalServer(review);
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain("This changes grades. Check each student and score.");
       expect(body).not.toContain("Morrow cannot check the saved read status.");
     } finally {
@@ -367,7 +368,7 @@ describe("approval page copy", () => {
     const server = approvalServer(moodleSnapshot("awaiting_approval"), moodleSnapshot("applied_or_unknown"));
     try {
       const baseUrl = await server.start();
-      const { nonce, cookie } = await reviewPage(baseUrl);
+      const { nonce, cookie } = await reviewPage(server, baseUrl);
       expect(nonce).not.toBe("");
       const refused = await submitApproval(server, baseUrl, nonce, cookie);
       expect(refused.status).toBe(409);
@@ -408,7 +409,7 @@ describe("approval page copy", () => {
     const server = approvalServer(moodleSnapshot("awaiting_approval"));
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain('<article class="card">');
       expect(body).toContain("<h1>Edit Page?</h1>");
       expect(body.match(/<h1/g)).toHaveLength(1);
@@ -429,7 +430,7 @@ describe("approval page copy", () => {
     const server = approvalServer(snapshot, snapshot, []);
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain("<h1>Remove a page in a course?</h1>");
       expect(body).not.toContain("URL or ID");
       expect(body).not.toContain("week-2-overview");
@@ -452,7 +453,7 @@ describe("approval page copy", () => {
     ]);
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain("<h1>Edit a topic in a course?</h1>");
       expect(body).not.toContain("<h1>Edit discussion?</h1>");
     } finally {
@@ -473,7 +474,7 @@ describe("approval page copy", () => {
     ]);
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain("<h1>Not a real catalog tool?</h1>");
     } finally {
       await server.close();
@@ -505,7 +506,7 @@ describe("approval page copy", () => {
     ]);
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain("Shuffle answers");
       expect(body).toContain("Time limit in seconds");
       expect(body).not.toContain("morrow_new_quiz_settings_guard");
@@ -519,7 +520,7 @@ describe("approval page copy", () => {
     const server = approvalServer(moodleSnapshot("verified"));
     try {
       const baseUrl = await server.start();
-      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`)).text();
+      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`, { headers: reviewDocumentHeaders(server, `${baseUrl}/operations/${encodedId}`) })).text();
       expect(page).toContain('<section class="outcome outcome-success">');
       expect(page).toContain('<svg class="success-mark"');
       expect(page).toContain("<h1>Moodle saved the change. Morrow checked the result.</h1>");
@@ -539,7 +540,7 @@ describe("approval page copy", () => {
     ]);
     try {
       const baseUrl = await server.start();
-      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`)).text();
+      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`, { headers: reviewDocumentHeaders(server, `${baseUrl}/operations/${encodedId}`) })).text();
       expect(page).toContain('<a href="https://moodle.example/mod/page/view.php?id=6" target="_blank" rel="noopener noreferrer">Open in Moodle</a>');
     } finally {
       await server.close();
@@ -553,7 +554,7 @@ describe("approval page copy", () => {
     ]);
     try {
       const baseUrl = await server.start();
-      const response = await fetch(`${baseUrl}/operations/${encodedId}/status`);
+      const response = await fetch(`${baseUrl}/operations/${encodedId}/status`, { headers: reviewDocumentHeaders(server, `${baseUrl}/operations/${encodedId}/status`) });
       const body = (await response.json()) as { html: string };
       expect(body.html).toContain('<p class="result-item">Week 2 overview</p>');
       expect(body.html).toContain('<a href="https://moodle.example/mod/page/view.php?id=6" target="_blank" rel="noopener noreferrer">Open in Moodle</a>');
@@ -566,7 +567,7 @@ describe("approval page copy", () => {
     const server = approvalServer(moodleSnapshot("applied_or_unknown"));
     try {
       const baseUrl = await server.start();
-      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`)).text();
+      const page = await (await fetch(`${baseUrl}/operations/${encodedId}`, { headers: reviewDocumentHeaders(server, `${baseUrl}/operations/${encodedId}`) })).text();
       expect(page).not.toContain("outcome-success");
       expect(page).not.toContain("success-mark");
     } finally {
@@ -589,7 +590,7 @@ describe("approval page copy", () => {
     ]);
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain('<header class="hero danger">');
       expect(body).toContain('<button class="approve danger" type="submit">Delete "Old Syllabus Draft"</button>');
       expect(body).not.toContain("autofocus");
@@ -602,7 +603,7 @@ describe("approval page copy", () => {
     const server = approvalServer(moodleSnapshot("awaiting_approval"));
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain('<header class="hero">');
       expect(body).not.toContain("hero danger");
       expect(body).toContain('<button class="approve" type="submit">Apply this change</button>');
@@ -633,7 +634,7 @@ describe("approval page copy", () => {
     const server = approvalServer(snapshot, snapshot, []);
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain("<h1>Copy Blackboard course?</h1>");
       expect(body).toContain("<dt>Source Course ID</dt><dd>COURSE-101</dd>");
       expect(body).toContain("<dt>New Course ID</dt><dd>COURSE-101-COPY</dd>");
@@ -650,7 +651,7 @@ describe("WI-4.4: the review page's second button", () => {
     const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles" }, async () => "saved");
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).toContain(`<form method="post" action="/operations/${encodedId}/approve">`);
       expect(body).toContain('<button name="remember" value="1" class="approve secondary" type="submit">Apply this change, and do not ask again for text and titles in this course</button>');
       expect(body).not.toMatch(/ until \d| [AP]M</);
@@ -676,7 +677,7 @@ describe("WI-4.4: the review page's second button", () => {
     const server = rememberApprovalServer(null, async () => "failed", snapshot);
     try {
       const baseUrl = await server.start();
-      const { body } = await reviewPage(baseUrl);
+      const { body } = await reviewPage(server, baseUrl);
       expect(body).not.toContain('name="remember"');
       expect(body).not.toContain("do not ask again");
     } finally {
@@ -692,7 +693,7 @@ describe("WI-4.4: the review page's second button", () => {
     });
     try {
       const baseUrl = await server.start();
-      const { nonce, cookie } = await reviewPage(baseUrl);
+      const { nonce, cookie } = await reviewPage(server, baseUrl);
       const approve = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },
@@ -701,7 +702,7 @@ describe("WI-4.4: the review page's second button", () => {
       });
       // Approve first: the redirect that starts the change does not wait on the grant.
       expect(approve.status).toBe(303);
-      const html = await pollForText(`${baseUrl}/operations/${encodedId}`, "does not ask again");
+      const html = await pollForText(server, `${baseUrl}/operations/${encodedId}`, "does not ask again");
       expect(grantCalled).toBe(true);
       expect(html).toContain("Morrow does not ask again for text and titles in this course until you return the course to Plan in Morrow Bridge.");
     } finally {
@@ -713,7 +714,7 @@ describe("WI-4.4: the review page's second button", () => {
     const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles", joinsTimedGrant: true }, async () => "saved");
     try {
       const baseUrl = await server.start();
-      const { nonce, cookie } = await reviewPage(baseUrl);
+      const { nonce, cookie } = await reviewPage(server, baseUrl);
       const approve = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },
@@ -721,7 +722,7 @@ describe("WI-4.4: the review page's second button", () => {
         redirect: "manual",
       });
       expect(approve.status).toBe(303);
-      const html = await pollForText(`${baseUrl}/operations/${encodedId}`, "does not ask again");
+      const html = await pollForText(server, `${baseUrl}/operations/${encodedId}`, "does not ask again");
       expect(html).toContain("Morrow does not ask again for text and titles in this course until the Edit access this course already had ends.");
     } finally {
       await server.close();
@@ -732,7 +733,7 @@ describe("WI-4.4: the review page's second button", () => {
     const server = rememberApprovalServer({ categoryId: "text", label: "Text and titles" }, async () => "failed");
     try {
       const baseUrl = await server.start();
-      const { nonce, cookie } = await reviewPage(baseUrl);
+      const { nonce, cookie } = await reviewPage(server, baseUrl);
       const approve = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },
@@ -740,7 +741,7 @@ describe("WI-4.4: the review page's second button", () => {
         redirect: "manual",
       });
       expect(approve.status).toBe(303);
-      const html = await pollForText(`${baseUrl}/operations/${encodedId}`, "could not save that choice");
+      const html = await pollForText(server, `${baseUrl}/operations/${encodedId}`, "could not save that choice");
       expect(html).toContain("Morrow could not save that choice. It asks again next time.");
     } finally {
       await server.close();
@@ -755,7 +756,7 @@ describe("WI-4.4: the review page's second button", () => {
     });
     try {
       const baseUrl = await server.start();
-      const { cookie } = await reviewPage(baseUrl);
+      const { cookie } = await reviewPage(server, baseUrl);
       const refused = await fetch(`${baseUrl}/operations/${encodedId}/approve`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html", cookie, origin: baseUrl, referer: `${baseUrl}/operations/${encodedId}` },

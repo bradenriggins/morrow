@@ -13,7 +13,7 @@
   const approvePath = (form) => {
     try {
       const path = new URL(form.getAttribute("action") || "", location.href).pathname;
-      return /\/(?:approve|close)$/.test(path) ? path : null;
+      return /\/(?:approve|cancel|close)$/.test(path) ? path : null;
     } catch {
       return null;
     }
@@ -44,8 +44,9 @@
   // match signReviewApproval in review-approval.js.
   const signFailureText = (path, code, silent) => {
     const closing = /\/close$/.test(path);
-    const kept = closing ? "Nothing was closed." : "Nothing was approved.";
-    const act = closing ? "this click" : "this approval";
+    const cancelling = /\/cancel$/.test(path);
+    const kept = closing ? "Nothing was closed." : cancelling ? "Nothing was cancelled." : "Nothing was approved.";
+    const act = closing ? "this click" : cancelling ? "this cancellation" : "this approval";
     if (silent) return `Morrow Bridge did not answer. Check that Morrow Bridge is connected, reload this page, and select the button again. ${kept}`;
     if (code === "review_approval_key_missing") return `Morrow Bridge no longer holds this review's approval key: the connection restarted or the review ended. Reload this page for a fresh review, then select the button again. ${kept}`;
     if (code === "review_approval_sender_refused" || code === "review_approval_request_invalid") return `This review page is stale. Reload it and select the button again. ${kept}`;
@@ -135,6 +136,36 @@
     return false;
   });
   askForNames();
+
+  // The first navigation has no proof, so the server answers with no review and no nonce.
+  // Ask Morrow Bridge to sign this page, then load the review. A program that only knows the
+  // URL cannot make that signature.
+  const openReview = () => {
+    if (typeof location.pathname !== "string" || !location.pathname) return;
+    if (document.querySelector?.('input[name="nonce"]')) return;
+    const path = location.pathname;
+    Promise.resolve(chrome.runtime.sendMessage({ type: "morrow_review_approval_sign", approvePath: path, nonce: "open" }))
+      .catch(() => null)
+      .then(async (response) => {
+        if (!response?.ok || typeof response.presence !== "string" || document.querySelector?.('input[name="nonce"]')) return;
+        const page = await fetch(location.href, {
+          credentials: "same-origin",
+          headers: { accept: "text/html", "x-morrow-review-presence": response.presence },
+        }).catch(() => null);
+        if (!page?.ok) return;
+        const parsed = new DOMParser().parseFromString(await page.text(), "text/html");
+        if (!parsed.documentElement) return;
+        document.replaceChild(parsed.documentElement, document.documentElement);
+        for (const old of document.querySelectorAll("script[src]")) {
+          const script = document.createElement("script");
+          script.src = old.getAttribute("src");
+          if (old.defer) script.defer = true;
+          old.replaceWith(script);
+        }
+        askForNames();
+      });
+  };
+  openReview();
 
   document.addEventListener("submit", (event) => {
     const form = event.target;

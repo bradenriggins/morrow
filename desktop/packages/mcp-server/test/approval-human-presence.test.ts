@@ -2,6 +2,7 @@ import { request as httpRequest } from "node:http";
 import { describe, expect, it } from "vitest";
 import type { JsonObject } from "@morrow/contracts";
 import { LoopbackApprovalServer, reviewApprovalProof, type ReviewApprovalPresence } from "../src/approval-server.js";
+import { reviewDocumentHeaders } from "./fixtures/review-approval.js";
 
 const operationId = "op:human-presence-1234";
 const encodedId = encodeURIComponent(operationId);
@@ -53,9 +54,10 @@ function harness(): Harness {
   return Object.assign(state, { server });
 }
 
-/** What any local program can do with an HTTP client: read the page, copy its form, and post it back. */
-async function forgedApproval(baseUrl: string, extra: Record<string, string> = {}): Promise<{ response: Response; nonce: string; cookie: string }> {
-  const page = await fetch(`${baseUrl}/operations/${encodedId}`);
+/** What a local program can do after the review page was opened: copy its form and post it back. */
+async function forgedApproval(server: LoopbackApprovalServer, baseUrl: string, extra: Record<string, string> = {}): Promise<{ response: Response; nonce: string; cookie: string }> {
+  const pageUrl = `${baseUrl}/operations/${encodedId}`;
+  const page = await fetch(pageUrl, { headers: reviewDocumentHeaders(server, pageUrl) });
   const body = await page.text();
   const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1] || "";
   const cookie = page.headers.get("set-cookie")?.split(";", 1)[0] || "";
@@ -85,7 +87,7 @@ describe("approval needs a person in Chrome, not an HTTP client", () => {
     const test = harness();
     try {
       const baseUrl = await test.server.start();
-      const { response } = await forgedApproval(baseUrl);
+      const { response } = await forgedApproval(test.server, baseUrl);
       expect(response.status).toBe(403);
       expect(await response.text()).toContain("Approve this change in Chrome");
       await settle();
@@ -99,7 +101,7 @@ describe("approval needs a person in Chrome, not an HTTP client", () => {
     const test = harness();
     try {
       const baseUrl = await test.server.start();
-      const { response } = await forgedApproval(baseUrl, { remember: "1" });
+      const { response } = await forgedApproval(test.server, baseUrl, { remember: "1" });
       expect(response.status).toBe(403);
       await settle();
       expect(test.approved).toEqual([]);
@@ -113,13 +115,13 @@ describe("approval needs a person in Chrome, not an HTTP client", () => {
     const test = harness();
     try {
       const baseUrl = await test.server.start();
-      const guessed = await forgedApproval(baseUrl, { presence: "A".repeat(43) });
+      const guessed = await forgedApproval(test.server, baseUrl, { presence: "A".repeat(43) });
       expect(guessed.response.status).toBe(403);
       // A proof Morrow Bridge made for another review or another nonce is not this one.
       const key = test.presence[0]!.key;
-      const otherNonce = await forgedApproval(baseUrl, { presence: reviewApprovalProof(key, `/operations/${encodedId}/approve`, "another-nonce") });
+      const otherNonce = await forgedApproval(test.server, baseUrl, { presence: reviewApprovalProof(key, `/operations/${encodedId}/approve`, "another-nonce") });
       expect(otherNonce.response.status).toBe(403);
-      const otherReview = await forgedApproval(baseUrl, { presence: reviewApprovalProof(key, "/operations/op%3Aother/approve", guessed.nonce) });
+      const otherReview = await forgedApproval(test.server, baseUrl, { presence: reviewApprovalProof(key, "/operations/op%3Aother/approve", guessed.nonce) });
       expect(otherReview.response.status).toBe(403);
       await settle();
       expect(test.approved).toEqual([]);
@@ -151,7 +153,8 @@ describe("approval needs a person in Chrome, not an HTTP client", () => {
     const test = harness();
     try {
       const baseUrl = await test.server.start();
-      await (await fetch(`${baseUrl}/operations/${encodedId}`)).text();
+      const pageUrl = `${baseUrl}/operations/${encodedId}`;
+      await (await fetch(pageUrl, { headers: reviewDocumentHeaders(test.server, pageUrl) })).text();
       expect(test.announced).toBe(1);
     } finally {
       await test.server.close();
@@ -198,7 +201,17 @@ describe("approval needs a person in Chrome, not an HTTP client", () => {
       expect(review.status).toBe(403);
       expect(review.body).not.toContain("Week 2 overview");
       expect(review.body).not.toContain("nonce");
-      const page = await fetch(`${baseUrl}/operations/${encodedId}`);
+      const pageUrl = `${baseUrl}/operations/${encodedId}`;
+      const spoofed = await fetch(pageUrl, { headers: { accept: "text/html", "user-agent": "Mozilla/5.0", host: new URL(baseUrl).host } });
+      const spoofedBody = await spoofed.text();
+      expect(spoofed.status).toBe(403);
+      expect(spoofed.headers.get("set-cookie")).toBeNull();
+      expect(spoofedBody).not.toContain("Week 2 overview");
+      expect(spoofedBody).not.toContain("nonce");
+      const spoofedList = await fetch(`${baseUrl}/operations`, { headers: { accept: "application/json", "user-agent": "Mozilla/5.0", host: new URL(baseUrl).host } });
+      expect(spoofedList.status).toBe(403);
+      expect(await spoofedList.text()).not.toContain(operationId);
+      const page = await fetch(pageUrl, { headers: reviewDocumentHeaders(server, pageUrl) });
       const pageBody = await page.text();
       const nonce = /name="nonce" value="([^"]+)"/.exec(pageBody)?.[1] || "";
       const cookie = page.headers.get("set-cookie")?.split(";", 1)[0] || "";
@@ -243,7 +256,8 @@ describe("approval needs a person in Chrome, not an HTTP client", () => {
     const test = harness();
     try {
       const baseUrl = await test.server.start();
-      const page = await fetch(`${baseUrl}/operations/${encodedId}`);
+      const pageUrl = `${baseUrl}/operations/${encodedId}`;
+      const page = await fetch(pageUrl, { headers: reviewDocumentHeaders(test.server, pageUrl) });
       const body = await page.text();
       const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1] || "";
       const cookie = page.headers.get("set-cookie")?.split(";", 1)[0] || "";
@@ -268,7 +282,7 @@ describe("approval needs a person in Chrome, not an HTTP client", () => {
     const test = harness();
     try {
       const baseUrl = await test.server.start();
-      const { nonce, cookie } = await forgedApproval(baseUrl);
+      const { nonce, cookie } = await forgedApproval(test.server, baseUrl);
       const approvePath = `/operations/${encodedId}/approve`;
       const response = await fetch(`${baseUrl}${approvePath}`, {
         method: "POST",

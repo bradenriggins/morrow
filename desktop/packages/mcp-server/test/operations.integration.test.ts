@@ -10,7 +10,11 @@ import { GatewayRuntime } from "../src/runtime.js";
 import { LoopbackApprovalServer, operationStatus, reviewApprovalProof } from "../src/approval-server.js";
 import type { ApprovalReviewContext } from "../src/approval-context.js";
 import type { ApprovalReviewContext } from "../src/approval-context.js";
-import { bridgeSignedPresence } from "./fixtures/review-approval.js";
+import { bridgeSignedPresence, reviewDocumentHeaders } from "./fixtures/review-approval.js";
+
+function provenPage(server: LoopbackApprovalServer, target: string): Promise<Response> {
+  return fetch(target, { headers: reviewDocumentHeaders(server, target) });
+}
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
@@ -582,7 +586,7 @@ describe("outer provider effects", () => {
       expect(entry).not.toHaveProperty("forwardedRequest");
       expect(JSON.stringify(collection)).not.toContain(learnerMarker);
 
-      const review = await (await fetch(`${url}/operations/op%3Aprivacy-safe-1234`)).text();
+      const review = await (await provenPage(approval, `${url}/operations/op%3Aprivacy-safe-1234`)).text();
       const technical = review.slice(review.lastIndexOf("<details><summary>Technical details</summary>"));
       expect(review).toContain(ordinaryChange);
       expect(technical).not.toContain(learnerMarker);
@@ -634,7 +638,7 @@ describe("outer provider effects", () => {
     });
     try {
       const url = await approval.start();
-      const review = await (await fetch(`${url}/operations/quiz-item`)).text();
+      const review = await (await provenPage(approval, `${url}/operations/quiz-item`)).text();
       expect(review).toContain("Which structure directly assembles proteins?");
       expect(review).toContain("Current correct answer");
       expect(review).toContain("Proposed correct answer");
@@ -656,7 +660,7 @@ describe("outer provider effects", () => {
           },
         },
       };
-      const mixed = await (await fetch(`${url}/operations/mixed`)).text();
+      const mixed = await (await provenPage(approval, `${url}/operations/mixed`)).text();
       expect(mixed).toContain("<strong>2</strong> points");
       expect(mixed).not.toContain("Only the answer key is in this request");
 
@@ -665,7 +669,7 @@ describe("outer provider effects", () => {
         attention: ["dispatch_failed_before_send"],
         plan: { tool: "canvas_update_create_page_courses", arguments: {} },
       };
-      const noSend = await (await fetch(`${url}/operations/no-send`)).text();
+      const noSend = await (await provenPage(approval, `${url}/operations/no-send`)).text();
       expect(noSend).toContain("No change was sent");
       expect(noSend).toContain("read the latest Canvas content and prepare a new review");
       expect(noSend).not.toContain("This request did not finish");
@@ -678,7 +682,7 @@ describe("outer provider effects", () => {
         attention: ["readback_did_not_match_frozen_comparator"],
         plan: { tool: "moodle_update_page", arguments: {} },
       };
-      const savedOtherwise = await (await fetch(`${url}/operations/saved-otherwise`)).text();
+      const savedOtherwise = await (await provenPage(approval, `${url}/operations/saved-otherwise`)).text();
       expect(savedOtherwise).toContain("Did not save as approved");
       expect(savedOtherwise).toContain("Moodle does not hold the result you approved");
       expect(savedOtherwise).not.toContain("No change was sent");
@@ -692,7 +696,7 @@ describe("outer provider effects", () => {
         attention: ["provider_effect_may_have_landed"],
         plan: { tool: "canvas_update_create_page_courses", arguments: {} },
       };
-      const uncertain = await (await fetch(`${url}/operations/uncertain`)).text();
+      const uncertain = await (await provenPage(approval, `${url}/operations/uncertain`)).text();
       expect(uncertain).toContain("Canvas may have received the changes");
       expect(uncertain).not.toContain("No change was sent");
 
@@ -701,7 +705,7 @@ describe("outer provider effects", () => {
         attention: ["provider_effect_target_conflict"],
         plan: { tool: "moodle_create_resource_file", arguments: {} },
       };
-      const blocked = await (await fetch(`${url}/operations/blocked-target`)).text();
+      const blocked = await (await provenPage(approval, `${url}/operations/blocked-target`)).text();
       expect(blocked).toContain("Check earlier change");
       expect(blocked).toContain("Morrow has not sent this change");
       expect(blocked).toContain("same target");
@@ -712,7 +716,7 @@ describe("outer provider effects", () => {
         attention: ["provider_effect_target_scope_unknown"],
         plan: { tool: "canvas_update_create_page_courses", arguments: {} },
       };
-      const historicalScopeBlocked = await (await fetch(`${url}/operations/blocked-historical-scope`)).text();
+      const historicalScopeBlocked = await (await provenPage(approval, `${url}/operations/blocked-historical-scope`)).text();
       expect(historicalScopeBlocked).toContain("Check earlier change");
       expect(historicalScopeBlocked).toContain("An earlier change from an older Morrow version is still unresolved");
       expect(historicalScopeBlocked).toContain("Morrow has not sent this change");
@@ -738,11 +742,11 @@ describe("outer provider effects", () => {
     });
     try {
       const url = await missingApproval.start();
-      const review = await (await fetch(`${url}/operations/moodle-move-missing`)).text();
+      const review = await (await provenPage(missingApproval, `${url}/operations/moodle-move-missing`)).text();
       expect(review).toContain("Morrow could not identify the course or a selected item in Moodle.");
       expect(review).not.toContain('class="approve"');
       missingMove = { ...missingMove, state: "verified" };
-      const verified = await (await fetch(`${url}/operations/moodle-move-verified`)).text();
+      const verified = await (await provenPage(missingApproval, `${url}/operations/moodle-move-verified`)).text();
       expect(verified).not.toContain("Earlier values are not available in this review.");
     } finally {
       await missingApproval.close();
@@ -767,19 +771,19 @@ describe("outer provider effects", () => {
     });
     try {
       const url = await approval.start();
-      const named = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      const named = await (await provenPage(approval, `${url}/operations/canvas-quiz-delete`)).text();
       expect(named).toContain("MORROW quiz");
       expect(named).toContain('class="approve danger"');
 
       // A change that reaches no named object is still the person's to approve:
       // the page shows the exact request it will send.
       review = { targets: [] };
-      const plain = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      const plain = await (await provenPage(approval, `${url}/operations/canvas-quiz-delete`)).text();
       expect(plain).toContain('class="approve danger"');
       expect(plain).toContain("338137");
 
       review = { targets: [], unnamed: true };
-      const held = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      const held = await (await provenPage(approval, `${url}/operations/canvas-quiz-delete`)).text();
       expect(held).toContain("Morrow could not identify the course or a selected item in Canvas.");
       expect(held).not.toContain('class="approve"');
 
@@ -788,7 +792,7 @@ describe("outer provider effects", () => {
       // Telling the person to check their connection would send them to fix
       // something that is not broken.
       review = { targets: [{ field: "id", label: "Quiz", name: "", state: "absent" }] };
-      const absent = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      const absent = await (await provenPage(approval, `${url}/operations/canvas-quiz-delete`)).text();
       expect(absent).toContain("Canvas does not have the item this change names.");
       expect(absent).toContain("ask Morrow to read the latest Canvas content");
       expect(absent).not.toContain("Check your Canvas connection");
@@ -796,7 +800,7 @@ describe("outer provider effects", () => {
 
       // A reading that never reached Canvas still says so.
       review = { targets: [{ field: "id", label: "Quiz", name: "" }] };
-      const unreadable = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      const unreadable = await (await provenPage(approval, `${url}/operations/canvas-quiz-delete`)).text();
       expect(unreadable).toContain("Check your Canvas connection");
       expect(unreadable).not.toContain('class="approve"');
     } finally {
@@ -868,7 +872,7 @@ describe("outer provider effects", () => {
     });
     try {
       const url = await approval.start();
-      const review = await (await fetch(`${url}/batches/moodle-review`)).text();
+      const review = await (await provenPage(approval, `${url}/batches/moodle-review`)).text();
       const displayed = review.slice(0, review.lastIndexOf("<details><summary>Technical details"));
       expect(displayed).toContain("Edit Page");
       expect(displayed).toContain('aria-label="Content preview"');
@@ -911,7 +915,7 @@ describe("outer provider effects", () => {
     });
     try {
       const url = await approval.start();
-      const review = await (await fetch(`${url}/operations/moodle-grade-item`)).text();
+      const review = await (await provenPage(approval, `${url}/operations/moodle-grade-item`)).text();
       expect(review).toContain("Rename grade item?");
       expect(review).toContain("Moodle Biology");
       expect(review).toContain("Morrow gradebook check");
@@ -921,7 +925,7 @@ describe("outer provider effects", () => {
       expect(review).toContain('class="approve"');
 
       context = { targets: [], unnamed: true };
-      const blocked = await (await fetch(`${url}/operations/moodle-grade-item`)).text();
+      const blocked = await (await provenPage(approval, `${url}/operations/moodle-grade-item`)).text();
       expect(blocked).toContain("Morrow could not identify the course or a selected item in Moodle.");
       expect(blocked).not.toContain('class="approve"');
     } finally {
