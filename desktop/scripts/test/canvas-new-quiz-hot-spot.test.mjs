@@ -185,12 +185,26 @@ async function runMediaInit(input, { pageOrigin = ORIGIN, body = { url: INST_FS_
           redirect: options.redirect,
           credentials: options.credentials,
         });
+        const encoded = new TextEncoder().encode(JSON.stringify(body));
         return {
           ok: status >= 200 && status < 300,
           status,
           redirected: false,
           url: String(target?.href ?? target),
-          json: async () => body,
+          body: {
+            getReader() {
+              let sent = false;
+              return {
+                async read() {
+                  if (sent) return { done: true, value: undefined };
+                  sent = true;
+                  return { done: false, value: encoded };
+                },
+                cancel() {},
+              };
+            },
+            cancel() {},
+          },
         };
       },
     });
