@@ -16,8 +16,10 @@ export function canvasUploadUrlShape(value) {
 }
 
 /**
- * A Hot Spot image URL may leave only for the Canvas page origin, or for a
- * New Quiz host this code already treats as Canvas-owned for that same tenant.
+ * A URL whose host is the Canvas page origin, or a New Quiz host this code
+ * already treats as Canvas-owned for that same tenant. Course file and Hot Spot
+ * bytes do not use this allowlist. Those uploads follow the URL the isolated
+ * init read from Canvas.
  */
 export function canvasPrivateUploadUrl(value, canvasOrigin) {
   if (typeof value !== "string" || value.length < 1 || value.length > 8192) return null;

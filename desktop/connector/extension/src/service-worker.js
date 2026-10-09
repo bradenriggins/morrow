@@ -9,8 +9,8 @@ import { itemBankMediaFindings } from "./item-bank-guard.js";
 import { canClaimCourseConnectionIntent, canCompleteCourseConnectionIntent, normalizeCourseConnectionUrl, validCourseConnectionIntent } from "./course-connection-intent.js";
 import { MAX_FILE_TEXT_BYTES, canvasCourseFileDownloadUrl, canvasFileTextContentTypeSupported, executeCanvasCourseFileTextInPage } from "./canvas-file-content.js";
 import { CANVAS_FILE_SIGNALS_OPERATION_KEY, CANVAS_FILE_SIGNALS_SCHEMA, CANVAS_FILE_SIGNALS_TOOL_NAME, canvasCourseFileSignals, canvasFileSignalsContentTypeSupported } from "./canvas-file-signals.js";
-import { canvasPrivateUploadUrl, canvasUploadFolderId, canvasUploadUrlShape, executeCanvasCourseFileTransferInPage, executeCanvasUploadInitIsolated } from "./canvas-file-transfer.js";
-import { canvasNewQuizHotSpotVerification, executeCanvasNewQuizHotSpotInPage, unsignedHotSpotImageUrl } from "./canvas-new-quiz-hot-spot.js";
+import { canvasUploadFolderId, canvasUploadUrlShape, executeCanvasCourseFileTransferInPage, executeCanvasUploadInitIsolated } from "./canvas-file-transfer.js";
+import { canvasNewQuizHotSpotVerification, executeCanvasHotSpotMediaInitIsolated, executeCanvasNewQuizHotSpotInPage, unsignedHotSpotImageUrl } from "./canvas-new-quiz-hot-spot.js";
 import { CANVAS_CONVERSATION_PRIVATE_SCHEMA, PRIVATE_CANVAS_CONVERSATION_OPERATION, PRIVATE_CANVAS_CONVERSATION_TOOL, canvasConversationOperationMatches, executeCanvasConversationInPage, normalizeCanvasConversationPrivatePayload } from "./canvas-conversations.js";
 import { problemCopy, problemText } from "./bridge-problem-copy.js";
 import { bridgeWriteFailureCode, canvasWriteOutcomeUncertain } from "./canvas-write-outcome.js";
@@ -4888,15 +4888,6 @@ function observeCanvasUploadConfirmation(uploadUrl, canvasOrigin, signal, method
   return observer;
 }
 
-/**
- * The signed URL Canvas answered the media upload request with. It is used to
- * send the bytes and then, with its query string removed, as the image URL the
- * created question carries. Its signature never leaves this worker.
- */
-function privateCanvasSignedUploadUrl(value, canvasOrigin) {
-  return canvasPrivateUploadUrl(value, canvasOrigin);
-}
-
 function canvasUploadRedirectKept(response, uploadUrl, canvasOrigin) {
   if (!response || response.redirected !== true) return true;
   let finalUrl;
@@ -4915,18 +4906,40 @@ function canvasUploadLocationKept(response, uploadUrl, canvasOrigin) {
 }
 
 /**
+ * A Hot Spot PUT may stay on the host the isolated media init named. A redirect
+ * to any other host, including the Canvas origin, is refused.
+ */
+function canvasHotSpotRedirectKept(response, uploadUrl) {
+  if (!response || response.redirected !== true) return true;
+  let finalUrl;
+  try { finalUrl = new URL(response.url); } catch { return false; }
+  if (finalUrl.protocol !== "https:" || finalUrl.username || finalUrl.password || finalUrl.hash) return false;
+  return finalUrl.origin === uploadUrl.origin;
+}
+
+function canvasHotSpotLocationKept(response, uploadUrl) {
+  const location = response?.headers?.get?.("location");
+  if (typeof location !== "string" || !location) return true;
+  let next;
+  try { next = new URL(location, uploadUrl); } catch { return false; }
+  if (next.protocol !== "https:" || next.username || next.password || next.hash) return false;
+  return next.origin === uploadUrl.origin;
+}
+
+/**
  * One reviewed New Quizzes Hot Spot question, sent once.
  *
  * Canvas splits this into three requests that only work in order. The page reads
- * the current course, quiz and complete saved question list and asks Canvas for
- * one signed upload URL. This worker sends the reviewed bytes to that URL with
- * one PUT, and watches that exact request so it learns the real response even
- * when the upload host answers opaquely. Only a confirmed upload lets the page
- * create the question, with the same URL minus its query string, and reread what
- * Canvas saved. A watch that ends without confirming refuses the create even
- * when the worker's own read of the PUT looked like a success, and because the
- * bytes may have reached the host anyway, that success-looking read leaves the
- * outcome unknown.
+ * the current course, quiz and complete saved question list. The isolated world
+ * asks the bound Canvas or quiz host for one media upload URL. This worker sends
+ * the reviewed bytes to the https host that answer named, including inst-fs and
+ * S3, and watches that exact request so it learns the real response even when
+ * the upload host answers opaquely. Only a confirmed upload lets the page create
+ * the question, with the same URL minus its query string, and reread what Canvas
+ * saved. A watch that ends without confirming refuses the create even when the
+ * worker's own read of the PUT looked like a success, and because the bytes may
+ * have reached the host anyway, that success-looking read leaves the outcome
+ * unknown.
  *
  * Nothing here is sent twice. Once the create is dispatched, an ending that does
  * not prove a refusal is reported as an unknown outcome, and Morrow never
@@ -4977,8 +4990,27 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
       || !Number.isSafeInteger(prepared.data.item_count) || prepared.data.item_count < 0) {
       return { ok: false, sent: false, error: prepared?.error || "canvas_hot_spot_upload_init_invalid" };
     }
-    const uploadUrl = privateCanvasSignedUploadUrl(prepared.data.upload_url, binding.origin);
-    if (!uploadUrl) return { ok: false, sent: false, error: "canvas_hot_spot_upload_url_refused" };
+    // The page's fetch is not asked for the media URL. A replaced window.fetch
+    // cannot name the host that receives the image.
+    const [initialized] = await chrome.scripting.executeScript({
+      target: { tabId: binding.tabId, frameIds: [0] }, world: "ISOLATED", func: executeCanvasHotSpotMediaInitIsolated,
+      args: [JSON.stringify({
+        origin: binding.origin,
+        courseId: binding.courseId,
+        assignmentId: String(args.assignment_id),
+        expiresAt: deadline,
+      })],
+    });
+    const supplied = initialized?.result?.upload_url;
+    const uploadUrl = initialized?.result?.ok === true ? canvasUploadUrlShape(supplied) : null;
+    if (!uploadUrl || uploadUrl.href !== canvasUploadUrlShape(supplied)?.href) {
+      return {
+        ok: false, sent: false,
+        error: typeof supplied === "string" && !canvasUploadUrlShape(supplied)
+          ? "canvas_hot_spot_upload_url_refused"
+          : (initialized?.result?.error || "canvas_hot_spot_upload_init_invalid"),
+      };
+    }
     uploadHost = uploadUrl.hostname;
     uploadObserver = observeCanvasUploadConfirmation(uploadUrl, binding.origin, controller.signal, "PUT");
     if (!uploadObserver) return { ok: false, sent: false, error: "canvas_hot_spot_upload_observer_unavailable" };
@@ -4999,7 +5031,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
       signal: controller.signal,
       body: bytes,
     });
-    if (!canvasUploadRedirectKept(upload, uploadUrl, binding.origin) || !canvasUploadLocationKept(upload, uploadUrl, binding.origin)) {
+    if (!canvasHotSpotRedirectKept(upload, uploadUrl) || !canvasHotSpotLocationKept(upload, uploadUrl)) {
       return {
         ok: false, sent: true, outcomeUnknown: true, status: upload.status,
         upload_host: uploadHost, error: "canvas_hot_spot_upload_url_refused",
