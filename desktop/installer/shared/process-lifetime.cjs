@@ -324,10 +324,16 @@ async function processMatchesRecordedLifetime(pid, observedAt) {
 function matchExactProcessStart(expected, observed) {
   if (!Number.isFinite(expected) || !observed || !Number.isFinite(observed.at)) return null;
   const resolution = Number.isFinite(observed.resolutionMs) && observed.resolutionMs > 0 ? observed.resolutionMs : 1_000;
-  if (resolution >= 1_000 || expected % 1_000 === 0) {
-    return Math.floor(expected / 1_000) === Math.floor(observed.at / 1_000) ? true : false;
+  if (observed.at === expected && resolution < 1_000) return true;
+  const sameSecond = Math.floor(expected / 1_000) === Math.floor(observed.at / 1_000);
+  if (!sameSecond) return false;
+  // A one-second observation cannot confirm a recorded instant that has a
+  // fraction. Two real starts inside that second stay unknown. A record that
+  // is itself that whole second matches the child the coarse clock can see.
+  if (resolution >= 1_000) {
+    return expected % 1_000 === 0 && observed.at === Math.floor(expected / 1_000) * 1_000 ? true : null;
   }
-  return observed.at === expected ? true : false;
+  return expected % 1_000 === 0 ? true : false;
 }
 
 async function processMatchesExactStart(pid, recordedStartedAt, readObservation = null) {
