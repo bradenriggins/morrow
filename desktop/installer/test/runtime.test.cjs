@@ -180,6 +180,16 @@ test("MCP startup verification rejects unsealed code added to a direct package",
   assert.equal(await verifyMcpRuntime(payloadRoot, manifestSha256), null);
 });
 
+test("a payload file read that never resolves fails closed inside its bound", async () => {
+  const started = Date.now();
+  const result = await verifyMcpRuntime("/tmp/morrow-payload-read-bound", "a".repeat(64), null, {
+    readFile: () => new Promise(() => {}),
+    fileReadTimeoutMs: 50,
+  });
+  assert.equal(result, null);
+  assert.ok(Date.now() - started < 1_000);
+});
+
 test("MCP startup rejects the legacy package input schema that could select mutable dependencies", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-runtime-legacy-input-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

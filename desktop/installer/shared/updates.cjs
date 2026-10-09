@@ -1143,6 +1143,10 @@ function createUpdateController({
       ))
       .then(async (lease) => {
         if (!isGrantedRestartLease(lease)) return deferredInstall(version);
+        if (!attempts) {
+          try { await releaseRestartLease(lease.leaseId); } catch { /* An uncommitted lease is not used. */ }
+          return transition("error", version, "update_runtime_unverified");
+        }
         const attempt = await recordAttempt(version);
         // The attempt is durable before the owner crosses its closing boundary.
         // A failed claim releases the still-reversible lease.

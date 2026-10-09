@@ -183,6 +183,10 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow could not finish this step.",
     recovery: "Check status, then try the step again. If it still fails, close Morrow and reopen it."
   },
+  claude_desktop_unverified: {
+    message: "Morrow could not confirm that Claude Desktop will open this extension.",
+    recovery: "Install Claude Desktop, then try again. Morrow did not open an unverified link."
+  },
   cancelled: {
     message: "No folder was selected.",
     recovery: "Choose a folder when you are ready."

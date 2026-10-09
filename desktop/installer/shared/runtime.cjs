@@ -7,6 +7,7 @@ const MCP_RUNTIME_SCHEMA = "morrow.mcp-runtime-manifest.v2";
 const MCP_RUNTIME_HEALTH_SCHEMA = "morrow.mcp-runtime.health.v1";
 const SHA256 = /^[0-9a-f]{64}$/;
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const PAYLOAD_FILE_READ_TIMEOUT_MS = 5_000;
 const REQUIRED_DIRECT_RUNTIME_FILES = Object.freeze([
   "packages/client-config/dist/cli.js",
   "packages/mcp-server/dist/index.js",
@@ -84,7 +85,22 @@ async function directRuntimeFileSet(root) {
   return files.sort();
 }
 
-async function sameFileRecord(root, record) {
+function readPayloadFile(file, readFile, timeoutMs) {
+  const controller = new AbortController();
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(Object.assign(new Error("payload file read timed out"), { code: "ERR_PAYLOAD_READ_TIMEOUT" }));
+    }, timeoutMs);
+  });
+  return Promise.race([
+    Promise.resolve().then(() => readFile(file, { signal: controller.signal })),
+    timeout,
+  ]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
+async function sameFileRecord(root, record, readFile = fs.readFile, timeoutMs = PAYLOAD_FILE_READ_TIMEOUT_MS) {
   const target = path.resolve(root, record.path);
   const relative = path.relative(root, target);
   if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return false;
@@ -93,7 +109,7 @@ async function sameFileRecord(root, record) {
     if (canonicalTarget !== path.resolve(canonicalRoot, record.path)) return false;
     const info = await fs.lstat(target);
     if (!info.isFile() || info.isSymbolicLink() || info.size !== record.bytes) return false;
-    return sha256(await fs.readFile(target)) === record.sha256;
+    return sha256(await readPayloadFile(target, readFile, timeoutMs)) === record.sha256;
   } catch {
     return false;
   }
@@ -152,7 +168,10 @@ function mcpRuntimeManifest(value) {
  * in the signed application metadata. It returns only the bounded health
  * binding passed to the child gateway; callers never expose payload paths.
  */
-async function verifyMcpRuntime(payloadRoot, expectedManifestSha256, expectedNodeSha256 = null) {
+async function verifyMcpRuntime(payloadRoot, expectedManifestSha256, expectedNodeSha256 = null, dependencies = {}) {
+  const readFile = dependencies.readFile || fs.readFile;
+  const fileReadTimeoutMs = dependencies.fileReadTimeoutMs || PAYLOAD_FILE_READ_TIMEOUT_MS;
+  const read = (file) => readPayloadFile(file, readFile, fileReadTimeoutMs);
   if (typeof expectedManifestSha256 !== "string" || !SHA256.test(expectedManifestSha256)) return null;
   const payload = path.resolve(payloadRoot);
   const appRoot = path.join(payload, "app");
@@ -162,8 +181,8 @@ async function verifyMcpRuntime(payloadRoot, expectedManifestSha256, expectedNod
   let input;
   let manifest;
   try {
-    manifestBytes = await fs.readFile(manifestPath);
-    input = parseStrictJson(await fs.readFile(inputPath), "MCP package input manifest");
+    manifestBytes = await read(manifestPath);
+    input = parseStrictJson(await read(inputPath), "MCP package input manifest");
     manifest = mcpRuntimeManifest(parseStrictJson(manifestBytes, "MCP runtime manifest"));
   } catch {
     return null;
@@ -183,17 +202,17 @@ async function verifyMcpRuntime(payloadRoot, expectedManifestSha256, expectedNod
     try {
       const info = await fs.lstat(nodePath);
       if (!info.isFile() || info.isSymbolicLink()
-        || sha256(await fs.readFile(nodePath)) !== expectedNodeSha256) return null;
+        || sha256(await read(nodePath)) !== expectedNodeSha256) return null;
     } catch {
       return null;
     }
   }
   const root = path.join(payload, "app");
-  if (!await sameFileRecord(root, manifest.entrypoint)) return null;
+  if (!await sameFileRecord(root, manifest.entrypoint, readFile, fileReadTimeoutMs)) return null;
   for (const dependency of manifest.dependencies) {
-    for (const record of dependency.files) if (!await sameFileRecord(root, record)) return null;
+    for (const record of dependency.files) if (!await sameFileRecord(root, record, readFile, fileReadTimeoutMs)) return null;
   }
-  for (const record of manifest.directFiles) if (!await sameFileRecord(root, record)) return null;
+  for (const record of manifest.directFiles) if (!await sameFileRecord(root, record, readFile, fileReadTimeoutMs)) return null;
   const actualDirectFiles = await directRuntimeFileSet(root);
   const expectedDirectFiles = manifest.directFiles.map((record) => record.path).sort();
   if (!actualDirectFiles || actualDirectFiles.length !== manifest.directFiles.length

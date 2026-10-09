@@ -565,6 +565,91 @@ test("quit during bootstrap blocks activation, joins bootstrap, and cleans its l
   assert.equal(target.quits, 1);
 });
 
+test("a startup file read that never resolves still opens the window inside the bound", async () => {
+  const root = await temporaryRoot();
+  const previousBound = process.env.MORROW_STARTUP_INITIALIZATION_BOUND_MS;
+  const previousPayload = process.env.MORROW_INSTALLER_PAYLOAD;
+  process.env.MORROW_STARTUP_INITIALIZATION_BOUND_MS = "200";
+  process.env.MORROW_INSTALLER_PAYLOAD = path.join(root, "Payload");
+  let windows = 0;
+  let releaseQuit;
+  const quitted = new Promise((resolve) => { releaseQuit = resolve; });
+  const handlers = new Map();
+  const app = {
+    isPackaged: false,
+    exitCode: null,
+    quits: 0,
+    getVersion: () => "1.0.0-rc.0",
+    getPath: () => path.join(root, "UserData"),
+    setName() {},
+    setPath() {},
+    requestSingleInstanceLock: () => true,
+    whenReady: () => ({ then(onReady) { return Promise.resolve().then(onReady); } }),
+    on(name, handler) { handlers.set(name, handler); },
+    quit() { this.quits += 1; releaseQuit(); },
+  };
+  const webContents = {
+    on() {},
+    setWindowOpenHandler() {},
+  };
+  const undo = [
+    plant(electronPath, {
+      app,
+      BrowserWindow: class {
+        constructor() {
+          windows += 1;
+          this.webContents = webContents;
+        }
+        isDestroyed() { return false; }
+        once() {}
+        show() {}
+        loadFile() { return Promise.resolve(); }
+        destroy() {}
+      },
+      dialog: { showErrorBox() {} },
+      ipcMain: { handle() {} },
+      session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+      shell: {},
+      clipboard: {},
+    }),
+    plant(updaterPath, { autoUpdater: {} }),
+    plant(adapterPath, { createElectronUpdaterAdapter: () => ({}) }),
+    plant(updatesPath, {
+      createUpdateAttemptStore: () => ({}),
+      createUpdateController: () => ({ subscribe: () => () => {}, start: async () => {}, stop() {} }),
+    }),
+    plant(controllerPath, {
+      ...controllerModule,
+      createInstallerController: () => ({
+        async initializeBridgeAtStartup() { await new Promise(() => {}); },
+        async closeRuntimeMonitor() {},
+      }),
+    }),
+  ];
+  delete require.cache[mainPath];
+  const started = Date.now();
+  try {
+    require(mainPath);
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("the window did not open")), 2_000);
+      const watch = setInterval(() => {
+        if (windows > 0) { clearInterval(watch); clearTimeout(timer); resolve(); }
+      }, 20);
+    });
+    assert.equal(windows, 1);
+    assert.ok(Date.now() - started < 2_000);
+  } finally {
+    handlers.get("before-quit")?.({ preventDefault() {} });
+    await Promise.race([quitted, new Promise((resolve) => setTimeout(resolve, 500))]);
+    delete require.cache[mainPath];
+    for (const restore of undo.reverse()) restore();
+    if (previousBound === undefined) delete process.env.MORROW_STARTUP_INITIALIZATION_BOUND_MS;
+    else process.env.MORROW_STARTUP_INITIALIZATION_BOUND_MS = previousBound;
+    if (previousPayload === undefined) delete process.env.MORROW_INSTALLER_PAYLOAD;
+    else process.env.MORROW_INSTALLER_PAYLOAD = previousPayload;
+  }
+});
+
 test("the real main process closes a controller created by startup and creates nothing after quit", async () => {
   const root = await temporaryRoot();
   let releaseBootstrap;

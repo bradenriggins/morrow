@@ -260,6 +260,16 @@ function renderUpdates(current) {
   updatesPanel.hidden = false;
   const version = typeof updates.availableVersion === "string" && updates.availableVersion ? ` version ${updates.availableVersion}` : " an update";
   const automatic = updates.automatic === true;
+  if (updates.reason === "update_download_failed" || updates.reason === "update_download_timeout") {
+    updatesCopy.textContent = "Morrow could not download the update. Try again.";
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>');
+    return;
+  }
+  if (updates.reason === "update_install_failed" && updates.status === "installing") {
+    updatesCopy.textContent = "Morrow could not install the update. Try again when course work is idle.";
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>');
+    return;
+  }
   if (updates.status === "idle") {
     updatesCopy.textContent = automatic ? "Morrow checks for updates automatically. You can also check now." : "Morrow is ready to check for an update.";
     renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Check for updates</button>');

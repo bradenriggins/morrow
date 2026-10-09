@@ -98,6 +98,27 @@ test("Blackboard setup seals the credential route and keeps it out of public sta
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test("a crash after the secret rename and before the config rename leaves the previous credential live", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
+  try {
+    const before = await setup(root, { secret: "old-credential" });
+    const paths = blackboardPaths(root, TENANT);
+    const oldCredential = await fs.readFile(paths.credential, "utf8");
+    let liveDuringConfig = null;
+    await assert.rejects(() => setup(root, {
+      secret: "new-credential",
+      writeConfigFile: async () => {
+        liveDuringConfig = await fs.readFile(paths.credential, "utf8");
+        throw new Error("crash before config rename");
+      },
+    }), /crash before config rename/);
+    assert.equal(liveDuringConfig, oldCredential);
+    assert.equal(await fs.readFile(paths.credential, "utf8"), oldCredential);
+    assert.equal(JSON.parse(oldCredential).applicationSecret, "old-credential");
+    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), before);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test("a config-write failure restores an exact prior credential pair and never publishes the new route", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
   try {
@@ -185,7 +206,7 @@ test("complete Blackboard data removal never deletes a secret while its route re
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
-test("a failed Windows ACL confirmation leaves an old route and new credential unusable", async () => {
+test("a failed read of the new secret leaves the previous credential live", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
   try {
     const configured = await setup(root, { secret: "old-credential" });
@@ -194,10 +215,9 @@ test("a failed Windows ACL confirmation leaves an old route and new credential u
       secret: "new-credential",
       privateFileAccessAccepted: () => ++accepted <= 2,
     }), /Blackboard credential access is not private/);
-    assert.deepEqual(
-      await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }),
-      { ...configured, status: "credential_mismatched" },
-    );
+    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), configured);
+    const paths = blackboardPaths(root, TENANT);
+    assert.equal(JSON.parse(await fs.readFile(paths.credential, "utf8")).applicationSecret, "old-credential");
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 

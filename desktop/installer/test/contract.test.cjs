@@ -782,7 +782,8 @@ test("routine installer state does not create or rotate the app-owned Bridge dir
   const main = fs.readFileSync(path.join(installerRoot, "main.cjs"), "utf8");
   const controller = fs.readFileSync(path.join(installerRoot, "shared", "installer-controller.cjs"), "utf8");
   const state = controller.slice(controller.indexOf("  async state() {"), controller.indexOf("  async revealBridgeFolder() {"));
-  assert.match(main, /await installer\.initializeBridgeAtStartup\(\)\.catch\(\(\) => \{\}\);/);
+  assert.match(main, /settleStartupInitialization\(installer\.initializeBridgeAtStartup\(\)\)/);
+  assert.match(main, /Promise\.resolve\(operation\)\.catch\(\(\) => \{\}\)/);
   assert.match(controller, /bridgeInstallationStatus/);
   assert.doesNotMatch(state, /initializeBridgeAtStartup|ensureBridgeDirectory|initializeBridgeDirectory|issueBridgeActiveFolderChallenge|bridgeInstallationStatus/);
 });

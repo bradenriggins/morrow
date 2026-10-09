@@ -1240,6 +1240,39 @@ test("an update that did not start names the running version and offers the retr
   assert.equal(dom.element("#updates-actions").querySelector("[data-action]").dataset.action, "check-for-updates");
 });
 
+test("a download timeout or install failure shows the failure and a retry that checks again", async () => {
+  const snapshot = (status, reason) => ({
+    schema: "morrow.desktop-update.v1",
+    status,
+    currentVersion: "1.0.0",
+    availableVersion: "1.0.1",
+    automatic: true,
+    reason,
+  });
+  const methods = [];
+  let updates = snapshot("available", "update_download_timeout");
+  const dom = await load("update-failure-retry", async (method) => {
+    methods.push(method);
+    if (method === "installer:check-for-updates") updates = snapshot("checking", null);
+    return ok(state({ updates }));
+  });
+  assert.equal(dom.element("#updates-copy").textContent, "Morrow could not download the update. Try again.");
+  assert.equal(dom.element("#updates-copy").textContent.includes("will download"), false);
+  let retry = dom.element("#updates-actions").querySelector("[data-action]");
+  assert.equal(retry.dataset.action, "check-for-updates");
+  await dom.element("#updates-actions").dispatch("click", { target: retry });
+  await settle();
+  assert.ok(methods.includes("installer:check-for-updates"));
+  assert.equal(dom.element("#updates-copy").textContent, "Morrow is checking for an update.");
+
+  updates = snapshot("installing", "update_install_failed");
+  await checkStatus(dom);
+  assert.equal(dom.element("#updates-copy").textContent, "Morrow could not install the update. Try again when course work is idle.");
+  assert.equal(dom.element("#updates-copy").textContent.includes("installing its update"), false);
+  retry = dom.element("#updates-actions").querySelector("[data-action]");
+  assert.equal(retry.dataset.action, "check-for-updates");
+});
+
 test("a ready update blocked by course work names the version and offers to try again", async () => {
   const busy = {
     schema: "morrow.desktop-update.v1",

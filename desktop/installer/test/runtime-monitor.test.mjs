@@ -9,7 +9,11 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "@typescript/typescript6";
 import { hardenPrivateDirectory } from "../../packages/gateway-core/dist/private-file-access.js";
+import { createRequire } from "node:module";
 import { createChildProcessReclaimer, createRuntimeMonitor } from "../shared/runtime-monitor.mjs";
+
+const require = createRequire(import.meta.url);
+const { matchExactProcessStart } = require("../shared/process-lifetime.cjs");
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const gatewayEntry = path.join(repository, "packages/mcp-server/dist/index.js");
@@ -106,7 +110,7 @@ test("child reclaim treats a PID that dies during the post-SIGTERM identity chec
   assert.deepEqual(signals, ["SIGTERM"]);
 });
 
-test("Windows child reclaim force-kills the process tree after the SIGTERM grace period", async () => {
+test("Windows child reclaim tree-kills for the grace stop and the force stop without process.kill", async () => {
   const signals = [];
   const trees = [];
   let clock = 0;
@@ -116,17 +120,62 @@ test("Windows child reclaim force-kills the process tree after the SIGTERM grace
     platform: "win32",
     processAlive: () => alive,
     processMatchesExactStart: async () => identities.shift() ?? true,
-    signalProcess: (_pid, signal) => { signals.push(signal); },
+    signalProcess: () => {
+      signals.push("process.kill");
+      alive = false;
+    },
     terminatePidTree: (pid, force) => {
       trees.push({ pid, force });
-      alive = false;
+      if (force) alive = false;
     },
     pause: async (milliseconds) => { clock += milliseconds; },
     now: () => clock,
   });
   assert.equal(await reclaim(4242, "2026-09-14T00:00:00.000Z", 100), true);
-  assert.deepEqual(signals, ["SIGTERM"]);
-  assert.deepEqual(trees, [{ pid: 4242, force: true }]);
+  assert.deepEqual(signals, []);
+  assert.deepEqual(trees, [{ pid: 4242, force: false }, { pid: 4242, force: true }]);
+});
+
+test("a one-second start clock does not authorize a signal when two real starts share that second", async () => {
+  const first = Date.parse("2026-09-14T00:00:00.100Z");
+  const second = Date.parse("2026-09-14T00:00:00.800Z");
+  assert.notEqual(first, second);
+  assert.equal(Math.floor(first / 1000), Math.floor(second / 1000));
+  const truncated = Math.floor(second / 1000) * 1000;
+  assert.equal(matchExactProcessStart(first, { at: truncated, resolutionMs: 1000 }), null);
+  assert.equal(matchExactProcessStart(first, { at: first, resolutionMs: 10 }), true);
+
+  const signals = [];
+  const trees = [];
+  const refused = createChildProcessReclaimer({
+    platform: "linux",
+    processAlive: () => true,
+    processMatchesExactStart: async () => matchExactProcessStart(first, { at: truncated, resolutionMs: 1000 }),
+    signalProcess: () => { signals.push("signal"); },
+    terminatePidTree: () => { trees.push("tree"); },
+    pause: async () => {},
+    now: () => 0,
+  });
+  assert.equal(await refused(process.pid, new Date(first).toISOString(), 100), false);
+  assert.deepEqual(signals, []);
+  assert.deepEqual(trees, []);
+
+  let clock = 0;
+  let alive = true;
+  const allowed = [];
+  const signaled = createChildProcessReclaimer({
+    platform: "linux",
+    processAlive: () => alive,
+    processMatchesExactStart: async () => matchExactProcessStart(first, { at: first, resolutionMs: 10 }),
+    signalProcess: (_pid, name) => {
+      allowed.push(name);
+      if (name === "SIGKILL") alive = false;
+    },
+    pause: async (milliseconds) => { clock += milliseconds; },
+    now: () => clock,
+  });
+  assert.equal(await signaled(process.pid, new Date(first).toISOString(), 100), true);
+  assert.deepEqual(allowed, ["SIGTERM", "SIGKILL"]);
 });
 
 for (const platform of ["linux", "win32"]) {
@@ -179,10 +228,24 @@ for (const platform of ["linux", "win32"]) {
       now: () => clock,
     });
     assert.equal(await reclaim(4242, "2026-09-14T00:00:00.000Z", 100), false);
-    assert.deepEqual(signals, ["SIGTERM"]);
-    assert.deepEqual(trees, []);
+    if (platform === "win32") {
+      assert.deepEqual(signals, []);
+      assert.deepEqual(trees, [{ pid: 4242, force: false }]);
+    } else {
+      assert.deepEqual(signals, ["SIGTERM"]);
+      assert.deepEqual(trees, []);
+    }
   });
 }
+
+test("the diagnostic launcher tree-kills on Windows instead of TerminateProcess of one child", async () => {
+  const source = await readFile(fileURLToPath(new URL("../shared/runtime-monitor.mjs", import.meta.url)), "utf8");
+  const launcher = source.slice(source.indexOf("function writeTestDiagnosticLauncher"), source.indexOf("function readTestDiagnosticChild"));
+  assert.match(launcher, /taskkill\.exe/);
+  assert.match(launcher, /"\/T"/);
+  assert.match(launcher, /process\.platform === "win32"/);
+  assert.equal(launcher.includes("child.kill(signal)"), false);
+});
 
 function processIsAlive(pid) {
   // Every process these tests spawn runs as this user, so a live pid this

@@ -248,10 +248,11 @@ async function stopStubbornTree(child, input) {
   await waitFor(() => remaining().length === 0);
 }
 
-/** Waits until `child` has written `text` to stdout, collected in `chunks`; fails if it closes first. */
-function outputIncludes(child, chunks, text) {
+/** Waits until `child` has written `text` to stdout, collected in `chunks`; fails if it closes first or the bound passes. */
+function outputIncludes(child, chunks, text, timeoutMs = 15_000) {
   return new Promise((resolve, reject) => {
     const written = () => Buffer.concat(chunks).toString().includes(text);
+    let timer = null;
     const check = () => {
       if (!written()) return;
       cleanup();
@@ -262,10 +263,16 @@ function outputIncludes(child, chunks, text) {
       if (written()) resolve();
       else reject(new Error(`the launcher closed before it wrote ${text}`));
     };
+    const timedOut = () => {
+      cleanup();
+      reject(new Error(`timed out waiting for ${JSON.stringify(text)}`));
+    };
     const cleanup = () => {
+      if (timer) clearTimeout(timer);
       child.stdout.off("data", check);
       child.off("close", closed);
     };
+    timer = setTimeout(timedOut, timeoutMs);
     child.stdout.on("data", check);
     child.once("close", closed);
     check();
@@ -425,7 +432,91 @@ test("a closed verified Claude Desktop receipt preserves the installed fact", as
   assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: true, running: false });
 });
 
-test("Windows Claude setup opens the registered app and reveals only its own extension file", async (t) => {
+test("outputIncludes fails inside a bound when the child stays up and never prints the text", async () => {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "pipe", "ignore"] });
+  const chunks = [];
+  child.stdout.on("data", (chunk) => chunks.push(chunk));
+  const started = Date.now();
+  try {
+    await assert.rejects(outputIncludes(child, chunks, "never-printed", 200), /timed out waiting/);
+    assert.ok(Date.now() - started < 2_000);
+  } finally {
+    child.kill();
+  }
+});
+
+test("the Claude proof stand-in refuses a taskkill that is not a tree kill", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-taskkill-tree-"));
+  const log = path.join(directory, "proof.log");
+  const marker = path.join(directory, "tree.json");
+  const resultPath = path.join(directory, "result.json");
+  await fs.writeFile(log, "");
+  const parentSource = `
+    const fs = require("node:fs");
+    const { spawn } = require("node:child_process");
+    const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    fs.writeFileSync(process.env.MARKER, JSON.stringify({ parent: process.pid, descendant: descendant.pid }));
+    setInterval(() => {}, 1000);
+  `;
+  const killerSource = `
+    const fs = require("node:fs");
+    const { spawn } = require("node:child_process");
+    const tree = JSON.parse(fs.readFileSync(process.env.MARKER, "utf8"));
+    const killer = spawn("taskkill.exe", ["/PID", String(tree.parent), ...process.env.TASKKILL_FLAGS.split(" ").filter(Boolean)], { stdio: "ignore" });
+    killer.on("close", (code) => {
+      setTimeout(() => {
+        let alive = true;
+        try { process.kill(tree.descendant, 0); } catch (error) { alive = error && error.code !== "ESRCH"; }
+        fs.writeFileSync(process.env.RESULT, JSON.stringify({ code, alive }));
+        try { process.kill(tree.parent, "SIGKILL"); } catch {}
+        try { process.kill(tree.descendant, "SIGKILL"); } catch {}
+        process.exit(0);
+      }, 200);
+    });
+  `;
+  const parent = spawn(process.execPath, ["-e", parentSource], {
+    env: { ...process.env, MARKER: marker },
+    stdio: "ignore",
+  });
+  const run = (flags) => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--require", proofSimulation, "-e", killerSource], {
+      env: {
+        ...process.env,
+        MORROW_TEST_CLAUDE_PROOF: "hang",
+        MORROW_TEST_CLAUDE_PROOF_LOG: log,
+        MARKER: marker,
+        RESULT: resultPath,
+        TASKKILL_FLAGS: flags,
+      },
+      stdio: "ignore",
+    });
+    const timer = setTimeout(() => { child.kill(); reject(new Error("taskkill stand-in did not settle")); }, 5_000);
+    child.once("close", () => { clearTimeout(timer); resolve(); });
+  });
+  try {
+    await waitFor(async () => {
+      try { return JSON.parse(await fs.readFile(marker, "utf8")).descendant > 0; } catch { return false; }
+    });
+    await run("/F");
+    const refused = JSON.parse(await fs.readFile(resultPath, "utf8"));
+    assert.equal(refused.code, 1);
+    assert.equal(refused.alive, true, "a single-PID kill must not satisfy a tree-kill request");
+    await run("/T /F");
+    const killed = JSON.parse(await fs.readFile(resultPath, "utf8"));
+    assert.equal(killed.code, 0);
+    assert.equal(killed.alive, false, "a tree kill must end the descendant, not only the named PID");
+  } finally {
+    parent.kill();
+    try {
+      const tree = JSON.parse(await fs.readFile(marker, "utf8"));
+      try { process.kill(tree.descendant, "SIGKILL"); } catch {}
+      try { process.kill(tree.parent, "SIGKILL"); } catch {}
+    } catch {}
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Windows Claude setup opens the prepared bundle and reveals only its own extension file", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-claude-desktop-open-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const installer = controller(root, { isCurrentClaudeDesktopSetup: async () => true });
@@ -437,7 +528,7 @@ test("Windows Claude setup opens the registered app and reveals only its own ext
   const calls = [];
   installer.shell = {
     openExternal: async (value) => calls.push(["application", value]),
-    openPath: async () => assert.fail("Windows must not depend on a .mcpb file association"),
+    openPath: async (value) => { calls.push(["bundle", value]); return ""; },
     showItemInFolder: (value) => calls.push(["file", value])
   };
   await installer.writeRecord({ ...freshRecord(), configured: { "claude-desktop": {
@@ -447,7 +538,8 @@ test("Windows Claude setup opens the registered app and reveals only its own ext
   } } });
   await installer.openClaudeDesktop();
   await installer.revealClaudeDesktopBundle();
-  assert.deepEqual(calls, [["application", "claude://"], ["file", bundle]]);
+  assert.deepEqual(calls, [["bundle", bundle], ["file", bundle]]);
+  assert.equal(calls.some((call) => call[0] === "application"), false);
 
   const outside = path.join(root, "Morrow.mcpb");
   await fs.writeFile(outside, "unrelated file");
@@ -458,6 +550,17 @@ test("Windows Claude setup opens the registered app and reveals only its own ext
   } } });
   await assert.rejects(installer.revealClaudeDesktopBundle(), { code: "setup_failed" });
   assert.equal(calls.length, 2);
+
+  const opener = { calls: 0 };
+  installer.shell.openExternal = async () => { opener.calls += 1; };
+  installer.shell.openPath = async () => "missing";
+  await installer.writeRecord({ ...freshRecord(), configured: { "claude-desktop": {
+    bundlePath: path.join(root, "missing", "Morrow.mcpb"),
+    installationId: "windows-unverified-test",
+    receiptPath: path.join(root, "missing", "connection.json")
+  } } });
+  await assert.rejects(installer.openClaudeDesktop(), { code: "claude_desktop_unverified" });
+  assert.equal(opener.calls, 0, "an unverified claude:// handler must not be opened");
 });
 
 test("a mismatched or oversized connection receipt cannot mark Claude configured", async (t) => {

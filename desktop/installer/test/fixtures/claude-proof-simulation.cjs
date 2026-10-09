@@ -55,7 +55,37 @@ childProcess.spawn = function simulatedSpawn(command, args, options) {
     const list = Array.isArray(args) ? args : [];
     const pid = Number(list[list.indexOf("/PID") + 1]);
     const signal = list.includes("/F") ? "SIGKILL" : "SIGTERM";
-    return originalSpawn.call(this, process.execPath, ["-e", `try { process.kill(${pid}, ${JSON.stringify(signal)}); } catch {}`], { ...options, shell: false });
+    // A tree kill is /T. Killing only the named PID leaves its children
+    // reparented, so a request without /T fails and signals nothing.
+    const script = list.includes("/T")
+      ? `const fs = require("node:fs");
+const root = ${pid};
+const signal = ${JSON.stringify(signal)};
+function descendants(pid) {
+  const children = new Map();
+  let entries = [];
+  try { entries = fs.readdirSync("/proc"); } catch { return []; }
+  for (const entry of entries) {
+    if (!/^[0-9]+$/.test(entry)) continue;
+    let stat;
+    try { stat = fs.readFileSync("/proc/" + entry + "/stat", "utf8"); } catch { continue; }
+    const end = stat.lastIndexOf(")");
+    if (end < 0) continue;
+    const fields = stat.slice(end + 1).trim().split(/\\s+/);
+    const parent = Number(fields[1]);
+    const id = Number(entry);
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push(id);
+  }
+  const found = [];
+  const walk = (id) => { for (const child of children.get(id) || []) { found.push(child); walk(child); } };
+  walk(pid);
+  return found;
+}
+for (const id of [root, ...descendants(root)]) { try { process.kill(id, signal); } catch {} }
+`
+      : "process.exit(1);";
+    return originalSpawn.call(this, process.execPath, ["-e", script], { ...options, shell: false });
   }
   return originalSpawn.apply(this, arguments);
 };

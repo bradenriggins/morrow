@@ -146,8 +146,22 @@ async function readConfig(home, privateFileAccessAccepted) {
   }
 }
 async function readCredential(paths, tenant, privateFileAccessAccepted) {
-  const serialized = await privateText(paths.credential, privateFileAccessAccepted, "Blackboard credential", 16 * 1024, path.dirname(paths.configDirectory));
-  return { serialized, sha256: hash(serialized), applicationSecret: parseCredential(JSON.parse(serialized), tenant.credentialRevision) };
+  const candidates = [paths.credential];
+  if (tenant?.credentialRevision) candidates.push(incomingCredentialPath(paths, tenant.credentialRevision));
+  let lastError = null;
+  for (const file of candidates) {
+    try {
+      const serialized = await privateText(file, privateFileAccessAccepted, "Blackboard credential", 16 * 1024, path.dirname(paths.configDirectory));
+      return { serialized, sha256: hash(serialized), applicationSecret: parseCredential(JSON.parse(serialized), tenant.credentialRevision) };
+    } catch (error) {
+      lastError = error;
+      const bindingMismatch = error instanceof TypeError && error.message === "Blackboard credential binding is invalid";
+      if (file === paths.credential && (error?.code === "ENOENT" || bindingMismatch)) continue;
+      if (file !== paths.credential && error?.code === "ENOENT") continue;
+      throw error;
+    }
+  }
+  throw lastError;
 }
 async function readPriorCredential(paths, tenant, privateFileAccessAccepted) {
   try { return await readCredential(paths, tenant, privateFileAccessAccepted); }
@@ -159,6 +173,20 @@ async function readPriorCredential(paths, tenant, privateFileAccessAccepted) {
     throw error;
   }
 }
+async function syncFile(file) {
+  const handle = await fs.open(file, "r+");
+  try { await handle.sync(); }
+  finally { await handle.close(); }
+}
+async function syncDirectory(directory) {
+  if (process.platform === "win32") return;
+  const handle = await fs.open(directory, "r");
+  try { await handle.sync(); }
+  finally { await handle.close(); }
+}
+function incomingCredentialPath(paths, revision) {
+  return path.join(paths.credentialDirectory, `.${path.basename(paths.credential)}.${revision}.incoming`);
+}
 async function writeConfig(file, value) {
   const directory = path.dirname(file);
   try { await fs.lstat(directory); }
@@ -167,8 +195,13 @@ async function writeConfig(file, value) {
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new TypeError("Blackboard configuration access is not private");
   if (process.platform !== "win32") await fs.chmod(directory, 0o700);
   const temporary = path.join(directory, `.${path.basename(file)}.tmp-${crypto.randomUUID()}`);
-  await fs.writeFile(temporary, serializeConfig(value), { encoding: "utf8", mode: 0o600, flag: "wx" }); if (process.platform !== "win32") await fs.chmod(temporary, 0o600);
-  await fs.rename(temporary, file); if (process.platform !== "win32") await fs.chmod(file, 0o600);
+  await fs.writeFile(temporary, serializeConfig(value), { encoding: "utf8", mode: 0o600, flag: "wx" });
+  if (process.platform !== "win32") await fs.chmod(temporary, 0o600);
+  await syncFile(temporary);
+  await fs.rename(temporary, file);
+  if (process.platform !== "win32") await fs.chmod(file, 0o600);
+  await syncFile(file);
+  await syncDirectory(directory);
 }
 function publicTenant(value) {
   return {
@@ -219,7 +252,12 @@ async function readBlackboardHealth(home, { privateFileAccessAccepted } = {}) {
     if (credentialFile.status === "private_access_refused") return repairHealth("private_access_refused", tenants);
     if (credentialFile.status !== "readable") return repairHealth("credential_mismatched", tenants);
     try { parseCredential(JSON.parse(credentialFile.serialized), tenant.credentialRevision); }
-    catch { return repairHealth("credential_mismatched", tenants); }
+    catch {
+      const staged = await inspectHealthText(incomingCredentialPath(credentialPaths, tenant.credentialRevision), privateFileAccessAccepted, 16 * 1024, path.dirname(credentialPaths.configDirectory));
+      if (staged.status !== "readable") return repairHealth("credential_mismatched", tenants);
+      try { parseCredential(JSON.parse(staged.serialized), tenant.credentialRevision); }
+      catch { return repairHealth("credential_mismatched", tenants); }
+    }
   }
   return configuredHealth(tenants);
 }
@@ -286,8 +324,14 @@ async function configureBlackboard({ home, input, discoverConnection, writeCrede
     // app would never show.
     const nextConfig = { schema: CONFIG_SCHEMA, tenants: [nextTenant] };
     await prepareCredentialDirectory({ directory: paths.credentialDirectory, destination: paths.credential });
-    await writeCredential({ directory: paths.credentialDirectory, destination: paths.credential, credentialRevision, applicationSecret: setup.applicationSecret });
-    const written = await readCredential(paths, nextTenant, privateFileAccessAccepted);
+    // The new secret is durable under its own name first. It becomes the live
+    // credential only after the configuration that names this revision is also
+    // durable, so a crash between the two leaves the previous secret in place.
+    const incoming = incomingCredentialPath(paths, credentialRevision);
+    await writeCredential({ directory: paths.credentialDirectory, destination: incoming, credentialRevision, applicationSecret: setup.applicationSecret });
+    await syncFile(incoming);
+    await syncDirectory(paths.credentialDirectory);
+    const written = await readCredential({ ...paths, credential: incoming }, nextTenant, privateFileAccessAccepted);
     const next = { sha256: written.sha256 };
     // The stored configuration has to be the exact bytes this transaction
     // intended. A failed write rolls back only bytes this transaction wrote;
@@ -297,8 +341,12 @@ async function configureBlackboard({ home, input, discoverConnection, writeCrede
       await writeConfigFile(before.path, nextConfig);
       const confirmed = await readConfig(home, privateFileAccessAccepted);
       if (confirmed.sha256 !== intended) throw new Error("Blackboard configuration write is unconfirmed");
+      await fs.rename(incoming, paths.credential);
+      if (process.platform !== "win32") await fs.chmod(paths.credential, 0o600);
+      await syncDirectory(paths.credentialDirectory);
     } catch (error) {
       await restoreConfig({ home, before, next: { sha256: intended }, privateFileAccessAccepted, writeConfigFile });
+      await fs.rm(incoming, { force: true }).catch(() => {});
       await restoreCredential({ previous: prior && { ...prior, revision: existing.credentialRevision }, next, paths, writeCredential, privateFileAccessAccepted });
       throw error;
     }
