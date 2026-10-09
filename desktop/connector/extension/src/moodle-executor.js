@@ -5115,6 +5115,11 @@ export function executeMoodleDraftSessionInPage() {
  */
 export async function executeMoodleDraftUploadInPage(rawInput) {
   let input = rawInput;
+  const requestSignal = (expiresAt) => {
+    const remaining = Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 0;
+    if (remaining <= 0) throw new Error("moodle_execution_expired");
+    return AbortSignal.timeout(Math.min(2_147_483_647, remaining));
+  };
   if (typeof rawInput === "string") {
     try { input = JSON.parse(rawInput); } catch { return { ok: false, sent: false, error: "moodle_file_attachment_invalid" }; }
   }
@@ -5278,17 +5283,32 @@ export async function executeMoodleDraftUploadInPage(rawInput) {
   try {
     response = await fetch(endpoint, {
       method: "POST", credentials: "include", cache: "no-store", redirect: "error",
-      headers: { Accept: "application/json" }, body, signal: AbortSignal.timeout(Math.min(2_147_483_647, remaining)),
+      headers: { Accept: "application/json" }, body, signal: requestSignal(input?.expiresAt),
     });
   } catch {
     return fail(unknown, true);
   }
+  const drop = (live) => { try { const canceled = live?.body?.cancel?.() || live?.cancel?.(); if (canceled && typeof canceled.catch === "function") canceled.catch(() => {}); } catch {} };
   let finalUrl;
-  try { finalUrl = new URL(response.url); } catch { return fail(unknown, true, response.status); }
+  try { finalUrl = new URL(response.url); } catch { drop(response); return fail(unknown, true, response.status); }
   if (response.redirected || finalUrl.origin !== origin.origin || finalUrl.username || finalUrl.password || finalUrl.hash
-    || finalUrl.pathname !== endpoint.pathname) return fail(refused, true, response.status);
+    || finalUrl.pathname !== endpoint.pathname) { drop(response); return fail(refused, true, response.status); }
   let text;
-  try { text = await response.text(); } catch { return fail(unknown, true, response.status); }
+  try {
+    const reader = response.body?.getReader?.();
+    if (!reader) throw new Error("moodle_extension_upload_failed");
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    text = "";
+    let size = 0;
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.byteLength;
+      if (size > 2 * 1024 * 1024) { try { reader.cancel(); } catch {} throw new Error("moodle_extension_upload_failed"); }
+      text += decoder.decode(next.value, { stream: true });
+    }
+    text += decoder.decode();
+  } catch { drop(response); return fail(unknown, true, response.status); }
   if (text.length > 2 * 1024 * 1024) return fail(unknown, true, response.status);
   let result;
   try { result = JSON.parse(text); } catch { return fail(refused, true, response.status); }
@@ -5304,16 +5324,31 @@ export async function executeMoodleDraftUploadInPage(rawInput) {
   try {
     saved = await fetch(draftUrl, {
       method: "GET", credentials: "include", cache: "no-store", redirect: "error",
-      signal: AbortSignal.timeout(Math.min(2_147_483_647, Math.max(1, input.expiresAt - Date.now()))),
+      signal: requestSignal(input?.expiresAt),
     });
   } catch {
     return unverified;
   }
   let savedUrl;
-  try { savedUrl = new URL(saved.url); } catch { return unverified; }
-  if (!saved.ok || saved.redirected || savedUrl.href !== draftUrl || savedUrl.origin !== origin.origin) return unverified;
+  try { savedUrl = new URL(saved.url); } catch { drop(saved); return unverified; }
+  if (!saved.ok || saved.redirected || savedUrl.href !== draftUrl || savedUrl.origin !== origin.origin) { drop(saved); return unverified; }
   let savedBytes;
-  try { savedBytes = new Uint8Array(await saved.arrayBuffer()); } catch { return unverified; }
+  try {
+    const reader = saved.body?.getReader?.();
+    if (!reader) throw new Error("moodle_extension_upload_failed");
+    const chunks = [];
+    let size = 0;
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.byteLength;
+      if (size > 1024 * 1024) { try { reader.cancel(); } catch {} throw new Error("moodle_extension_upload_failed"); }
+      chunks.push(next.value);
+    }
+    savedBytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { savedBytes.set(chunk, offset); offset += chunk.byteLength; }
+  } catch { drop(saved); return unverified; }
   if (savedBytes.byteLength !== size) return unverified;
   let savedDigest;
   try { savedDigest = await digest(savedBytes); } catch { return unverified; }

@@ -9,7 +9,7 @@
   "description": "Morrow graphical setup for macOS and Windows",
   "main": "main.cjs",
   "scripts": {
-    "test": "node test/run-bounded-tests.cjs --suite",
+    "test": "node test/require-dependencies.cjs && node test/run-bounded-tests.cjs --suite",
     "test:bounded:files": "node test/run-bounded-tests.cjs --per-file",
     "test:bounded:suite": "node test/run-bounded-tests.cjs --suite",
     "test:layout": "node test/renderer-layout.browser.mjs",

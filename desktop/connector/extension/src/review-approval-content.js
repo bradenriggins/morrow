@@ -148,12 +148,30 @@
       .catch(() => null)
       .then(async (response) => {
         if (!response?.ok || typeof response.presence !== "string" || document.querySelector?.('input[name="nonce"]')) return;
+        const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647, 8_000)));
         const page = await fetch(location.href, {
           credentials: "same-origin",
           headers: { accept: "text/html", "x-morrow-review-presence": response.presence },
+          signal: requestSignal(),
         }).catch(() => null);
-        if (!page?.ok) return;
-        const parsed = new DOMParser().parseFromString(await page.text(), "text/html");
+        if (!page?.ok) {
+          try { const canceled = page?.body?.cancel?.(); if (canceled && typeof canceled.catch === "function") canceled.catch(() => {}); } catch {}
+          return;
+        }
+        const reader = page.body?.getReader?.();
+        if (!reader) return;
+        const decoder = new TextDecoder("utf-8", { fatal: true });
+        let html = "";
+        let size = 0;
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) break;
+          size += next.value.byteLength;
+          if (size > 2 * 1024 * 1024) { try { reader.cancel(); } catch {} return; }
+          html += decoder.decode(next.value, { stream: true });
+        }
+        html += decoder.decode();
+        const parsed = new DOMParser().parseFromString(html, "text/html");
         if (!parsed.documentElement) return;
         document.replaceChild(parsed.documentElement, document.documentElement);
         for (const old of document.querySelectorAll("script[src]")) {

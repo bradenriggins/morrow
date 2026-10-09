@@ -181,7 +181,7 @@ Home. The Blackboard and retention panels are disclosures reachable through thei
 | `blackboard-hidden` | Nothing | None. The panel appears only after an assistant is configured and the local runtime is ready, so the first screen never asks for credentials | `installer/shared/setup-view.mjs:47-49`, `installer/renderer/renderer.js:425` |
 | `blackboard-empty` | "Connect a Blackboard Learn site (optional)", "Most people do not need this…" and four fields | Ask a Blackboard administrator for the key and secret, then **Save Blackboard connection** | `installer/renderer/index.html:61-92`, `installer/renderer/renderer.js:442` |
 | `blackboard-invalid` | One message under each field that is not ready, and focus moves to the first of them | Correct the named field. Messages clear as the value becomes right | `installer/renderer/renderer.js:926-935`, `installer/renderer/renderer.js:1004-1007` |
-| `blackboard-saved` | "Blackboard REST API configured. Live Blackboard access has not been tested.", and the saved site, account and stored name in one row | Saving verifies the integration account and opens a native chooser for the courses returned by Blackboard. **Remove connection** takes the connection and its secret off this computer | `installer/renderer/renderer.js:440-441`, `installer/renderer/renderer.js:398-418` |
+| `blackboard-saved` | "Blackboard REST API configured. Live Blackboard access has not been tested.", and the saved site, account and stored name in one row | Saving verifies the integration account and opens a native chooser for the courses returned by Blackboard. **Remove connection** takes the connection and its secret off this computer | `installer/renderer/renderer.js:450-452`, `installer/renderer/renderer.js:398-418` |
 | `blackboard-save-failed` | The step's own problem in `#problem`; the secret field is cleared and the web address and key keep what was typed | Correct the value and save again | `installer/renderer/renderer.js:979-986` |
 | `blackboard-removal-failed` | The step's own problem in `#problem`; the saved connection row and its courses stay exactly as they are | Check status, then remove it again | `installer/renderer/renderer.js:838-854`, `installer/main.cjs:761-778` |
 | `retention` | "What stays on this computer", every path this installation keeps, and which ones Morrow can remove. When Claude Desktop has its own copy of the Morrow extension, that folder is listed as kept, with the step that removes it in Claude Desktop under Settings, Extensions | Optional: **Remove Morrow's data** | `installer/shared/setup-view.mjs:667-690` |
@@ -558,13 +558,13 @@ stale name here.
 | `Change folder` | Morrow app | `installer/shared/setup-view.mjs:227` |
 | `Show folder` | Morrow app | `installer/shared/setup-view.mjs:227` |
 | `Copy path` | Morrow app | `installer/shared/setup-view.mjs:227`, `installer/shared/setup-view.mjs:227` |
-| `Remove` | Morrow app | `installer/shared/setup-view.mjs:245`, `installer/renderer/renderer.js:440` |
+| `Remove` | Morrow app | `installer/shared/setup-view.mjs:245`, `installer/renderer/renderer.js:450` |
 | `Show Bridge folder` | Morrow app | `installer/shared/setup-view.mjs:343` |
 | `Check Bridge` | Morrow app | `installer/shared/setup-view.mjs:296`, `installer/shared/setup-view.mjs:296` |
 | `Update Bridge` | Morrow app | `installer/shared/setup-view.mjs:440` |
 | `Check connection` | Morrow app | `installer/shared/setup-view.mjs:297`, `installer/shared/setup-view.mjs:297` |
-| `Check for updates` | Morrow app | `installer/renderer/renderer.js:265` |
-| `Restart to update` | Morrow app | `installer/renderer/renderer.js:292` |
+| `Check for updates` | Morrow app | `installer/renderer/renderer.js:275` |
+| `Restart to update` | Morrow app | `installer/renderer/renderer.js:302` |
 | `Try restart again` | Morrow app | `installer/renderer/renderer.js:288` |
 | `Retry the update` | Morrow app | `installer/renderer/renderer.js:304` |
 | `Try again` | Morrow app | `installer/renderer/renderer.js:287` |

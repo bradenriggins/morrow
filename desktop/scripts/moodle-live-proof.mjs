@@ -599,7 +599,10 @@ async function waitFor(probe, description, timeoutMs = 30_000) {
 async function approveThroughReviewPage(url, context, connector) {
   const reviewPage = await context.newPage();
   try {
-    const loaded = await reviewPage.goto(url);
+    await waitFor(() => connector.approvalPresence(), "the approval key from Morrow over the paired connection");
+    const presence = connector.approvalPresence();
+    const openProof = await reviewApprovalProof(presence.key, new URL(url).pathname, "open");
+    const loaded = await reviewPage.goto(`${url}${url.includes("?") ? "&" : "?"}presence=${encodeURIComponent(openProof)}`);
     const form = reviewPage.locator('form[action$="/approve"]');
     await form.waitFor();
     const html = await reviewPage.content();
@@ -608,8 +611,6 @@ async function approveThroughReviewPage(url, context, connector) {
       form: { nonce },
       headers: { origin: new URL(url).origin, referer: url },
     });
-    await waitFor(() => connector.approvalPresence(), "the approval key from Morrow over the paired connection");
-    const presence = connector.approvalPresence();
     assert.equal(presence.origin, new URL(url).origin, "Morrow sent the approval key for a different review server");
     const approvePath = new URL(`${url}/approve`).pathname;
     await reviewPage.route(`${url}/approve`, async (route) => {

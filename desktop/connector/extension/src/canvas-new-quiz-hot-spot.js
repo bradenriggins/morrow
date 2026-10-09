@@ -40,8 +40,11 @@ export async function executeCanvasHotSpotMediaInitIsolated(rawInput) {
     && /^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i.test(host)
     && host.split(".")[0] === tenant;
   if (requested.origin !== page.origin && !quizHost) return fail("canvas_hot_spot_upload_url_refused");
-  const remaining = Number.isSafeInteger(input?.expiresAt) ? input.expiresAt - Date.now() : 0;
-  if (remaining <= 0) return fail("canvas_hot_spot_transfer_timeout");
+  const requestSignal = (expiresAt) => {
+    const remaining = Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 0;
+    if (remaining <= 0) throw new Error("canvas_hot_spot_transfer_timeout");
+    return AbortSignal.timeout(Math.min(2_147_483_647, remaining));
+  };
   const endpoint = new URL(
     `/api/quiz/v1/courses/${encodeURIComponent(courseId)}/quizzes/${encodeURIComponent(assignmentId)}/items/media_upload_url`,
     requested.origin,
@@ -56,18 +59,35 @@ export async function executeCanvasHotSpotMediaInitIsolated(rawInput) {
       redirect: "error",
       referrerPolicy: "no-referrer",
       headers: { Accept: "application/json+canvas-string-ids" },
-      signal: AbortSignal.timeout(Math.min(2_147_483_647, remaining)),
+      signal: requestSignal(input?.expiresAt),
     });
   } catch {
     return fail("canvas_hot_spot_upload_init_invalid");
   }
+  const drop = () => { try { const canceled = response.body?.cancel?.(); if (canceled && typeof canceled.catch === "function") canceled.catch(() => {}); } catch {} };
   let finalUrl;
-  try { finalUrl = new URL(response.url); } catch { return fail("canvas_hot_spot_upload_init_invalid"); }
+  try { finalUrl = new URL(response.url); } catch { drop(); return fail("canvas_hot_spot_upload_init_invalid"); }
   if (!response.ok || response.redirected || finalUrl.origin !== requested.origin || finalUrl.username || finalUrl.password || finalUrl.hash) {
+    drop();
     return fail("canvas_hot_spot_upload_init_invalid");
   }
   let body;
-  try { body = await response.json(); } catch { return fail("canvas_hot_spot_upload_init_invalid"); }
+  try {
+    const reader = response.body?.getReader?.();
+    if (!reader) throw new Error("canvas_hot_spot_upload_init_invalid");
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let text = "";
+    let size = 0;
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.byteLength;
+      if (size > 1024 * 1024) { try { reader.cancel(); } catch {} throw new Error("canvas_hot_spot_upload_init_invalid"); }
+      text += decoder.decode(next.value, { stream: true });
+    }
+    text += decoder.decode();
+    body = JSON.parse(text);
+  } catch { drop(); return fail("canvas_hot_spot_upload_init_invalid"); }
   const uploadUrl = typeof body?.url === "string" ? body.url : "";
   if (!uploadUrl) return fail("canvas_hot_spot_upload_url_missing");
   return { ok: true, upload_url: uploadUrl };

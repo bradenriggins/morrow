@@ -74,8 +74,11 @@ export async function executeCanvasUploadInitIsolated(rawInput) {
   const cookie = String(document.cookie || "").split(";").map((entry) => entry.trim()).find((entry) => entry.startsWith("_csrf_token="));
   const csrf = cookie ? decodeURIComponent(cookie.slice("_csrf_token=".length)) : "";
   if (!csrf) return fail("canvas_csrf_context_missing");
-  const remaining = Number.isSafeInteger(input?.expiresAt) ? input.expiresAt - Date.now() : 0;
-  if (remaining <= 0) return fail("canvas_file_transfer_timeout");
+  const requestSignal = (expiresAt) => {
+    const remaining = Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 0;
+    if (remaining <= 0) throw new Error("canvas_file_transfer_timeout");
+    return AbortSignal.timeout(Math.min(2_147_483_647, remaining));
+  };
   const endpoint = new URL(uploadPath, canvas.origin);
   if (endpoint.origin !== canvas.origin) return fail("canvas_file_upload_target_invalid");
   let response;
@@ -97,18 +100,35 @@ export async function executeCanvasUploadInitIsolated(rawInput) {
         content_type: contentType,
         on_duplicate: "rename",
       }),
-      signal: AbortSignal.timeout(Math.min(2_147_483_647, remaining)),
+      signal: requestSignal(input?.expiresAt),
     });
   } catch {
     return fail("canvas_file_upload_init_invalid");
   }
+  const drop = () => { try { const canceled = response.body?.cancel?.(); if (canceled && typeof canceled.catch === "function") canceled.catch(() => {}); } catch {} };
   let finalUrl;
-  try { finalUrl = new URL(response.url); } catch { return fail("canvas_file_upload_init_invalid"); }
+  try { finalUrl = new URL(response.url); } catch { drop(); return fail("canvas_file_upload_init_invalid"); }
   if (!response.ok || response.redirected || finalUrl.origin !== canvas.origin || finalUrl.username || finalUrl.password || finalUrl.hash) {
+    drop();
     return fail("canvas_file_upload_init_invalid");
   }
   let body;
-  try { body = await response.json(); } catch { return fail("canvas_file_upload_init_invalid"); }
+  try {
+    const reader = response.body?.getReader?.();
+    if (!reader) throw new Error("canvas_file_upload_init_invalid");
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let text = "";
+    let size = 0;
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.byteLength;
+      if (size > 1024 * 1024) { try { reader.cancel(); } catch {} throw new Error("canvas_file_upload_init_invalid"); }
+      text += decoder.decode(next.value, { stream: true });
+    }
+    text += decoder.decode();
+    body = JSON.parse(text);
+  } catch { drop(); return fail("canvas_file_upload_init_invalid"); }
   const uploadUrl = typeof body?.upload_url === "string" ? body.upload_url : "";
   const uploadParams = body?.upload_params;
   if (!uploadUrl || !uploadParams || typeof uploadParams !== "object" || Array.isArray(uploadParams)) {
@@ -564,7 +584,10 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     uploadStatus = uploaded.status;
     if (uploaded.redirected) {
       const stayed = canvasOwnedUploadUrl(uploaded.url, canvasOrigin);
-      if (!stayed || stayed.origin !== new URL(started.upload_url).origin) throw new Error("canvas_file_upload_url_refused");
+      if (!stayed || stayed.origin !== new URL(started.upload_url).origin) {
+        try { const canceled = uploaded.body?.cancel?.(); if (canceled && typeof canceled.catch === "function") canceled.catch(() => {}); } catch {}
+        throw new Error("canvas_file_upload_url_refused");
+      }
     }
     const finalized = await finalFile(await uploadResponse(uploaded, canvasOrigin));
     // Canvas serves a course file to the signed-in person, so the proof reads it

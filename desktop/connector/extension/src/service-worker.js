@@ -3974,7 +3974,7 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
     const files = [...(privateAttachment ? [privateAttachment] : []), ...(Array.isArray(privateAttachments) ? privateAttachments : [])]
       .filter((entry) => entry && typeof entry.bytes_base64 === "string" && entry.manifest);
     const [sessionExecution] = await chrome.scripting.executeScript({
-      target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleDraftSessionInPage, args: [],
+      target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleDraftSessionInPage,
     });
     const session = sessionExecution?.result;
     if (!session || session.origin !== binding.origin || session.siteUrl !== binding.siteUrl || typeof session.sesskey !== "string") {
@@ -3987,7 +3987,8 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
     });
     await chrome.scripting.executeScript({
       target: { tabId: binding.tabId, frameIds: [0] }, world: "ISOLATED",
-      func: (name) => new Promise((resolve, reject) => {
+      func: (encoded) => new Promise((resolve, reject) => {
+        const name = JSON.parse(encoded);
         const started = Date.now();
         const timer = setInterval(() => {
           if (document.documentElement?.getAttribute("data-morrow-draft-listener") === name) {
@@ -3999,7 +4000,7 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
           }
         }, 10);
       }),
-      args: [channel],
+      args: [JSON.stringify(channel)],
     });
     const pagePayload = { ...payload, extensionOwnsBytes: true, draftUploadChannel: channel };
     delete pagePayload.privateAttachment;
@@ -4014,8 +4015,8 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
       try {
         await chrome.scripting.executeScript({
           target: { tabId: binding.tabId, frameIds: [0] }, world: "ISOLATED",
-          func: (name) => { document.dispatchEvent(new CustomEvent("morrow-draft-upload-close", { detail: { channel: name } })); },
-          args: [channel],
+          func: (encoded) => { const name = JSON.parse(encoded); document.dispatchEvent(new CustomEvent("morrow-draft-upload-close", { detail: { channel: name } })); },
+          args: [JSON.stringify(channel)],
         });
       } catch {}
       await listener.catch(() => {});
