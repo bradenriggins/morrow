@@ -188,6 +188,59 @@ describe("BatchSourceSettlementStore", () => {
     store.close();
   });
 
+  it("does not reopen a terminal settlement from a second stale projection", () => {
+    const store = new BatchSourceSettlementStore({ path: ":memory:" });
+    store.initialize("bat:test-stale", [
+      { childId: "course:1", sourceId: "morrow-legacy" },
+      { childId: "course:2", sourceId: "morrow-legacy" },
+    ]);
+    store.markStaged("bat:test-stale", "course:1", { sourceTaskId: "task-1" });
+    store.applyTaskProjection("bat:test-stale", "course:1", {
+      taskId: "task-1",
+      status: "completed",
+      outcome: "succeeded",
+      terminal: true,
+      verificationStatus: "verified",
+      resultCounts: { done: 1 },
+    });
+    expect(store.applyTaskProjection("bat:test-stale", "course:1", {
+      taskId: "task-1",
+      status: "awaiting_confirmation",
+      outcome: "awaiting_approval",
+      terminal: false,
+      verificationStatus: "unconfirmed",
+      resultCounts: { unconfirmed: 1 },
+    })).toMatchObject({
+      state: "succeeded",
+      verificationStatus: "verified",
+      taskStatus: "completed",
+      resultCounts: { done: 1, unconfirmed: 0 },
+    });
+
+    store.markStaged("bat:test-stale", "course:2", { sourceTaskId: "task-2" });
+    store.applyTaskProjection("bat:test-stale", "course:2", {
+      taskId: "task-2",
+      status: "failed",
+      outcome: "failed_effect_possible",
+      terminal: true,
+      verificationStatus: "mismatch",
+      resultCounts: { done: 1 },
+    });
+    expect(store.applyTaskProjection("bat:test-stale", "course:2", {
+      taskId: "task-2",
+      status: "completed",
+      outcome: "succeeded",
+      terminal: true,
+      verificationStatus: "verified",
+      resultCounts: { done: 1 },
+    })).toMatchObject({
+      state: "failed_effect_possible",
+      verificationStatus: "mismatch",
+      resultCounts: { done: 1 },
+    });
+    store.close();
+  });
+
   it("refuses task identity substitution", () => {
     const store = new BatchSourceSettlementStore({ path: ":memory:" });
     store.initialize("bat:test-5678", [

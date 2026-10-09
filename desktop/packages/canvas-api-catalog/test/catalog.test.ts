@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CANVAS_REVIEWED_UPLOAD_ROUTES, canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasAdmissionReason, canvasApiCompatibilityDigest, canvasCatalogTools, canvasSiteAuthorityNote, canvasOperationAdmission, canvasReadbackAssessment, canvasRedirectRead, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, loadCanvasApiCatalog, operationalJsonSchema, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
+import { CANVAS_REVIEWED_UPLOAD_ROUTES, canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasAdmissionReason, canvasApiCompatibilityDigest, canvasCatalogTools, canvasOperationIdempotentHint, canvasSiteAuthorityNote, canvasOperationAdmission, canvasReadbackAssessment, canvasRedirectRead, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, loadCanvasApiCatalog, operationalJsonSchema, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
 import catalogJson from "../../../artifacts/canvas-api/canvas-api-catalog.json";
 
 const catalog = parseCanvasApiCatalog(catalogJson);
@@ -1644,5 +1644,17 @@ describe("Canvas API catalog", () => {
       state: "unavailable",
       reason: "no_safe_readback_route",
     });
+  });
+
+  it("does not advertise a submission comment as an idempotent grade write", () => {
+    const operation = catalog.operations.find((candidate) => candidate.toolName === "canvas_grade_or_comment_on_submission_courses");
+    expect(operation).toBeTruthy();
+    expect(operation?.parameters.some((parameter) => parameter.wireName === "comment[text_comment]")).toBe(true);
+    const tool = canvasCatalogTools(catalog).find((candidate) => candidate.name === "canvas_grade_or_comment_on_submission_courses");
+    expect(tool?.annotations?.idempotentHint).toBe(false);
+    expect(canvasOperationIdempotentHint(operation!, { "comment[text_comment]": "Returned with notes." })).toBe(false);
+    expect(canvasOperationIdempotentHint(operation!, { comment_text_comment: "Returned with notes." })).toBe(false);
+    expect(canvasOperationIdempotentHint(operation!, { comment: { text_comment: "Returned with notes." } })).toBe(false);
+    expect(canvasOperationIdempotentHint(operation!, { submission_posted_grade: "18" })).toBe(true);
   });
 });

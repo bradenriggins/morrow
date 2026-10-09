@@ -125,13 +125,19 @@ const PROTECTED_GRADE_FIELDS: readonly (readonly string[])[] = [
 ];
 
 /**
- * The grade values one fresh read has to return unchanged after a change, on top
- * of the values that change set. Nothing else is compared: Blackboard sets a
- * grade's status itself when a score is saved, and no live tenant has been read
- * to prove what it becomes, so the readback reports those values instead of
- * failing on them.
+ * The grade values one fresh read has to return after a change. Score and text
+ * are both checked, including an override the change did not set, so a partial
+ * PATCH that clears the other one is not reported as verified. Blackboard sets
+ * a grade's status itself when a score is saved, and no live tenant has been
+ * read to prove what it becomes, so status and exemption are reported instead
+ * of failing the readback.
  */
-const COMPARED_GRADE_FIELDS: readonly string[] = ["userId", "columnId"];
+const GRADE_READBACK_FIELDS: readonly (readonly string[])[] = [
+  ["userId"],
+  ["columnId"],
+  ["score"],
+  ["text"],
+];
 
 /** What every reviewed Blackboard change reports about itself, by Morrow profile. */
 const WRITE_PROFILES = {
@@ -410,6 +416,16 @@ function expectedValues(
       : value;
   }
   return output;
+}
+
+/** An override the change did not set must still be present after the PATCH. */
+function omittedGradeOverrideCleared(record: JsonObject, patch: JsonObject): boolean {
+  for (const field of GRADE_PATCH_FIELDS) {
+    if (Object.hasOwn(patch, field)) continue;
+    const value = record[field];
+    if (value === undefined || value === null || value === "") return true;
+  }
+  return false;
 }
 
 /** Whether one fresh read already carries every reviewed value. */
@@ -1033,7 +1049,7 @@ async function applyReviewedGradebookGradePatch(
     );
   }
   const expected = expectedValues(
-    protectedValues(frozen.record, PROTECTED_GRADE_FIELDS.filter((path) => COMPARED_GRADE_FIELDS.includes(path.join(".")))),
+    protectedValues(frozen.record, GRADE_READBACK_FIELDS),
     patch,
     GRADE_PATCH_FIELDS,
     { score: "score", text: "text" },
@@ -1044,9 +1060,7 @@ async function applyReviewedGradebookGradePatch(
     dispatchState = "applied_or_unknown";
     await write.client.patch(gradePath(write.courseId, input.column_id, userId), patch, signal);
     const readback = await write.client.get(withFields(gradePath(write.courseId, input.column_id, userId), GRADE_FIELDS), signal);
-    const compared = protectedValues(readback, PROTECTED_GRADE_FIELDS.filter((path) => (
-      COMPARED_GRADE_FIELDS.includes(path.join(".")) || Object.hasOwn(patch, path.join("."))
-    )));
+    const compared = protectedValues(readback, GRADE_READBACK_FIELDS);
     if (canonicalJson(compared) !== canonicalJson(expected)) {
       throw new BlackboardApiError(
         "blackboard_content_mismatch",
@@ -1092,7 +1106,9 @@ async function verifyGradebookGradePatch(
   }, signal);
   const record = await comparator.client.get(withFields(gradePath(comparator.courseId, input.column_id, userId), GRADE_FIELDS), signal);
   const exact = record.userId === userId && (record.columnId === undefined || record.columnId === input.column_id);
-  const verified = exact && savedValues(record, patch, PROTECTED_GRADE_FIELDS, GRADE_PATCH_FIELDS, { score: "score", text: "text" });
+  const verified = exact
+    && !omittedGradeOverrideCleared(record, patch)
+    && savedValues(record, patch, PROTECTED_GRADE_FIELDS, GRADE_PATCH_FIELDS, { score: "score", text: "text" });
   runtime.recordEffectComparison(gradeEffectTarget(runtime, input, userId), verified);
   return {
     schema: "morrow.blackboard.gradebook-grade-patch.comparator.v1",

@@ -29,6 +29,7 @@ export const BATCH_RECOVERY_ACTIONS = Object.freeze([
   "source_task_recovered",
   "direct_effect_verified",
   "failed_before_send",
+  "recorded_result_failed",
   "inspection_required",
 ] as const);
 export type BatchRecoveryAction = typeof BATCH_RECOVERY_ACTIONS[number];
@@ -119,6 +120,7 @@ interface ManifestRow {
 interface OperationRow {
   operation_id: string;
   state: string;
+  response_succeeded: number | null;
   source_result_state: string | null;
   source_task_id: string | null;
   normalized_result_digest: string | null;
@@ -410,19 +412,73 @@ function updateBatchCounts(
   return { state, counts };
 }
 
+const UNSETTLED_SOURCE_RESULTS = new Set([
+  "awaiting_confirmation",
+  "awaiting_approval",
+  "pending_approval",
+  "running",
+  "approved",
+  "resuming",
+  "undoing",
+  "paused",
+]);
+
+function recordedSourceOutcome(operation: OperationRow): "succeeded" | "failed" | "unsettled" {
+  const resultState = (operation.source_result_state || "").trim().toLowerCase();
+  if (UNSETTLED_SOURCE_RESULTS.has(resultState)) return "unsettled";
+  if (operation.response_succeeded === 0 || resultState === "failed" || resultState.startsWith("failed")) {
+    return "failed";
+  }
+  if (operation.response_succeeded !== 1 || !resultState) return "unsettled";
+  return "succeeded";
+}
+
+function verifiedSourceSettlement(
+  database: DatabaseSync,
+  batchId: string,
+  childId: string,
+  sourceTaskId: string,
+): boolean {
+  const table = database.prepare(`
+    SELECT 1 AS present FROM sqlite_master
+    WHERE type='table' AND name='gateway_batch_source_settlements'
+  `).get() as unknown as { present: number } | undefined;
+  if (!table) return false;
+  const row = database.prepare(`
+    SELECT state, verification_status, source_task_id
+    FROM gateway_batch_source_settlements
+    WHERE batch_id=? AND child_id=?
+  `).get(batchId, childId) as unknown as {
+    state: string;
+    verification_status: string | null;
+    source_task_id: string | null;
+  } | undefined;
+  return row?.state === "succeeded"
+    && row.verification_status === "verified"
+    && row.source_task_id === sourceTaskId;
+}
+
 function operationForChild(
   database: DatabaseSync,
   child: ChildRow,
 ): OperationRow | null {
   if (!child.source_operation_id) return null;
-  const row = database.prepare(`
-    SELECT operation_id, state, source_result_state, source_task_id,
+  const rows = database.prepare(`
+    SELECT operation_id, state, response_succeeded, source_result_state, source_task_id,
            normalized_result_digest, upstream_result_digest, error_digest
     FROM gateway_operations
     WHERE source_id=? AND source_operation_id=?
-    ORDER BY created_at DESC, operation_id DESC LIMIT 1
-  `).get(child.source_id, child.source_operation_id) as unknown as OperationRow | undefined;
-  return row || null;
+    ORDER BY created_at DESC, operation_id DESC
+  `).all(child.source_id, child.source_operation_id) as unknown as OperationRow[];
+  if (rows.length === 0) return null;
+  const latest = rows[0]!;
+  // A later pre-send failure has no issued task. Keep the earlier row that recorded one
+  // so recovery can still reconcile that LMS task.
+  if (latest.state === "failed_before_send") {
+    const issued = rows.find((row) => row.source_task_id && row.state !== "failed_before_send");
+    if (issued) return issued;
+  }
+  return latest;
 }
 
 function verifiedDirectEffectForChild(
@@ -567,6 +623,7 @@ function childDecision(
   child: ChildRow,
   operation: OperationRow | null,
   verifiedDirectEffect: VerifiedDirectEffectRow | null,
+  taskVerified: boolean,
 ): Omit<BatchRecoveryChild, "schema" | "applied"> {
   if (batchMode === "read_only") {
     return {
@@ -612,19 +669,39 @@ function childDecision(
   const evidenceOperationState = (state: string): string | null => boundOperationId ? boundOperationState : state;
 
   if (operation?.state === "response_received" && operation.source_task_id) {
-    return {
-      childId: child.child_id,
-      ordinal: child.ordinal,
-      sourceId: child.source_id,
-      sourceToolName: child.source_tool_name,
-      sourceOperationId: child.source_operation_id,
-      action: "source_task_recovered",
-      gatewayOperationId: evidenceOperationId(operation.operation_id),
-      gatewayOperationState: evidenceOperationState(operation.state),
-      sourceTaskId: operation.source_task_id,
-      sourceResultState: operation.source_result_state,
-      detailDigest: sha256Text("source_task_recovered_from_gateway_operation"),
-    };
+    const outcome = recordedSourceOutcome(operation);
+    // A child is succeeded only when the recorded result succeeded and the task
+    // readback is verified. An unconfirmed task stays unknown. A failed result stays failed.
+    if (outcome === "succeeded" && taskVerified) {
+      return {
+        childId: child.child_id,
+        ordinal: child.ordinal,
+        sourceId: child.source_id,
+        sourceToolName: child.source_tool_name,
+        sourceOperationId: child.source_operation_id,
+        action: "source_task_recovered",
+        gatewayOperationId: evidenceOperationId(operation.operation_id),
+        gatewayOperationState: evidenceOperationState(operation.state),
+        sourceTaskId: operation.source_task_id,
+        sourceResultState: operation.source_result_state,
+        detailDigest: sha256Text("source_task_recovered_from_gateway_operation"),
+      };
+    }
+    if (outcome === "failed") {
+      return {
+        childId: child.child_id,
+        ordinal: child.ordinal,
+        sourceId: child.source_id,
+        sourceToolName: child.source_tool_name,
+        sourceOperationId: child.source_operation_id,
+        action: "recorded_result_failed",
+        gatewayOperationId: evidenceOperationId(operation.operation_id),
+        gatewayOperationState: evidenceOperationState(operation.state),
+        sourceTaskId: operation.source_task_id,
+        sourceResultState: operation.source_result_state,
+        detailDigest: operation.error_digest || sha256Text("recorded_source_result_failed"),
+      };
+    }
   }
 
   if (operation?.state === "failed_before_send") {
@@ -748,6 +825,27 @@ function applyDecision(
     return Number(result.changes) === 1;
   }
 
+  if (decision.action === "recorded_result_failed") {
+    const result = database.prepare(`
+      UPDATE gateway_batch_children
+      SET state='failed', gateway_operation_id=?, gateway_operation_state=?,
+          source_result_state=?, source_task_id=?, result_digest=NULL, error_digest=?,
+          updated_at=?, terminal_at=?, revision=revision+1
+      WHERE batch_id=? AND child_id=? AND state='unknown'
+    `).run(
+      decision.gatewayOperationId,
+      decision.gatewayOperationState,
+      decision.sourceResultState,
+      decision.sourceTaskId,
+      decision.detailDigest,
+      now,
+      now,
+      batchId,
+      decision.childId,
+    );
+    return Number(result.changes) === 1;
+  }
+
   if (decision.action === "direct_effect_verified") {
     if (bindingRecovery.status === "ready") {
       if (!key) throw new Error("batch result binding recovery requires its encryption key");
@@ -852,11 +950,16 @@ export function recoverBatchState(input: RecoverBatchStateInput): BatchRecoveryR
     const children: BatchRecoveryChild[] = [];
     for (const row of rows) {
       const directEffect = verifiedDirectEffectForChild(database, row);
+      const operation = operationForChild(database, row);
+      const taskVerified = operation?.source_task_id
+        ? verifiedSourceSettlement(database, batchId, row.child_id, operation.source_task_id)
+        : false;
       let decision = childDecision(
         batch.mode,
         row,
-        operationForChild(database, row),
+        operation,
         directEffect,
+        taskVerified,
       );
       const bindingRecovery = directEffect && decision.action === "direct_effect_verified"
         ? resultBindingRecovery(database, batchId, row, directEffect, key)

@@ -350,6 +350,28 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
   };
 }
 
+function bodyIncludesSubmissionComment(body: JsonObject): boolean {
+  if (Object.hasOwn(body, "comment[text_comment]") || Object.hasOwn(body, "comment_text_comment")) return true;
+  return isJsonObject(body.comment) && Object.hasOwn(body.comment, "text_comment");
+}
+
+/**
+ * Whether repeating this Canvas operation is safe. A submission comment is not:
+ * `comment[text_comment]` adds another comment on every call. The catalog tool
+ * is advertised as not idempotent because it accepts that body. A grade-only
+ * body, with no comment field, is idempotent.
+ */
+export function canvasOperationIdempotentHint(
+  operation: Pick<CanvasApiOperation, "method" | "toolName">,
+  body?: JsonObject,
+): boolean {
+  if (operation.toolName === "canvas_grade_or_comment_on_submission_courses") {
+    if (!body) return false;
+    return !bodyIncludesSubmissionComment(body);
+  }
+  return operation.method === "GET" || ["PUT", "PATCH", "DELETE"].includes(operation.method);
+}
+
 export function canvasCatalogTools(catalog: CanvasApiCatalog): readonly UpstreamTool[] {
   return catalog.operations.map((operation) => ({
     name: operation.toolName,
@@ -359,7 +381,7 @@ export function canvasCatalogTools(catalog: CanvasApiCatalog): readonly Upstream
     annotations: {
       readOnlyHint: operation.readOnly,
       destructiveHint: operation.risk === "destructive",
-      idempotentHint: operation.method === "GET" || ["PUT", "PATCH", "DELETE"].includes(operation.method),
+      idempotentHint: canvasOperationIdempotentHint(operation),
       openWorldHint: true,
     },
     capability: capability(catalog, operation),
