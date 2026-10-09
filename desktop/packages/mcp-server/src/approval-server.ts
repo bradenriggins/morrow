@@ -1738,6 +1738,13 @@ export class LoopbackApprovalServer {
         return;
       }
       if (method === "GET" && (!target.action || target.action === "status") && !this.reviewDocumentAdmitted(request, url, `${target.kind}:${target.id}`)) {
+        // The first open has no Bridge proof. Refuse it, and still hand the approval key to the
+        // paired Bridge so it can sign the reload. The key is not in this response.
+        if (!target.action) {
+          try {
+            this.controller.announceApprovalPresence?.();
+          } catch { /* the refusal still loads; the Bridge asks the person to reload when it has no key */ }
+        }
         if (target.action === "status" || !String(request.headers.accept || "").includes("text/html")) {
           sendJson(response, 403, { schema: "morrow.problem.v1", code: "approval_presence_required" });
         } else {

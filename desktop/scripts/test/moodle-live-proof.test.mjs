@@ -11,6 +11,7 @@ import {
   capabilitiesIn,
   closeHarnessResources,
   connectHarnessConnector,
+  waitFor,
   writeClass,
 } from "../moodle-live-proof.mjs";
 
@@ -24,6 +25,40 @@ const writes = catalog.operations.filter((operation) => operation.readOnly !== t
 function runHarness(argv, { timeout = 300_000 } = {}) {
   return spawnSync(process.execPath, [HARNESS, ...argv], { cwd: root, encoding: "utf8", timeout });
 }
+
+test("waitFor reports a probe that never settles when its deadline passes", async () => {
+  const started = Date.now();
+  await assert.rejects(
+    () => waitFor(() => new Promise(() => {}), "a probe that never settles", 200),
+    /timed out waiting for a probe that never settles/,
+  );
+  assert.ok(Date.now() - started < 2_000, "a hung probe held waitFor past its deadline");
+});
+
+test("waitFor does not wait out a probe that outlives its deadline", async () => {
+  const started = Date.now();
+  await assert.rejects(
+    () => waitFor(() => new Promise((resolve) => setTimeout(() => resolve("late"), 5_000)), "a late probe", 200),
+    /timed out waiting for a late probe/,
+  );
+  assert.ok(Date.now() - started < 2_000, "waitFor stayed on a probe past its deadline");
+});
+
+test("waitFor returns the probe error when the probe fails in time", async () => {
+  await assert.rejects(
+    () => waitFor(() => Promise.reject(new Error("probe failed")), "a failing probe", 1_000),
+    /probe failed/,
+  );
+});
+
+test("waitFor returns the first truthy probe result", async () => {
+  let calls = 0;
+  const value = await waitFor(() => {
+    calls += 1;
+    return calls >= 2 ? "ready" : null;
+  }, "a ready probe", 1_000);
+  assert.equal(value, "ready");
+});
 
 test("the harness proves one Moodle write against the local fixture and reaches no Moodle site", { timeout: 320_000 }, () => {
   const directory = mkdtempSync(join(tmpdir(), "morrow-live-proof-test-"));

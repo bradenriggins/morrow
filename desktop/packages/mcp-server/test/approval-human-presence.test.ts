@@ -161,6 +161,24 @@ describe("approval needs a person in Chrome, not an HTTP client", () => {
     }
   });
 
+  it("hands the key to Morrow Bridge when the review is opened without a proof, and still refuses that open", async () => {
+    const test = harness();
+    try {
+      const baseUrl = await test.server.start();
+      const pageUrl = `${baseUrl}/operations/${encodedId}`;
+      const response = await fetch(pageUrl, { headers: { accept: "text/html" } });
+      const text = await response.text();
+      expect(response.status).toBe(403);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(text).not.toContain(test.presence[0]!.key);
+      expect(text).not.toContain("nonce");
+      expect(text).not.toContain("Week 2 overview");
+      expect(test.announced).toBe(1);
+    } finally {
+      await test.server.close();
+    }
+  });
+
   it("does not list or cancel for a client that sets only Host, and rejects cancel without the Bridge proof", async () => {
     const test = harness();
     const cancelled: string[] = [];

@@ -561,11 +561,26 @@ test("the committed source-origin ledger is unreviewed, and the old self-stamp i
       return false;
     }
   };
-  if (typeof ledger.candidateCommit === "string" && ledger.candidateCommit !== head) {
-    const parent = `${ledger.candidateCommit}^`;
-    if (!commitPresent(ledger.candidateCommit) || !commitPresent(parent)) {
-      execFileSync("git", ["-C", desktop, "fetch", "--depth=2", "origin", ledger.candidateCommit], { stdio: "ignore" });
+  // Each entry is checked against its own source commit and that commit's parent, not only
+  // the ledger's candidate commit. A depth-1 CI checkout has neither until they are fetched.
+  const parentsPresent = (revision) => {
+    let listed;
+    try {
+      listed = execFileSync("git", ["-C", desktop, "rev-list", "--parents", "-n", "1", revision], { encoding: "utf8" }).trim();
+    } catch {
+      return false;
     }
+    return listed.split(" ").slice(1).filter(Boolean).every((parent) => commitPresent(parent));
+  };
+  const needed = new Set(
+    ledger.entries
+      .map((entry) => entry.sourceCommit)
+      .filter((commit) => typeof commit === "string" && /^[0-9a-f]{40,64}$/i.test(commit)),
+  );
+  if (typeof ledger.candidateCommit === "string" && /^[0-9a-f]{40,64}$/i.test(ledger.candidateCommit)) needed.add(ledger.candidateCommit);
+  const missing = [...needed].filter((commit) => !commitPresent(commit) || !parentsPresent(commit));
+  for (let offset = 0; offset < missing.length; offset += 40) {
+    execFileSync("git", ["-C", desktop, "fetch", "--depth=2", "origin", ...missing.slice(offset, offset + 40)], { stdio: "ignore" });
   }
   const generated = validateSourceOriginLedger({
     root: desktop,
