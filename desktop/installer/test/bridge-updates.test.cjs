@@ -754,3 +754,38 @@ test("a rollback copy the app cannot delete is reported retained, not reported d
   assert.deepEqual(pruned, { removed: [updated.backupDirectory], referenced: [], retained: [] });
   assert.equal(await present(updated.backupDirectory), false);
 });
+
+test("a backup directory failure after quiesce resumes the extension before the error returns", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-bridge-quiesce-resume-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "UserData", "State");
+  const bridgeDirectory = path.join(root, "UserData", "Bridge");
+  const initial = await fixture(root, "1.0.2");
+  const installed = await initializeBridgeDirectory({ ...initial, stateDirectory, bridgeDirectory, initialChallenge: challenge("old") });
+  await fs.writeFile(path.join(stateDirectory, "bridge-backups"), "not a directory\n");
+  const next = await fixture(root, "1.0.3");
+  const quiesceEpoch = "epoch-for-the-backup-failure";
+  let resumes = 0;
+  await assert.rejects(() => prepareBridgeUpdate({
+    ...next,
+    stateDirectory,
+    bridgeDirectory,
+    nextChallenge: challenge("to-1.0.3"),
+    requestQuiescence: async () => ({
+      schema: "morrow.bridge.update-quiesced.v1",
+      extensionId,
+      manifestVersion: "1.0.2",
+      installType: "development",
+      quiescent: true,
+      quiesceEpoch,
+      activeFolderProof: proof({ ...installed.activeFolderChallenge, manifestVersion: "1.0.2" }),
+    }),
+    resumeQuiescence: async (input) => {
+      resumes += 1;
+      assert.equal(input.quiesceEpoch, quiesceEpoch);
+      return { schema: "morrow.bridge.update-resumed.v1", extensionId, manifestVersion: "1.0.2", quiesceEpoch, resumed: true };
+    },
+  }), (error) => error instanceof BridgeUpdateError && error.code === "bridge_backup_directory_invalid");
+  assert.equal(resumes, 1);
+  assert.equal(await present(transactionPath(stateDirectory)), false);
+});

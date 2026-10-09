@@ -1,7 +1,11 @@
 "use strict";
 
+const fs = require("node:fs/promises");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+
+// Linux reports /proc starttime in USER_HZ, which is fixed at 100 for that interface.
+const LINUX_TICKS_PER_SECOND = 100;
 
 const QUERY_TIMEOUT_MS = 3_000;
 // A cold Windows PowerShell start can take several seconds. The bound stays
@@ -196,10 +200,61 @@ async function readProcessStartTimes(pids, { platform = process.platform, readCo
   return output === null ? null : parseUnixProcessStartTimes(output);
 }
 
+function linuxStartFromStat(stat, bootTimeMs) {
+  const commandEnd = stat.lastIndexOf(")");
+  if (commandEnd < 0 || !Number.isSafeInteger(bootTimeMs)) return null;
+  const fields = stat.slice(commandEnd + 1).trim().split(/\s+/);
+  const ticks = Number(fields[22 - 3]);
+  if (!Number.isSafeInteger(ticks) || ticks < 0) return null;
+  return {
+    at: bootTimeMs + Math.floor(ticks * (1_000 / LINUX_TICKS_PER_SECOND)),
+    resolutionMs: 1_000 / LINUX_TICKS_PER_SECOND,
+  };
+}
+
+async function readLinuxProcessStart(pid, procRoot = "/proc") {
+  let statText;
+  let bootText;
+  try {
+    [statText, bootText] = await Promise.all([
+      fs.readFile(path.join(procRoot, String(pid), "stat"), "utf8"),
+      fs.readFile(path.join(procRoot, "stat"), "utf8"),
+    ]);
+  } catch {
+    return null;
+  }
+  const boot = /^btime\s+([0-9]+)\s*$/m.exec(bootText);
+  const seconds = boot ? Number(boot[1]) : NaN;
+  if (!Number.isSafeInteger(seconds)) return null;
+  return linuxStartFromStat(statText, seconds * 1_000);
+}
+
+/**
+ * The finest start instant this operating system will state for one live PID.
+ * `resolutionMs` is 10 on Linux (proc starttime ticks), 1 on Windows, and
+ * 1000 where the only clock is `ps -o lstart`.
+ */
+async function readProcessStartObservation(pid, {
+  platform = process.platform,
+  procRoot = "/proc",
+  readCommand = readBoundedCommandOutput,
+  processAlive: alive = processAlive,
+} = {}) {
+  if (!exactPid(pid) || !alive(pid)) return null;
+  if (platform === "linux") {
+    const fromProc = await readLinuxProcessStart(pid, procRoot);
+    if (fromProc) return fromProc;
+  }
+  const started = await readProcessStartTimes([pid], { platform, readCommand });
+  if (!started) return null;
+  const at = started.get(pid);
+  if (!Number.isFinite(at)) return null;
+  return { at, resolutionMs: platform === "win32" ? 1 : 1_000 };
+}
+
 async function readProcessStartedAt(pid) {
-  if (!exactPid(pid) || !processAlive(pid)) return null;
-  const started = await readProcessStartTimes([pid]);
-  return started?.get(pid) ?? null;
+  const observed = await readProcessStartObservation(pid);
+  return observed?.at ?? null;
 }
 
 async function processMatchesRecordedLifetime(pid, observedAt) {
@@ -209,11 +264,30 @@ async function processMatchesRecordedLifetime(pid, observedAt) {
   return startedAt === null ? null : startedAt <= boundary;
 }
 
-async function processMatchesExactStart(pid, recordedStartedAt) {
+/**
+ * Exact identity is permission to signal. A clock that only has whole seconds
+ * cannot separate two processes that started in that same second, so equality
+ * at that truncated resolution is not a match.
+ */
+function matchExactProcessStart(expected, observed) {
+  if (!Number.isFinite(expected) || !observed || !Number.isFinite(observed.at)) return null;
+  const resolution = Number.isFinite(observed.resolutionMs) && observed.resolutionMs > 0 ? observed.resolutionMs : 1_000;
+  if (resolution >= 1_000) {
+    return Math.floor(expected / 1_000) === Math.floor(observed.at / 1_000) ? null : false;
+  }
+  if (observed.at === expected) return true;
+  if (expected % 1_000 === 0 && Math.floor(observed.at / 1_000) === Math.floor(expected / 1_000)) return null;
+  return false;
+}
+
+async function processMatchesExactStart(pid, recordedStartedAt, readObservation = null) {
   const expected = Date.parse(recordedStartedAt);
   if (!exactPid(pid) || !Number.isFinite(expected) || !processAlive(pid)) return false;
-  const startedAt = await readProcessStartedAt(pid);
-  return startedAt === null ? null : startedAt === expected;
+  const observed = typeof readObservation === "function"
+    ? await readObservation(pid)
+    : await readProcessStartObservation(pid);
+  if (!processAlive(pid)) return false;
+  return matchExactProcessStart(expected, observed);
 }
 
 module.exports = {
@@ -222,9 +296,12 @@ module.exports = {
   parseUnixProcessStartTimes,
   parseWindowsProcessStartTimes,
   processAlive,
+  matchExactProcessStart,
   processMatchesExactStart,
   processMatchesRecordedLifetime,
   readBoundedCommandOutput,
+  readLinuxProcessStart,
+  readProcessStartObservation,
   readProcessStartedAt,
   readProcessStartTimes,
   terminatePidTree,

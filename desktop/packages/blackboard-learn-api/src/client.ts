@@ -136,6 +136,7 @@ async function jsonResponse(
     if (response.status === 204) return null;
     throw new ApiError("blackboard_response_invalid", "Blackboard returned an unreadable response.", undefined, dispatchState);
   }
+  const bodySignal = signal ?? AbortSignal.timeout(30_000);
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const decode = (bytes?: Uint8Array, stream = false): string => {
@@ -149,17 +150,15 @@ async function jsonResponse(
   let text = "";
   try {
     for (;;) {
-      if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+      if (bodySignal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
       let onAbort: (() => void) | undefined;
-      const next = await (signal
-        ? Promise.race([
-            reader.read(),
-            new Promise<never>((_, reject) => {
-              onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"));
-              signal.addEventListener("abort", onAbort, { once: true });
-            }),
-          ]).finally(() => { if (onAbort) signal.removeEventListener("abort", onAbort); })
-        : reader.read());
+      const next = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"));
+          bodySignal.addEventListener("abort", onAbort, { once: true });
+        }),
+      ]).finally(() => { if (onAbort) bodySignal.removeEventListener("abort", onAbort); });
       if (next.done) break;
       bytes += next.value.byteLength;
       if (bytes > MAX_RESPONSE_BYTES) {
@@ -178,6 +177,13 @@ async function jsonResponse(
   if (response.status === 204 || !text.trim()) return null;
   try { return object(JSON.parse(text) as unknown); }
   catch { throw new ApiError("blackboard_response_invalid", "Blackboard returned invalid JSON.", undefined, dispatchState); }
+}
+
+function finiteCeiling(value: number | undefined, fallback: number, maximum: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) return fallback;
+  const whole = Math.floor(value);
+  if (!Number.isSafeInteger(whole) || whole < 1) return fallback;
+  return Math.min(whole, maximum);
 }
 
 function collectionUrl(path: string, tenant: BlackboardTenant, options: BlackboardCollectionOptions): URL {
@@ -485,8 +491,8 @@ export class BlackboardLearnClient {
   async collect(path: string, options: BlackboardCollectionOptions = {}): Promise<readonly JsonObject[]> {
     const label = options.label || "collection";
     const identityField = options.identityField || "id";
-    const maxPages = options.maxPages ?? MAX_COLLECTION_PAGES;
-    const maxRecords = options.maxRecords ?? MAX_COLLECTION_RECORDS;
+    const maxPages = finiteCeiling(options.maxPages, MAX_COLLECTION_PAGES, MAX_COLLECTION_PAGES);
+    const maxRecords = finiteCeiling(options.maxRecords, MAX_COLLECTION_RECORDS, MAX_COLLECTION_RECORDS);
     let url = collectionUrl(path, this.tenant, options);
     const expectedPath = url.pathname;
     const visited = new Set<string>();

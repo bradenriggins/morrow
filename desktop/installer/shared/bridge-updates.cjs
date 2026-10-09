@@ -1044,6 +1044,16 @@ function errorAfterQuiesce(code, details, resume) {
   return new BridgeUpdateError(code, { ...details, resume });
 }
 
+async function persistedQuiesceEpoch(stateDirectory, quiesceEpoch) {
+  try {
+    const value = parseStrictJson(await fs.readFile(updateTransactionPath(stateDirectory)), "Bridge update transaction");
+    const epoch = value?.nextRecord?.pendingUpdate?.quiesceEpoch;
+    return epoch === quiesceEpoch;
+  } catch {
+    return false;
+  }
+}
+
 async function initializeBridgeDirectory(options = {}) {
   const release = await readReleaseManifest(options);
   const destination = await stableDestination(options.bridgeDirectory);
@@ -1209,9 +1219,16 @@ async function prepareBridgeUpdate(options = {}) {
           manualChromeReloadRequired: true
         });
       } catch (error) {
+        const persisted = await persistedQuiesceEpoch(stateDirectory, quiesced.quiesceEpoch);
+        if (!persisted) {
+          const resume = await resumeIfSafe(options.resumeQuiescence, quiesced);
+          if (error instanceof BridgeUpdateError) {
+            throw new BridgeUpdateError(error.code, { ...error.details, resume });
+          }
+          throw errorAfterQuiesce("bridge_update_after_quiesce_failed", {}, resume);
+        }
         if (error instanceof BridgeUpdateError) throw error;
-        const resume = await resumeIfSafe(options.resumeQuiescence, quiesced);
-        throw errorAfterQuiesce("bridge_update_after_quiesce_failed", {}, resume);
+        throw errorAfterQuiesce("bridge_update_after_quiesce_failed", {}, { attempted: false, resumed: false });
       }
     } finally {
       if (stage) await fs.rm(stage, { recursive: true, force: true }).catch(() => undefined);

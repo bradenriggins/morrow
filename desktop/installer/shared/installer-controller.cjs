@@ -78,7 +78,10 @@ const {
 } = require("./claude-desktop.cjs");
 const {
   WINDOWS_POWERSHELL_TIMEOUT_MS,
+  processAlive: lifetimeProcessAlive,
   processMatchesRecordedLifetime,
+  readProcessStartedAt,
+  terminatePidTree,
   windowsPowerShellPath,
 } = require("./process-lifetime.cjs");
 const { blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, readBlackboardHealth, removeBlackboardData, removeBlackboardTenant, selectBlackboardCourses } = require("./blackboard.cjs");
@@ -221,6 +224,11 @@ function runBoundedCommand(executable, argumentsValue, options = {}) {
     const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_COMMAND_OUTPUT_LIMIT;
     const terminationGraceMs = options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS;
     const closeGraceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
+    const platform = options.platform || process.platform;
+    const spawnProcess = options.spawnProcess || spawn;
+    const killTree = options.terminatePidTree || ((pid, force) => terminatePidTree(pid, force, platform, options.spawnProcess || spawn));
+    const readStarted = options.readProcessStartedAt || readProcessStartedAt;
+    const sameProcessAlive = options.processAlive || lifetimeProcessAlive;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0
       || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0
       || !Number.isSafeInteger(terminationGraceMs) || terminationGraceMs < 0
@@ -231,12 +239,12 @@ function runBoundedCommand(executable, argumentsValue, options = {}) {
 
     let child;
     try {
-      child = spawn(executable, argumentsValue, {
+      child = spawnProcess(executable, argumentsValue, {
         cwd: options.cwd,
         env: options.env,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
-        detached: process.platform !== "win32"
+        detached: platform !== "win32"
       });
     } catch (error) {
       reject(error);
@@ -273,8 +281,29 @@ function runBoundedCommand(executable, argumentsValue, options = {}) {
       if (settled || termination) return;
       termination = reason;
       clearTimeout(timeoutTimer);
-      killChild(child, "SIGTERM");
-      forceKillTimer = setTimeout(() => killChild(child, "SIGKILL"), terminationGraceMs);
+      const pid = child.pid;
+      if (platform === "win32") {
+        // taskkill /T, then /T /F only while this PID is still the same process.
+        void (async () => {
+          let recorded = null;
+          if (Number.isSafeInteger(pid) && pid > 0) {
+            try { recorded = await readStarted(pid); } catch { recorded = null; }
+            try { killTree(pid, false); } catch {}
+          }
+          forceKillTimer = setTimeout(() => {
+            void (async () => {
+              if (settled || !Number.isSafeInteger(pid) || pid <= 0 || !sameProcessAlive(pid)) return;
+              let current = null;
+              try { current = await readStarted(pid); } catch { current = null; }
+              if (!sameProcessAlive(pid) || recorded === null || current !== recorded) return;
+              try { killTree(pid, true); } catch {}
+            })();
+          }, terminationGraceMs);
+        })();
+      } else {
+        killChild(child, "SIGTERM");
+        forceKillTimer = setTimeout(() => killChild(child, "SIGKILL"), terminationGraceMs);
+      }
       closeDeadlineTimer = setTimeout(() => {
         child.stdout?.destroy();
         child.stderr?.destroy();
@@ -989,13 +1018,28 @@ class InstallerController {
     };
     try {
       const client = new module.BlackboardLearnClient(tenant);
-      const principal = await client.get("/learn/api/public/v1/users/me");
-      if (!principal || typeof principal.id !== "string" || !/^_[1-9][0-9]{0,18}_[1-9][0-9]{0,18}$/.test(principal.id)) {
-        throw new TypeError("Blackboard did not return a valid integration account");
+      const timeoutMs = Number.isSafeInteger(this.blackboardDiscoveryTimeoutMs) && this.blackboardDiscoveryTimeoutMs > 0
+        ? this.blackboardDiscoveryTimeoutMs
+        : 15_000;
+      const discovery = new AbortController();
+      const discoveryTimer = setTimeout(() => discovery.abort(), timeoutMs);
+      let principal;
+      let memberships;
+      try {
+        principal = await client.get("/learn/api/public/v1/users/me", discovery.signal);
+        if (!principal || typeof principal.id !== "string" || !/^_[1-9][0-9]{0,18}_[1-9][0-9]{0,18}$/.test(principal.id)) {
+          throw new TypeError("Blackboard did not return a valid integration account");
+        }
+        memberships = await client.collect(`/learn/api/public/v1/users/${encodeURIComponent(principal.id)}/courses`, {
+          label: "course membership",
+          expand: ["course"],
+          maxRecords: 500,
+          maxPages: 20,
+          signal: discovery.signal,
+        });
+      } finally {
+        clearTimeout(discoveryTimer);
       }
-      const memberships = await client.collect(`/learn/api/public/v1/users/${encodeURIComponent(principal.id)}/courses`, {
-        label: "course membership", expand: ["course"], maxRecords: Number.POSITIVE_INFINITY, maxPages: Number.POSITIVE_INFINITY
-      });
       const courses = memberships.map((membership) => {
         if (!membership || typeof membership !== "object" || Array.isArray(membership) || membership.userId !== principal.id) {
           throw new TypeError("Blackboard returned a course membership for a different account");
@@ -1045,10 +1089,20 @@ class InstallerController {
       applicationSecret
     };
     try {
-      await fs.writeFile(temporary, `${JSON.stringify(credential)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      const handle = await fs.open(temporary, "wx", 0o600);
+      try {
+        await handle.writeFile(`${JSON.stringify(credential)}\n`, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
       if (this.platform !== "win32") await fs.chmod(temporary, 0o600);
       await fs.rename(temporary, destination);
       if (this.platform !== "win32") await fs.chmod(destination, 0o600);
+      if (this.platform !== "win32") {
+        const directoryHandle = await fs.open(path.dirname(destination), "r");
+        try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+      }
     } finally {
       credential.applicationSecret = "";
       await fs.rm(temporary, { force: true }).catch(() => {});
@@ -1741,12 +1795,7 @@ class InstallerController {
 
     if (setup) {
       try {
-        if (this.platform === "win32") {
-          await this.shell.openExternal("claude://");
-        } else {
-          const openError = await this.shell.openPath(setup.bundlePath);
-          if (openError) throw new Error("Claude Desktop did not open the Morrow bundle");
-        }
+        await this.openPreparedClaudeBundle(setup.bundlePath);
       } catch (error) {
         if (error.code) throw error;
         throw errorDetails("setup_failed");
@@ -3155,12 +3204,23 @@ class InstallerController {
     if (!await this.isCurrentClaudeDesktopSetup(setup, { platform: this.platform, homeDirectory: this.home })) {
       throw errorDetails("setup_failed");
     }
-    if (this.platform === "win32") {
-      await this.shell.openExternal("claude://");
-    } else {
-      const openError = await this.shell.openPath(setup.bundlePath);
-      if (openError) throw errorDetails("setup_failed");
+    await this.openPreparedClaudeBundle(setup.bundlePath);
+  }
+
+  /**
+   * Opens the prepared Morrow bundle. A bare claude:// URL is used only when
+   * a caller has verified that the registered handler is Claude Desktop.
+   */
+  async openPreparedClaudeBundle(bundlePath) {
+    const info = await fs.lstat(bundlePath).catch(() => null);
+    if (info?.isFile() && !info.isSymbolicLink()) {
+      const openError = await this.shell.openPath(bundlePath);
+      if (openError) throw errorDetails("claude_desktop_unverified");
+      return;
     }
+    const verified = typeof this.claudeProtocolVerified === "function" ? await this.claudeProtocolVerified() : false;
+    if (verified !== true) throw errorDetails("claude_desktop_unverified");
+    await this.shell.openExternal("claude://");
   }
 
   async revealClaudeDesktopBundle() {

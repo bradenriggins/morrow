@@ -424,25 +424,60 @@ test("the installer command runner bounds retained output while the child is wri
   assert.notEqual(result.code, 0);
 });
 
-test("the installer command runner hard-kills a child that ignores its soft timeout", { skip: process.platform === "win32" ? "POSIX signal behavior" : false }, async () => {
-  const started = Date.now();
-  const result = await runBoundedCommand(process.execPath, ["-e", [
-    "process.on('SIGTERM', () => {});",
-    "console.log(process.pid);",
-    "setInterval(() => {}, 1_000);"
-  ].join("\n")], {
-    timeoutMs: 150,
+test("the installer command runner hard-kills a Windows process tree after rechecking identity", async () => {
+  const { EventEmitter } = require("node:events");
+  const child = new EventEmitter();
+  child.pid = 4242;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdout.destroy = () => {};
+  child.stderr.destroy = () => {};
+  child.unref = () => {};
+  child.kill = () => { throw new Error("Windows reclaim must not TerminateProcess one PID"); };
+  const trees = [];
+  let startedAt = 1_700_000_000_000;
+  const result = await runBoundedCommand("fixture", [], {
+    platform: "win32",
+    spawnProcess: () => child,
+    terminatePidTree: (pid, force) => {
+      trees.push({ pid, force });
+      if (force) child.emit("close", null, "SIGKILL");
+    },
+    readProcessStartedAt: async () => startedAt,
+    processAlive: () => true,
+    timeoutMs: 20,
     maxOutputBytes: 1024,
-    terminationGraceMs: 100,
-    closeGraceMs: 300
+    terminationGraceMs: 20,
+    closeGraceMs: 200,
   });
-  const pid = Number.parseInt(result.stdout.trim(), 10);
-
   assert.equal(result.termination, "timeout");
-  assert.ok(Number.isSafeInteger(pid) && pid > 0);
-  assert.ok(Date.now() - started < 2_000, "the runner obeyed its hard close deadline");
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.throws(() => process.kill(pid, 0), (error) => error?.code === "ESRCH");
+  assert.deepEqual(trees, [{ pid: 4242, force: false }, { pid: 4242, force: true }]);
+
+  const reused = new EventEmitter();
+  reused.pid = 4242;
+  reused.stdout = new EventEmitter();
+  reused.stderr = new EventEmitter();
+  reused.stdout.destroy = () => {};
+  reused.stderr.destroy = () => {};
+  reused.unref = () => {};
+  reused.kill = () => { throw new Error("Windows reclaim must not TerminateProcess one PID"); };
+  const reusedTrees = [];
+  let reads = 0;
+  await runBoundedCommand("fixture", [], {
+    platform: "win32",
+    spawnProcess: () => reused,
+    terminatePidTree: (pid, force) => { reusedTrees.push({ pid, force }); },
+    readProcessStartedAt: async () => {
+      reads += 1;
+      return reads === 1 ? 1_700_000_000_000 : 1_700_000_000_500;
+    },
+    processAlive: () => true,
+    timeoutMs: 20,
+    maxOutputBytes: 1024,
+    terminationGraceMs: 20,
+    closeGraceMs: 40,
+  });
+  assert.deepEqual(reusedTrees, [{ pid: 4242, force: false }]);
 });
 
 // The Windows half of this, runWindowsPowerShell, uses the same runner and
@@ -3421,4 +3456,48 @@ test("Move to Applications asks the app to move itself, and says how to move it 
   const settled = controller(root, { appLocation: () => "ok", moveToApplications: async () => { moves.push("unexpected"); return true; } });
   assert.equal(await settled.moveToApplications(), false);
   assert.deepEqual(moves, ["move", "move", "move"]);
+});
+
+test("Blackboard discovery rejects a stalled body or an endless page inside the bound and releases the mutation", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  let held = false;
+  installer.withDesktopMutation = async (action) => {
+    held = true;
+    try { return await action({ stopRuntime: async () => {} }); }
+    finally { held = false; }
+  };
+  installer.privateFileAccessAccepted = async () => () => true;
+  installer.blackboardDiscoveryTimeoutMs = 80;
+  const modes = ["stall", "pages"];
+  for (const mode of modes) {
+    installer.blackboardClientModule = {
+      BlackboardLearnClient: class {
+        async get(_path, signal) {
+          if (!signal) await new Promise(() => {});
+          return { id: "_11_1" };
+        }
+        async collect(_path, options) {
+          if (!Number.isFinite(options.maxPages) || !Number.isFinite(options.maxRecords) || !options.signal) {
+            await new Promise(() => {});
+          }
+          if (mode === "pages") throw new Error("Blackboard course membership pagination exceeded the safe limit.");
+          await new Promise((_resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("stall exceeded the test bound")), 5_000);
+            options.signal.addEventListener("abort", () => {
+              clearTimeout(timer);
+              reject(Object.assign(new Error("The Blackboard request was cancelled."), { name: "AbortError" }));
+            }, { once: true });
+          });
+        }
+      },
+    };
+    const started = Date.now();
+    await assert.rejects(
+      () => installer.configureBlackboard({ baseUrl: "https://learn.example.edu/", applicationKey: "key-1", applicationSecret: "secret-1" }),
+      mode === "pages" ? /pagination exceeded/ : /cancelled|aborted/i,
+    );
+    assert.ok(Date.now() - started < 2_000, `${mode} discovery held the mutation`);
+    assert.equal(held, false, `${mode} discovery left the mutation held`);
+  }
 });

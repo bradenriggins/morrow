@@ -512,6 +512,27 @@ test("corrupt, signature, cancellation, and offline failures use bounded states 
   assert.equal(offlineAdapter.installs, 0);
 });
 
+test("a missing attempt store does not commit the restart lease or hand off the install", async () => {
+  const adapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
+  const commits = [];
+  const releases = [];
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy(),
+    acquireRestartLease: async () => ({ status: "granted", leaseId: "unrecorded-lease" }),
+    releaseRestartLease: async (leaseId) => { releases.push(leaseId); },
+    commitRestartLease: async (leaseId) => { commits.push(leaseId); return { status: "closing" }; },
+  });
+  await controller.check();
+  await new Promise((resolve) => setImmediate(resolve));
+  const result = await controller.installWhenIdle();
+  assert.equal(result.status, "error");
+  assert.equal(result.reason, "update_runtime_unverified");
+  assert.equal(adapter.installs, 0);
+  assert.deepEqual(commits, []);
+  assert.deepEqual(releases, ["unrecorded-lease"]);
+});
+
 test("install commits an authoritative lease before it can hand off to the updater", async () => {
   const adapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
   let leaseStatus = "busy";
@@ -520,6 +541,8 @@ test("install commits an authoritative lease before it can hand off to the updat
   const controller = createUpdateController({
     adapter,
     policy: enabledPolicy(),
+    updateAttempts: memoryAttempts(),
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
     acquireRestartLease: async () => leaseStatus === "granted"
       ? { status: "granted", leaseId: "known-idle-lease" }
       : { status: leaseStatus },
@@ -549,6 +572,8 @@ test("concurrent restart requests acquire one lease and install once", async () 
   const controller = createUpdateController({
     adapter,
     policy: enabledPolicy(),
+    updateAttempts: memoryAttempts(),
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
     acquireRestartLease: () => {
       acquisitionCount += 1;
       return pendingLease.promise;
@@ -629,6 +654,8 @@ test("a failed release after a failed commit leaves the verified update deferred
   const controller = createUpdateController({
     adapter,
     policy: enabledPolicy(),
+    updateAttempts: memoryAttempts(),
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
     acquireRestartLease: async () => ({ status: "granted", leaseId: "release-failure-lease" }),
     releaseRestartLease: async () => { throw new Error("lease service unavailable"); },
     commitRestartLease: async () => { throw new Error("owner did not enter closing state"); }
@@ -657,6 +684,8 @@ test("a failed updater handoff after commit retains the closing lease and refuse
   const controller = createUpdateController({
     adapter,
     policy: enabledPolicy(),
+    updateAttempts: memoryAttempts(),
+    confirmUpdatedRuntime: async () => ({ status: "verified" }),
     acquireRestartLease: async () => ({ status: "granted", leaseId: "committed-lease" }),
     releaseRestartLease: async (leaseId) => { released.push(leaseId); },
     commitRestartLease: async () => ({ status: "closing" })

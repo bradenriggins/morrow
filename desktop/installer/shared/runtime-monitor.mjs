@@ -240,7 +240,15 @@ export function createChildProcessReclaimer(dependencies = {}) {
     if (identityReclaimed(initial)) return true;
     if (initial !== "match") return false;
     const signalDeadline = Math.min(deadline, now() + Math.floor(timeoutMs / 2));
-    try { signal(pid, "SIGTERM"); } catch { if (!alive(pid)) return true; }
+    // Windows process.kill is TerminateProcess of this PID only. The children
+    // are reparented, so a later taskkill of the dead PID never sees them.
+    // The grace stop is taskkill /PID /T, and the force stop is /T /F, and
+    // only after the identity is still an exact match.
+    const requestStop = (force) => {
+      if (platform === "win32") return killTree(pid, force);
+      return signal(pid, force ? "SIGKILL" : "SIGTERM");
+    };
+    try { requestStop(false); } catch { if (!alive(pid)) return true; }
     while (now() < signalDeadline) {
       if (!alive(pid)) return true;
       await wait(CHILD_RECLAIM_POLL_MS);
@@ -248,10 +256,7 @@ export function createChildProcessReclaimer(dependencies = {}) {
     const afterTerm = await childIdentity(pid, recordedStartedAt, alive, matches);
     if (identityReclaimed(afterTerm)) return true;
     if (afterTerm !== "match") return false;
-    try {
-      if (platform === "win32") killTree(pid, true);
-      else signal(pid, "SIGKILL");
-    } catch { if (!alive(pid)) return true; }
+    try { requestStop(true); } catch { if (!alive(pid)) return true; }
     while (now() < deadline) {
       if (!alive(pid)) return true;
       await wait(CHILD_RECLAIM_POLL_MS);
@@ -353,9 +358,19 @@ if (child) {
   // The launcher is the only process the monitor can signal, so it carries
   // termination to the gateway it started and escalates when that gateway
   // ignores the request. It exits once the gateway has closed.
-  const forward = (signal) => { if (child.exitCode === null && child.signalCode === null) { try { child.kill(signal); } catch {} } };
-  process.on("SIGTERM", () => { forward("SIGTERM"); setTimeout(() => forward("SIGKILL"), ${TEST_LAUNCHER_ESCALATION_MS}).unref(); });
-  process.on("exit", () => forward("SIGKILL"));
+  const stopTree = (force) => {
+    if (child.exitCode !== null || child.signalCode !== null || !Number.isSafeInteger(child.pid) || child.pid < 1) return;
+    if (process.platform === "win32") {
+      try {
+        const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T"].concat(force ? ["/F"] : []), { stdio: "ignore", windowsHide: true });
+        killer.unref();
+      } catch {}
+      return;
+    }
+    try { child.kill(force ? "SIGKILL" : "SIGTERM"); } catch {}
+  };
+  process.on("SIGTERM", () => { stopTree(false); setTimeout(() => stopTree(true), ${TEST_LAUNCHER_ESCALATION_MS}).unref(); });
+  process.on("exit", () => stopTree(true));
 }
 `;
   writeFileSync(launcherPath, source, { mode: 0o600, flag: "w" });

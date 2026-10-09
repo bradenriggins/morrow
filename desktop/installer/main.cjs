@@ -143,7 +143,7 @@ async function updateAttemptWindowsAccess() {
         hardenPrivateDirectory: gatewayCore.hardenPrivateDirectory
       };
     }
-  } catch { /* Without the checks the attempt store refuses to start; updates then run without attempt records. */ }
+  } catch { /* Without the checks the attempt store refuses to start. Install then fails closed. */ }
   return null;
 }
 
@@ -165,9 +165,8 @@ function createAppUpdateController(windowsPrivateAccess = null) {
       windowsPrivateAccess
     });
   } catch {
-    // The store refuses a state directory it cannot prove private. Updates
-    // then run without attempt records instead of keeping the app from
-    // starting; the panel carries the update states either way.
+    // The store refuses a state directory it cannot prove private. The app
+    // still starts, and install fails closed without a rollback record.
   }
   return createUpdateController({
     adapter,
@@ -817,6 +816,23 @@ function claimSingleInstance(target, currentWindow) {
   return true;
 }
 
+function startupInitializationBoundMs() {
+  const configured = Number(process.env.MORROW_STARTUP_INITIALIZATION_BOUND_MS);
+  if (Number.isSafeInteger(configured) && configured >= 50 && configured <= 120_000) return configured;
+  return 20_000;
+}
+
+/** A thrown startup failure is swallowed. A read that never settles still opens the window. */
+async function settleStartupInitialization(operation) {
+  let timer = null;
+  const timeout = new Promise((resolve) => { timer = setTimeout(resolve, startupInitializationBoundMs()); });
+  try {
+    await Promise.race([Promise.resolve(operation).catch(() => {}), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function startMorrow(lifecycle) {
   if (lifecycle.isClosing()) return false;
   if (!rendererSmokeRequestIsValid()) {
@@ -848,7 +864,7 @@ async function startMorrow(lifecycle) {
     moveToApplications: async () => typeof app.moveToApplicationsFolder === "function" && app.moveToApplicationsFolder() === true,
     updateSnapshot: () => updateController?.snapshot()
   });
-  await installer.initializeBridgeAtStartup().catch(() => {});
+  await settleStartupInitialization(installer.initializeBridgeAtStartup());
   if (lifecycle.isClosing()) return false;
   updateController = createAppUpdateController(await updateAttemptWindowsAccess());
   if (lifecycle.isClosing() || await runDesktopSmokeIfRequested()) return false;
