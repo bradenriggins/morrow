@@ -582,6 +582,37 @@ test("the committed source-origin ledger is unreviewed, and the old self-stamp i
   for (let offset = 0; offset < missing.length; offset += 40) {
     execFileSync("git", ["-C", desktop, "fetch", "--depth=2", "origin", ...missing.slice(offset, offset + 40)], { stdio: "ignore" });
   }
+  // A later depth-limited fetch rewrites .git/shallow. It can graft a source commit
+  // whose parent object is already stored, and then `commit^` does not resolve, so
+  // every changed file in that commit is reported invalid. Drop that graft only when
+  // every recorded parent tree is present.
+  const shallowPath = execFileSync("git", ["-C", desktop, "rev-parse", "--path-format=absolute", "--git-path", "shallow"], { encoding: "utf8" }).trim();
+  if (existsSync(shallowPath)) {
+    const parentTreesPresent = (revision) => {
+      let raw;
+      try {
+        raw = execFileSync("git", ["-C", desktop, "cat-file", "commit", revision], { encoding: "utf8" });
+      } catch {
+        return false;
+      }
+      const parents = raw.split("\n").filter((line) => line.startsWith("parent ")).map((line) => line.slice(7).trim());
+      if (parents.length === 0) return false;
+      return parents.every((parent) => {
+        try {
+          execFileSync("git", ["-C", desktop, "cat-file", "-e", `${parent}^{tree}`], { stdio: "ignore" });
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    };
+    const grafted = readFileSync(shallowPath, "utf8").split("\n").filter(Boolean);
+    const keep = grafted.filter((revision) => !needed.has(revision) || !parentTreesPresent(revision));
+    if (keep.length !== grafted.length) {
+      if (keep.length === 0) unlinkSync(shallowPath);
+      else writeFileSync(shallowPath, `${keep.join("\n")}\n`);
+    }
+  }
   const generated = validateSourceOriginLedger({
     root: desktop,
     commit: head,
