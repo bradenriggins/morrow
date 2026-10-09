@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { launchTestChromium } from "./lib/chromium-launch.mjs";
-import { executeMoodleInPage } from "../../connector/extension/src/moodle-executor.js";
+import { executeMoodleDraftUploadInPage, executeMoodleInPage } from "../../connector/extension/src/moodle-executor.js";
 
 const listOperation = {
   key: "moodle.ajax.core_course_get_enrolled_courses_by_timeline_classification.v1",
@@ -740,7 +740,24 @@ function authoringQuizPage(questions) {
 
 
 async function executeInBrowser(page, input) {
-  return page.evaluate(executeMoodleInPage, JSON.stringify(input));
+  if (!input?.privateAttachment && !input?.privateAttachments) {
+    return page.evaluate(executeMoodleInPage, JSON.stringify(input));
+  }
+  const channel = `draft-${Math.random().toString(36).slice(2)}`;
+  const files = [input.privateAttachment, ...(Array.isArray(input.privateAttachments) ? input.privateAttachments : [])].filter(Boolean);
+  const sesskey = await page.evaluate(() => globalThis.M?.cfg?.sesskey || "");
+  const listener = page.evaluate(executeMoodleDraftUploadInPage, JSON.stringify({
+    mode: "listen", channel, files, sesskey, expiresAt: input.expiresAt || Date.now() + 60_000,
+  }));
+  await page.waitForFunction((name) => document.documentElement.getAttribute("data-morrow-draft-listener") === name, channel);
+  try {
+    return await page.evaluate(executeMoodleInPage, JSON.stringify({ ...input, draftUploadChannel: channel }));
+  } finally {
+    await page.evaluate((name) => {
+      document.dispatchEvent(new CustomEvent("morrow-draft-upload-close", { detail: { channel: name } }));
+    }, channel);
+    await listener;
+  }
 }
 
 test("Moodle discovery includes a fresh verified current course without dropping timeline courses", async () => {

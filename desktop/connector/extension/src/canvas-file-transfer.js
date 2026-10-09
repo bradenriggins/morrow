@@ -2,6 +2,32 @@ export const MAX_CANVAS_FILE_TRANSFER_BYTES = 1024 * 1024;
 
 export const CANVAS_UPLOAD_PATH = /^\/api\/v1(?:\/[a-z_]+(?:\/(?:[1-9][0-9]*|self))?)+$/;
 
+/**
+ * A private Canvas upload may leave only for the Canvas page origin, or for a
+ * New Quiz host this code already treats as Canvas-owned for that same tenant.
+ * Any other https host is refused, including userinfo and fragment tricks.
+ */
+export function canvasPrivateUploadUrl(value, canvasOrigin) {
+  if (typeof value !== "string" || value.length < 1 || value.length > 8192) return null;
+  if (typeof canvasOrigin !== "string" || canvasOrigin.length < 1 || canvasOrigin.length > 8192) return null;
+  let url;
+  let canvas;
+  try {
+    url = new URL(value);
+    canvas = new URL(canvasOrigin);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.hash || !url.hostname) return null;
+  if (canvas.protocol !== "https:" || canvas.username || canvas.password || canvas.hash
+    || canvas.origin !== canvasOrigin || canvas.href !== `${canvas.origin}/`) return null;
+  if (url.origin === canvas.origin) return url;
+  const tenant = canvas.hostname.toLowerCase().match(/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/)?.[1] || "";
+  const host = url.hostname.toLowerCase();
+  if (!tenant || !/^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i.test(host) || host.split(".")[0] !== tenant) return null;
+  return url;
+}
+
 /** The Canvas folder a folder upload names, or "" for an upload to any other target. */
 export function canvasUploadFolderId(uploadPath) {
   return /^\/api\/v1\/folders\/([1-9][0-9]*)\/files$/.exec(String(uploadPath || ""))?.[1] || "";
@@ -78,6 +104,26 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     let url;
     try { url = new URL(value, canvasOrigin); } catch { throw new Error(code); }
     if (url.protocol !== "https:" || url.origin !== canvasOrigin || url.username || url.password || url.hash) throw new Error(code);
+    return url;
+  };
+  // Same host rule as canvasPrivateUploadUrl. This copy stays inside the injected
+  // function because Chrome serializes only that function body.
+  const canvasOwnedUploadUrl = (value, canvasOrigin) => {
+    if (typeof value !== "string" || value.length < 1 || value.length > 8192) return null;
+    let url;
+    let canvas;
+    try {
+      url = new URL(value);
+      canvas = new URL(canvasOrigin);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "https:" || url.username || url.password || url.hash || !url.hostname) return null;
+    if (canvas.protocol !== "https:" || canvas.origin !== canvasOrigin || canvas.href !== `${canvas.origin}/`) return null;
+    if (url.origin === canvas.origin) return url;
+    const tenant = canvas.hostname.toLowerCase().match(/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/)?.[1] || "";
+    const host = url.hostname.toLowerCase();
+    if (!tenant || !/^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i.test(host) || host.split(".")[0] !== tenant) return null;
     return url;
   };
   const cancelBody = (body) => {
@@ -301,11 +347,8 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       const uploadUrl = typeof started.value?.upload_url === "string" ? started.value.upload_url : "";
       const uploadParams = started.value?.upload_params;
       if (!plainObject(uploadParams) || !uploadUrl) throw new Error("canvas_file_upload_init_invalid");
-      let trustedUploadUrl;
-      try { trustedUploadUrl = new URL(uploadUrl); } catch { throw new Error("canvas_file_upload_url_refused"); }
-      if (trustedUploadUrl.protocol !== "https:" || trustedUploadUrl.username || trustedUploadUrl.password || trustedUploadUrl.hash) {
-        throw new Error("canvas_file_upload_url_refused");
-      }
+      const trustedUploadUrl = canvasOwnedUploadUrl(uploadUrl, canvasOrigin);
+      if (!trustedUploadUrl) throw new Error("canvas_file_upload_url_refused");
       const entries = Object.entries(uploadParams);
       if (!entries.length || entries.length > 64 || entries.some(([key, value]) => !/^[A-Za-z0-9_.-]{1,128}$/.test(key) || key === "file" || typeof value !== "string" || value.length > 8192)) {
         throw new Error("canvas_file_upload_params_refused");
@@ -427,6 +470,10 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       signal: uploadSignal,
     });
     uploadStatus = uploaded.status;
+    if (uploaded.redirected) {
+      const stayed = canvasOwnedUploadUrl(uploaded.url, canvasOrigin);
+      if (!stayed || stayed.origin !== new URL(started.upload_url).origin) throw new Error("canvas_file_upload_url_refused");
+    }
     const finalized = await finalFile(await uploadResponse(uploaded, canvasOrigin));
     // Canvas serves a course file to the signed-in person, so the proof reads it
     // back the same way. The request is same-origin to Canvas, and the redirect it

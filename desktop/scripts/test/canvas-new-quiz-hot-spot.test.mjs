@@ -8,6 +8,7 @@ import {
   executeCanvasNewQuizHotSpotInPage,
   unsignedHotSpotImageUrl,
 } from "../../connector/extension/src/canvas-new-quiz-hot-spot.js";
+import { canvasPrivateUploadUrl } from "../../connector/extension/src/canvas-file-transfer.js";
 import { stableJson } from "../../connector/extension/src/catalog-compatibility.js";
 import { canvasWriteOutcomeUncertain } from "../../connector/extension/src/canvas-write-outcome.js";
 
@@ -15,8 +16,8 @@ const ORIGIN = "https://school.instructure.com";
 const COURSE_ID = "2";
 const QUIZ_ID = "77";
 const PRINCIPAL_ID = "7";
-const SIGNED_UPLOAD_URL = "https://instructure-uploads.example.net/media/cell.png?X-Amz-Signature=deadbeefsecret&X-Amz-Expires=600";
-const UNSIGNED_UPLOAD_URL = "https://instructure-uploads.example.net/media/cell.png";
+const SIGNED_UPLOAD_URL = "https://school.instructure.com/media/cell.png?X-Amz-Signature=deadbeefsecret&X-Amz-Expires=600";
+const UNSIGNED_UPLOAD_URL = "https://school.instructure.com/media/cell.png";
 const QUIZ_PATH = `/api/quiz/v1/courses/${COURSE_ID}/quizzes/${QUIZ_ID}`;
 
 const SAVED = [
@@ -460,6 +461,7 @@ function workerFunction(signature) {
 const hotSpotWorkerRegion = (() => {
   const script = [
     "globalThis.__morrowHotSpotWorkerRegion = (() => {",
+    canvasPrivateUploadUrl.toString(),
     "const canvasUploadObservers = new Map();",
     "const COURSE_FILE_READ_TIMEOUT_MS = 30_000;",
     "async function courseFileStorageAccessEnabled() { return true; }",
@@ -514,7 +516,7 @@ function createdFixture() {
  * in flight, which is the only moment the observer endings below can happen:
  * the watch is registered and the create has not been reached.
  */
-async function runHotSpotWorker({ expiresAt, duringFetch }) {
+async function runHotSpotWorker({ expiresAt, duringFetch, uploadUrl = SIGNED_UPLOAD_URL }) {
   const keys = ["chrome", "fetch", "canvasWriteOutcomeUncertain", "unsignedHotSpotImageUrl"];
   const saved = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const scriptModes = [];
@@ -559,7 +561,7 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
           const input = JSON.parse(injection.args[0]);
           scriptModes.push(input.mode);
           const result = input.mode === "initialize"
-            ? { ok: true, sent: false, data: { course_id: COURSE_ID, assignment_id: QUIZ_ID, item_count: SAVED.length, upload_url: SIGNED_UPLOAD_URL } }
+            ? { ok: true, sent: false, data: { course_id: COURSE_ID, assignment_id: QUIZ_ID, item_count: SAVED.length, upload_url: uploadUrl } }
             : createdFixture();
           return [{ result }];
         },
@@ -606,6 +608,25 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
     }
   }
 }
+
+test("an attacker https Hot Spot upload URL is refused before fetch, and a Canvas URL still proceeds", async () => {
+  const attacker = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    uploadUrl: "https://attacker.example/media/cell.png?X-Amz-Signature=deadbeef",
+  });
+  assert.equal(attacker.result.ok, false);
+  assert.equal(attacker.result.sent, false);
+  assert.equal(attacker.result.error, "canvas_hot_spot_upload_url_refused");
+  assert.deepEqual(attacker.putRequests, []);
+  assert.deepEqual(attacker.scriptModes, ["initialize"]);
+  const sameOrigin = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    duringFetch: (triggers) => triggers.confirmUpload(),
+  });
+  assert.equal(sameOrigin.result.ok, true, JSON.stringify(sameOrigin.result));
+  assert.equal(sameOrigin.putRequests.length, 1);
+  assert.equal(sameOrigin.putRequests[0].url, SIGNED_UPLOAD_URL);
+});
 
 test("the worker preserves a complete verified Hot Spot result after one confirmed upload", async () => {
   const { result, scriptModes, putRequests } = await runHotSpotWorker({

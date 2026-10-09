@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInThisContext } from "node:vm";
 import { canvasReviewedUploadKind, canvasReviewedUploadPath } from "../../connector/extension/generated/canvas-operation-admission.js";
+import { canvasPrivateUploadUrl } from "../../connector/extension/src/canvas-file-transfer.js";
 
 // The Bridge worker carries the saved-file read itself for a folder upload: the
 // page prepares and completes the upload, and the worker reads the bytes back.
@@ -39,7 +40,10 @@ function region({ siteTarget = false, courseAccessMode = "selected", resolveResu
     "async function courseFileStorageAccessEnabled() { return true; }",
     "function canvasUploadFolderId(path) { return /\\/folders\\/([1-9][0-9]*)\\/files$/.exec(path)?.[1] || ''; }",
     "function decimalId(value) { return /^[1-9][0-9]*$/.test(String(value)) ? String(value) : ''; }",
-    "function privateCanvasUploadPlan(data) { return { entries: [['key', 'uploads/material']], uploadUrl: new URL('https://storage.example.test/upload') }; }",
+    canvasPrivateUploadUrl.toString(),
+    "function canvasUploadRedirectKept(response, uploadUrl, canvasOrigin) { if (!response || response.redirected !== true) return true; const stayed = canvasPrivateUploadUrl(response.url, canvasOrigin); return Boolean(stayed) && stayed.origin === uploadUrl.origin; }",
+    "function canvasUploadLocationKept(response, uploadUrl, canvasOrigin) { const location = response?.headers?.get?.('location'); if (typeof location !== 'string' || !location) return true; let next; try { next = new URL(location, uploadUrl); } catch { return false; } if (next.protocol !== 'https:' || next.username || next.password || next.hash) return false; return next.origin === uploadUrl.origin || next.origin === canvasOrigin; }",
+    "function privateCanvasUploadPlan(data) { return { entries: [['key', 'uploads/material']], uploadUrl: new URL('" + ORIGIN + "/upload') }; }",
     "function observeCanvasUploadConfirmation() { return { result: Promise.resolve({ status: 201, confirmation: new URL('" + ORIGIN + "/api/v1/files/" + FILE_ID + "/confirm') }), close() {} }; }",
     "async function boundedResponseBytes(response) { return new Uint8Array(await response.arrayBuffer()); }",
     "async function sha256Bytes() { return " + JSON.stringify(SHA256) + "; }",
@@ -200,4 +204,82 @@ test("upload targets name the bound course, own files, or a site import", () => 
     canvasReviewedUploadTarget(binding, { course_id: "43", upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post", upload_arguments: { folder_id: FOLDER_ID } }),
     null,
   );
+});
+
+function workerSlice(signature, after) {
+  const start = WORKER_SOURCE.indexOf(signature);
+  assert.ok(start >= 0, signature);
+  const from = after ? WORKER_SOURCE.indexOf(after, start) : start;
+  const end = WORKER_SOURCE.indexOf("\n}\n", from);
+  assert.ok(end > start, signature);
+  return WORKER_SOURCE.slice(start, end + "\n}\n".length);
+}
+
+function pinnedTransfer(uploadUrl) {
+  const script = [
+    "globalThis.__morrowPinnedTransfer = (() => {",
+    "const MAX_PRIVATE_FILE_BYTES = 1024 * 1024;",
+    "function executeCanvasCourseFileTransferInPage() {}",
+    "const COURSE_FILE_READ_TIMEOUT_MS = 30_000;",
+    canvasPrivateUploadUrl.toString(),
+    "function boundedCommandDeadline() { return Date.now() + 30_000; }",
+    "function commandDeadlineCurrent() { return true; }",
+    "async function courseFileStorageAccessEnabled() { return true; }",
+    "function canvasReviewedUploadTarget() { return { kind: 'file', uploadPath: '/api/v1/courses/" + COURSE_ID + "/files' }; }",
+    "async function storage() { return { courseAccessMode: 'selected' }; }",
+    "function canvasUploadFolderId() { return ''; }",
+    "function decimalId(value) { return /^[1-9][0-9]*$/.test(String(value)) ? String(value) : ''; }",
+    workerSlice("function privateCanvasUploadPlan(value, canvasOrigin) {"),
+    "function canvasUploadRedirectKept() { return true; }",
+    "function canvasUploadLocationKept() { return true; }",
+    "function observeCanvasUploadConfirmation() { return { result: Promise.resolve({ status: 201, confirmation: new URL('" + ORIGIN + "/api/v1/files/" + FILE_ID + "') }), close() {} }; }",
+    "async function boundedResponseBytes(response) { return new Uint8Array(await response.arrayBuffer()); }",
+    "async function sha256Bytes() { return " + JSON.stringify(SHA256) + "; }",
+    "function privateCanvasConfirmationUrl(value, canvasOrigin) { try { const url = new URL(value, canvasOrigin); return url.origin === canvasOrigin ? url : null; } catch { return null; } }",
+    "globalThis.chrome = { scripting: { executeScript: async () => [{ result: { ok: true, sent: false, data: { course_id: " + JSON.stringify(COURSE_ID) + ", upload_path: '/api/v1/courses/" + COURSE_ID + "/files', upload_url: " + JSON.stringify(uploadUrl) + ", upload_params: { key: 'uploads/material' } } } }] } };",
+    workerSlice("async function executeCanvasCourseFileTransfer(binding, args, expiresAt, privateAttachment) {", "uploadObserver?.close();"),
+    "return { executeCanvasCourseFileTransfer };",
+    "})();",
+  ].join("\n");
+  runInThisContext(script, { filename: "service-worker-pinned-upload.js" });
+  const value = globalThis.__morrowPinnedTransfer;
+  delete globalThis.__morrowPinnedTransfer;
+  return value;
+}
+
+test("an attacker https upload URL is refused before fetch, and a Canvas upload URL proceeds", async () => {
+  const binding = { tabId: 3, origin: ORIGIN, courseId: COURSE_ID, principalId: "7" };
+  const attachment = { manifest: { filename: "proof.txt", size_bytes: BYTES.byteLength, sha256: SHA256 }, content_type: "text/plain", bytes_base64: Buffer.from(BYTES).toString("base64") };
+  const priorFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push(String(url?.href || url));
+    return { ok: true, status: 201, url: `${ORIGIN}/files/${FILE_ID}/download?download_frd=1`, arrayBuffer: async () => BYTES.buffer.slice(0) };
+  };
+  try {
+    for (const attack of [
+      "https://attacker.example/upload",
+      "https://school.instructure.com.attacker.example/upload",
+      "https://user:pw@school.instructure.com/upload",
+      "https://school.instructure.com/upload#fragment",
+      "https://school.instructure.com@attacker.example/upload",
+    ]) {
+      requests.length = 0;
+      const refused = await pinnedTransfer(attack).executeCanvasCourseFileTransfer(binding, { upload_tool: "canvas_upload_file" }, Date.now() + 30_000, attachment);
+      assert.equal(refused.ok, false, attack);
+      assert.equal(refused.sent, false, attack);
+      assert.equal(refused.error, "canvas_file_upload_url_refused", attack);
+      assert.deepEqual(requests, [], attack);
+    }
+    requests.length = 0;
+    const allowed = await pinnedTransfer(`${ORIGIN}/upload?signature=opaque`).executeCanvasCourseFileTransfer(binding, { upload_tool: "canvas_upload_file" }, Date.now() + 30_000, attachment);
+    assert.equal(requests.length > 0, true, JSON.stringify(allowed));
+    assert.equal(requests[0], `${ORIGIN}/upload?signature=opaque`);
+    const quizHost = "https://school.quiz-api.instructure.com/upload";
+    requests.length = 0;
+    await pinnedTransfer(quizHost).executeCanvasCourseFileTransfer(binding, { upload_tool: "canvas_upload_file" }, Date.now() + 30_000, attachment);
+    assert.equal(requests[0], quizHost);
+  } finally {
+    globalThis.fetch = priorFetch;
+  }
 });

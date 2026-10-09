@@ -135,6 +135,26 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
     if (url.href.includes("?") || url.href.includes("#")) throw new Error("canvas_hot_spot_upload_url_refused");
     return url.href;
   };
+  // Same host rule as canvasPrivateUploadUrl. Kept here because Chrome serializes
+  // only this function body into the page.
+  const canvasOwnedUploadUrl = (value, canvasOrigin) => {
+    if (typeof value !== "string" || value.length < 1 || value.length > 8192) return null;
+    let url;
+    let canvas;
+    try {
+      url = new URL(value);
+      canvas = new URL(canvasOrigin);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "https:" || url.username || url.password || url.hash || !url.hostname) return null;
+    if (canvas.protocol !== "https:" || canvas.origin !== canvasOrigin || canvas.href !== `${canvas.origin}/`) return null;
+    if (url.origin === canvas.origin) return url;
+    const tenant = canvas.hostname.toLowerCase().match(/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/)?.[1] || "";
+    const host = url.hostname.toLowerCase();
+    if (!tenant || !/^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i.test(host) || host.split(".")[0] !== tenant) return null;
+    return url;
+  };
   // Canvas may add provider-owned fields to the saved record. Every field the
   // reviewed create supplied must still be present and equal. Canvas commonly
   // serializes numeric identifiers and numeric form values as either strings or
@@ -365,9 +385,8 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
       const started = await canvasJson(`${quizPath}/items/media_upload_url`);
       const uploadUrl = plainObject(started) && typeof started.url === "string" ? started.url : "";
       if (!uploadUrl) throw new Error("canvas_hot_spot_upload_url_missing");
-      let signed;
-      try { signed = new URL(uploadUrl); } catch { throw new Error("canvas_hot_spot_upload_url_refused"); }
-      if (signed.protocol !== "https:" || signed.username || signed.password) throw new Error("canvas_hot_spot_upload_url_refused");
+      const signed = canvasOwnedUploadUrl(uploadUrl, canvasOrigin);
+      if (!signed) throw new Error("canvas_hot_spot_upload_url_refused");
       // Proves the trimmed form is a usable URL before any byte is sent.
       unsignedImageUrl(uploadUrl);
       return {

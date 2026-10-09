@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { launchTestChromium } from "./lib/chromium-launch.mjs";
-import { executeMoodleInPage } from "../../connector/extension/src/moodle-executor.js";
+import { executeMoodleDraftUploadInPage, executeMoodleInPage } from "../../connector/extension/src/moodle-executor.js";
 import { executeMoodleScormInPage } from "../../connector/extension/src/moodle-scorm-executor.js";
 
 const SESSION = "synthetic-session";
@@ -248,10 +248,22 @@ test("Moodle SCORM executor edits bounded settings and replaces one package with
     const binding = { origin, siteUrl: `${origin}/`, principalId: "3", courseId: "2" };
     const base = { mode: "execute", binding, expiresAt: Date.now() + 60_000 };
     const read = () => page.evaluate(executeMoodleInPage, JSON.stringify({ ...base, operation: scormRead, arguments: { course_id: 2, module_id: 99 } }));
-    const run = (operation, argumentsValue, privateAttachment) => page.evaluate(
-      executeMoodleScormInPage,
-      JSON.stringify({ ...base, operation, arguments: argumentsValue, ...(privateAttachment ? { privateAttachment } : {}) }),
-    );
+    const run = async (operation, argumentsValue, privateAttachment) => {
+      const input = { ...base, operation, arguments: argumentsValue, ...(privateAttachment ? { privateAttachment } : {}) };
+      if (!privateAttachment) return page.evaluate(executeMoodleScormInPage, JSON.stringify(input));
+      const channel = `draft-${Math.random().toString(36).slice(2)}`;
+      const sesskey = await page.evaluate(() => globalThis.M?.cfg?.sesskey || "");
+      const listener = page.evaluate(executeMoodleDraftUploadInPage, JSON.stringify({
+        mode: "listen", channel, files: [privateAttachment], sesskey, expiresAt: input.expiresAt,
+      }));
+      await page.waitForFunction((name) => document.documentElement.getAttribute("data-morrow-draft-listener") === name, channel);
+      try {
+        return await page.evaluate(executeMoodleScormInPage, JSON.stringify({ ...input, draftUploadChannel: channel }));
+      } finally {
+        await page.evaluate((name) => document.dispatchEvent(new CustomEvent("morrow-draft-upload-close", { detail: { channel: name } })), channel);
+        await listener;
+      }
+    };
     const attachment = (handle, manifest, bytes) => ({ schema: "morrow.private-file-attachment.v1", handle, manifest, bytes_base64: bytes.toString("base64") });
     const scormRoutes = () => requests.filter((entry) => /\/mod\/scorm\/(?:view|player|report)\.php/.test(entry));
 
@@ -442,4 +454,26 @@ test("the Moodle SCORM catalog and worker expose exactly the two guarded SCORM w
   const documentation = readFileSync(new URL("docs/implementation/MOODLE-FULL-FUNCTIONALITY.md", root), "utf8");
   assert.ok(documentation.includes("moodle_replace_scorm_package"), "the SCORM documentation row must name the replacement operation");
   assert.ok(documentation.includes("Byte equality does not establish package validity or learner access."));
+});
+
+test("Moodle page upload functions do not hand file bytes or the sesskey to page fetch", () => {
+  const root = new URL("../..", import.meta.url);
+  const read = (path) => readFileSync(new URL(path, root), "utf8");
+  const slice = (source, signature) => {
+    const start = source.indexOf(signature);
+    assert.ok(start >= 0, signature);
+    const end = source.indexOf("\n  };", start);
+    assert.ok(end > start, signature);
+    return source.slice(start, end);
+  };
+  const resource = slice(read("connector/extension/src/moodle-executor.js"), "const uploadResourceDraft = async");
+  const scorm = slice(read("connector/extension/src/moodle-scorm-executor.js"), "const uploadPackageDraft = async");
+  const h5p = slice(read("connector/extension/src/moodle-h5p-executor.js"), "const uploadPackageDraft = async");
+  for (const body of [resource, scorm, h5p]) {
+    assert.equal(body.includes("fetch("), false, body.slice(0, 80));
+    assert.equal(body.includes("sesskey"), false, body.slice(0, 80));
+    assert.equal(body.includes("bytes_base64"), false, body.slice(0, 80));
+  }
+  const worker = read("connector/extension/src/service-worker.js");
+  assert.match(worker, /world: "ISOLATED", func: executeMoodleDraftUploadInPage/);
 });

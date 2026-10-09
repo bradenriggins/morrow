@@ -74,7 +74,7 @@ function fixtureResponses(overrides = {}) {
     response({
       url: CANVAS + "/api/v1/folders/81/files",
       json: {
-        upload_url: STORAGE + "/upload/signed",
+        upload_url: CANVAS + "/upload/signed",
         upload_params: { key: "uploads/material", policy: "opaque-policy" },
       },
     }),
@@ -151,7 +151,7 @@ test("uploads only an existing private attachment and verifies saved Canvas byte
   // Canvas refuses a signed-in change without the page's own request token.
   assert.equal(requests[3].options.headers["X-CSRF-Token"], "page+token=");
   assert.equal(new URLSearchParams(requests[3].options.body).get("on_duplicate"), "rename");
-  assert.equal(requests[4].url, STORAGE + "/upload/signed");
+  assert.equal(requests[4].url, CANVAS + "/upload/signed");
   assert.equal(requests[4].options.credentials, "omit");
   assert.equal(requests[4].options.redirect, "manual");
   assert.equal(requests[4].options.body instanceof FormData, true);
@@ -237,7 +237,7 @@ test("non-OK Canvas, upload, and download bodies are canceled without awaiting c
     const index = scenario === "canvas" ? 0 : scenario === "upload" ? 4 : 9;
     const url = scenario === "canvas"
       ? CANVAS + "/api/v1/users/self/profile"
-      : scenario === "upload" ? STORAGE + "/upload/signed" : STORAGE + "/download/material";
+      : scenario === "upload" ? CANVAS + "/upload/signed" : STORAGE + "/download/material";
     const live = liveResponse({ status: 503, url });
     responses[index] = live.response;
     const completed = await Promise.race([
@@ -252,7 +252,7 @@ test("non-OK Canvas, upload, and download bodies are canceled without awaiting c
 
 test("a redirect response body is canceled before its confirmation read", async () => {
   const responses = fixtureResponses();
-  const live = liveResponse({ status: 302, url: STORAGE + "/upload/signed", headers: { location: "/api/v1/files/501" } });
+  const live = liveResponse({ status: 302, url: CANVAS + "/upload/signed", headers: { location: "/api/v1/files/501" } });
   responses[4] = live.response;
   const { result } = await run(input(), responses);
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -271,7 +271,7 @@ test("preserves canonical course and folder IDs above Number.MAX_SAFE_INTEGER", 
     }),
     response({
       url: `${CANVAS}/api/v1/folders/${folderId}/files`,
-      json: { upload_url: STORAGE + "/upload/signed", upload_params: { key: "uploads/material" } },
+      json: { upload_url: CANVAS + "/upload/signed", upload_params: { key: "uploads/material" } },
     }),
   ];
 
@@ -354,6 +354,20 @@ test("keeps a concurrent duplicate rename unconfirmed after the byte upload", as
   assert.equal(requests.length, 9);
 });
 
+test("refuses an attacker https upload URL before the file bytes are fetched", async () => {
+  const responses = fixtureResponses();
+  responses[3] = response({
+    url: CANVAS + "/api/v1/folders/81/files",
+    json: { upload_url: "https://attacker.example/upload", upload_params: { key: "uploads/material" } },
+  });
+  const { result, requests } = await run(input(), responses);
+  assert.equal(result.ok, false);
+  assert.equal(result.sent, false);
+  assert.equal(result.error, "canvas_file_upload_url_refused");
+  assert.equal(requests.some((request) => request.url.includes("attacker.example")), false);
+  assert.equal(requests.some((request) => request.options.body instanceof FormData && [...request.options.body.keys()].includes("file")), false);
+});
+
 test("refuses an upload address that is not a Canvas upload route before any request", async () => {
   for (const target of [
     { kind: "file", uploadPath: "/api/v1/courses/42/pages" },
@@ -372,7 +386,7 @@ test("uploads to a group without a folder name check and accepts the copy Canvas
   const responses = [
     response({ url: CANVAS + "/api/v1/users/self/profile", json: { id: "7" } }),
     response({ url: CANVAS + "/api/v1/courses/42", json: { id: "42" } }),
-    response({ url: CANVAS + "/api/v1/groups/9/files", json: { upload_url: STORAGE + "/upload/signed", upload_params: { key: "uploads/group" } } }),
+    response({ url: CANVAS + "/api/v1/groups/9/files", json: { upload_url: CANVAS + "/upload/signed", upload_params: { key: "uploads/group" } } }),
     response({ status: 302, headers: { location: "/api/v1/files/601/create_success?uuid=opaque" } }),
     response({ url: CANVAS + "/api/v1/files/601/create_success?uuid=opaque", json: { id: "601" } }),
     response({ url: CANVAS + "/api/v1/users/self/profile", json: { id: "7" } }),

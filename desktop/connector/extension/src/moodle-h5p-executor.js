@@ -769,6 +769,7 @@ export async function executeMoodleH5pInPage(rawInput) {
   };
   const exactPrivatePackage = async (inputValue, manifest) => {
     const attachment = inputValue?.privateAttachment;
+    if (attachment === undefined) return { extensionOwnsBytes: true };
     if (!object(attachment) || Object.keys(attachment).some((key) => !["schema", "handle", "manifest", "bytes_base64"].includes(key))
       || attachment.schema !== "morrow.private-file-attachment.v1" || typeof attachment.handle !== "string"
       || !/^[A-Za-z0-9:_.-]{8,200}$/.test(attachment.handle) || typeof attachment.bytes_base64 !== "string"
@@ -800,36 +801,74 @@ export async function executeMoodleH5pInPage(rawInput) {
     return !url.search && parts.length === 5 && id(parts[0]) && parts[1] === "user" && parts[2] === "draft"
       && parts[3] === itemId && decodeURIComponent(parts[4]) === filename ? url.toString() : "";
   };
-  const uploadPackageDraft = async (context, manager, manifest, bytes) => {
-    let file;
-    try { file = new File([bytes], manifest.filename, { type: "application/octet-stream" }); } catch { return { error: "moodle_h5pactivity_package_attachment_invalid" }; }
-    const body = new FormData();
-    body.append("repo_upload_file", file, manifest.filename);
-    body.append("sesskey", context.sesskey);
-    body.append("repo_id", manager.repoId);
-    body.append("itemid", manager.itemId);
-    body.append("savepath", "/");
-    body.append("title", manifest.filename);
-    body.append("ctx_id", manager.contextId);
-    for (const acceptedType of manager.acceptedTypes) body.append("accepted_types[]", acceptedType);
-    if (manager.author !== null) body.append("author", manager.author);
-    let response;
-    try {
-      response = await fetch(urlFor(context, "/repository/repository_ajax.php", { action: "upload" }), {
-        method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" }, body,
-        signal: requestSignal(input?.expiresAt),
-      });
-    } catch { return { error: "moodle_h5pactivity_package_upload_refused" }; }
-    let text;
-    try { text = await readText(response); } catch { return { error: "moodle_h5pactivity_package_upload_refused", status: response.status }; }
-    let result;
-    try { result = JSON.parse(text); } catch { return { error: "moodle_h5pactivity_package_upload_refused", status: response.status }; }
-    if (!response.ok || !object(result) || result.error || result.fileexists || id(result.id) !== manager.itemId
-      || result.file !== manifest.filename || typeof result.url !== "string") return { error: "moodle_h5pactivity_package_upload_refused", status: response.status };
-    const draftUrl = nativeDraftUrl(context, result.url, manager.itemId, manifest.filename);
-    return draftUrl ? { status: response.status, draftUrl } : { error: "moodle_h5pactivity_package_upload_refused", status: response.status };
+  const extensionDraftUploads = () => Array.isArray(input?.extensionDraftUploads) ? input.extensionDraftUploads : [];
+  const matchedExtensionDraft = (itemId, manifest) => {
+    const matches = extensionDraftUploads().filter((entry) => object(entry) && entry.itemId === itemId
+      && entry.filename === manifest.filename && entry.savepath === "/" && entry.sha256 === manifest.sha256);
+    if (matches.length !== 1) return null;
+    const entry = matches[0];
+    if (entry.ok === true && typeof entry.draftUrl === "string" && Number.isInteger(entry.status)) {
+      return { status: entry.status, draftUrl: entry.draftUrl, ...(entry.bytesVerified === true ? { bytesVerified: true } : {}) };
+    }
+    if (entry.ok === false && typeof entry.error === "string" && /^moodle_[a-z0-9_]+$/.test(entry.error)) {
+      return { error: entry.error, ...(Number.isInteger(entry.status) ? { status: entry.status } : {}) };
+    }
+    return null;
+  };
+  const requestExtensionDraftUpload = (channel, ticket) => new Promise((resolve) => {
+    const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const timer = setTimeout(() => {
+      document.removeEventListener("morrow-draft-upload-result", onResult);
+      resolve(null);
+    }, Math.max(1, Math.min(30_000, (Number.isFinite(input?.expiresAt) ? input.expiresAt : Date.now() + 30_000) - Date.now())));
+    const onResult = (event) => {
+      const detail = event?.detail;
+      if (!detail || detail.channel !== channel || detail.id !== requestId) return;
+      clearTimeout(timer);
+      document.removeEventListener("morrow-draft-upload-result", onResult);
+      resolve(detail.result || null);
+    };
+    document.addEventListener("morrow-draft-upload-result", onResult);
+    document.dispatchEvent(new CustomEvent("morrow-draft-upload", { detail: { channel, id: requestId, ticket } }));
+  });
+  // The file bytes and sesskey stay in the extension listener. This function only
+  // names the draft fields Moodle's form already showed.
+  const uploadPackageDraft = async (context, manager, manifest) => {
+    const ready = matchedExtensionDraft(manager.itemId, manifest);
+    if (ready) return ready;
+    const ticket = {
+      schema: "morrow.moodle-draft-upload.v1",
+      origin: context.origin,
+      basePath: context.basePath,
+      itemId: manager.itemId,
+      repoId: manager.repoId,
+      contextId: manager.contextId,
+      filename: manifest.filename,
+      savepath: "/",
+      sha256: manifest.sha256,
+      size_bytes: manifest.size_bytes,
+      acceptedTypes: Array.isArray(manager.acceptedTypes) ? manager.acceptedTypes.slice(0, 8) : [],
+      author: manager.author,
+      module: "h5pactivity",
+      archive: "h5p",
+      manifestError: "moodle_h5pactivity_package_definition_invalid",
+      unknownError: "moodle_h5pactivity_package_upload_refused",
+      refusedError: "moodle_h5pactivity_package_upload_refused",
+    };
+    if (typeof input.draftUploadChannel !== "string" || !input.draftUploadChannel) {
+      return { needsExtensionUpload: ticket };
+    }
+    const result = await requestExtensionDraftUpload(input.draftUploadChannel, ticket);
+    if (result?.record?.ok === true && typeof result.record.draftUrl === "string" && Number.isInteger(result.record.status)) {
+      return { status: result.record.status, draftUrl: result.record.draftUrl, ...(result.record.bytesVerified === true ? { bytesVerified: true } : {}) };
+    }
+    if (result && result.ok === false && typeof result.error === "string") {
+      return { error: result.error, ...(Number.isInteger(result.status) ? { status: result.status } : {}) };
+    }
+    return { error: "moodle_extension_upload_failed" };
   };
   const bytesMatch = async (endpoint, manifest) => {
+    if (extensionDraftUploads().some((entry) => object(entry) && entry.bytesVerified === true && entry.draftUrl === endpoint && entry.sha256 === manifest.sha256)) return true;
     let response;
     try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestSignal(input?.expiresAt) }); } catch { return false; }
     if (!response.ok || response.url !== endpoint) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return false; }
@@ -989,7 +1028,7 @@ export async function executeMoodleH5pInPage(rawInput) {
     if (before.snapshot_digest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", before.status);
     const bytes = await exactPrivatePackage(inputValue, args.manifest);
     if (!bytes) return failure("moodle_h5pactivity_package_attachment_invalid", before.status);
-    if (!h5pArchiveHasRootDefinition(bytes)) return failure("moodle_h5pactivity_package_definition_invalid", before.status);
+    if (bytes instanceof Uint8Array && !h5pArchiveHasRootDefinition(bytes)) return failure("moodle_h5pactivity_package_definition_invalid", before.status);
     const preflightContext = currentContext();
     if (!sameContext(context, preflightContext) || !bindingValid(preflightContext, inputValue.binding)) return failure("moodle_binding_mismatch");
     // The activity list read immediately before the dispatch is the baseline
@@ -1003,13 +1042,14 @@ export async function executeMoodleH5pInPage(rawInput) {
       return failure("moodle_h5pactivity_package_exceeds_native_limit", refreshed.status);
     }
     const existingIds = new Set(refreshed.state.activities.map((entry) => id(object(entry) ? entry.id : "")).filter(Boolean));
-    const uploaded = await uploadPackageDraft(preflightContext, form.manager, args.manifest, bytes);
+    const uploaded = await uploadPackageDraft(preflightContext, form.manager, args.manifest);
+    if (uploaded.needsExtensionUpload) return { ok: false, sent: false, needsExtensionUpload: uploaded.needsExtensionUpload, error: "moodle_extension_upload_required" };
     if (uploaded.error) return failure(uploaded.error, uploaded.status ?? refreshed.status);
     const listing = await readDraftListing(preflightContext, form.manager.itemId);
     if (listingHasReference(listing)) return failure("moodle_h5pactivity_content_bank_source_refused", uploaded.status);
     const staged = packageFileFromListing(listing);
     if (!staged || staged.filename !== args.manifest.filename || staged.size_bytes !== args.manifest.size_bytes
-      || !await bytesMatch(uploaded.draftUrl, args.manifest)) return failure("moodle_h5pactivity_package_draft_mismatch", uploaded.status ?? refreshed.status);
+      || (uploaded.bytesVerified !== true && !await bytesMatch(uploaded.draftUrl, args.manifest))) return failure("moodle_h5pactivity_package_draft_mismatch", uploaded.status ?? refreshed.status);
     const sendContext = currentContext();
     if (!sameContext(preflightContext, sendContext) || !bindingValid(sendContext, inputValue.binding)) return failure("moodle_binding_mismatch");
     const posted = await postForm(sendContext, form, args.courseId, { name: args.name, visible: "0", [PACKAGE_FIELD]: form.manager.itemId });
@@ -1053,7 +1093,7 @@ export async function executeMoodleH5pInPage(rawInput) {
     if (before.data.visible) return failure("moodle_h5pactivity_activity_visible_refused", before.status);
     const bytes = await exactPrivatePackage(inputValue, args.manifest);
     if (!bytes) return failure("moodle_h5pactivity_package_attachment_invalid", before.status);
-    if (!h5pArchiveHasRootDefinition(bytes)) return failure("moodle_h5pactivity_package_definition_invalid", before.status);
+    if (bytes instanceof Uint8Array && !h5pArchiveHasRootDefinition(bytes)) return failure("moodle_h5pactivity_package_definition_invalid", before.status);
 
     const preflightContext = currentContext();
     if (!sameContext(context, preflightContext) || !bindingValid(preflightContext, inputValue.binding)) return failure("moodle_binding_mismatch");
@@ -1072,12 +1112,13 @@ export async function executeMoodleH5pInPage(rawInput) {
     if (!removed || removed.filepath !== "/") return failure("moodle_h5pactivity_package_area_not_cleared", form.status);
     const cleared = await readDraftListing(preflightContext, form.manager.itemId);
     if (managerState(cleared) !== "empty") return failure("moodle_h5pactivity_package_area_not_cleared", form.status);
-    const uploaded = await uploadPackageDraft(preflightContext, form.manager, args.manifest, bytes);
+    const uploaded = await uploadPackageDraft(preflightContext, form.manager, args.manifest);
+    if (uploaded.needsExtensionUpload) return { ok: false, sent: false, needsExtensionUpload: uploaded.needsExtensionUpload, error: "moodle_extension_upload_required" };
     if (uploaded.error) return failure(uploaded.error, uploaded.status ?? form.status);
     const listing = await readDraftListing(preflightContext, form.manager.itemId);
     const staged = packageFileFromListing(listing);
     if (listingHasReference(listing) || !staged || staged.filename !== args.manifest.filename || staged.size_bytes !== args.manifest.size_bytes
-      || !await bytesMatch(uploaded.draftUrl, args.manifest)) return failure("moodle_h5pactivity_package_draft_mismatch", uploaded.status ?? form.status);
+      || (uploaded.bytesVerified !== true && !await bytesMatch(uploaded.draftUrl, args.manifest))) return failure("moodle_h5pactivity_package_draft_mismatch", uploaded.status ?? form.status);
 
     const sendContext = currentContext();
     if (!sameContext(preflightContext, sendContext) || !bindingValid(sendContext, inputValue.binding)) return failure("moodle_binding_mismatch");

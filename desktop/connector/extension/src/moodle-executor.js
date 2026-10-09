@@ -1804,6 +1804,10 @@ export async function executeMoodleInPage(input) {
   };
   const exactPrivateResourceFile = async (inputValue, args) => {
     const attachment = inputValue?.privateAttachment;
+    if (attachment === undefined) {
+      const manifest = resourceFileManifest({ filename: args?.filename, size_bytes: args?.size_bytes, sha256: args?.sha256 });
+      return manifest ? { manifest, bytes: null } : null;
+    }
     if (!isObject(attachment) || !only(attachment, ["schema", "handle", "manifest", "bytes_base64"])
       || attachment.schema !== "morrow.private-file-attachment.v1" || typeof attachment.handle !== "string" || !/^[A-Za-z0-9:_.-]{8,200}$/.test(attachment.handle)
       || typeof attachment.bytes_base64 !== "string" || attachment.bytes_base64.length < 4 || attachment.bytes_base64.length > 1_398_104) return null;
@@ -2033,34 +2037,77 @@ export async function executeMoodleInPage(input) {
     return !url.search && parts.length >= 5 && id(parts[0]) && parts[1] === "user" && parts[2] === "draft" && parts[3] === itemId
       && `/${tail.join("/")}` === expected ? url.toString() : null;
   };
-  const uploadResourceDraft = async (context, manager, manifest, bytes, module = "resource", savepath = "/") => {
-    let file;
-    try { file = new File([bytes], manifest.filename, { type: "application/octet-stream" }); } catch { return { ok: false, sent: false, error: "moodle_file_attachment_invalid" }; }
-    const body = new FormData();
-    body.append("repo_upload_file", file, manifest.filename);
-    body.append("sesskey", context.sesskey);
-    body.append("repo_id", manager.repoId);
-    body.append("itemid", manager.itemId);
-    body.append("savepath", savepath);
-    body.append("title", manifest.filename);
-    body.append("ctx_id", manager.contextId);
-    for (const acceptedType of manager.acceptedTypes) body.append("accepted_types[]", acceptedType);
-    if (manager.author !== null) body.append("author", manager.author);
-    const endpoint = urlFor(context, "/repository/repository_ajax.php", { action: "upload" });
+  const extensionDraftUploads = () => Array.isArray(input?.extensionDraftUploads) ? input.extensionDraftUploads : [];
+  const matchedExtensionDraft = (itemId, manifest, savepath) => {
+    const matches = extensionDraftUploads().filter((entry) => isObject(entry) && entry.itemId === itemId
+      && entry.filename === manifest.filename && entry.savepath === savepath && entry.sha256 === manifest.sha256);
+    if (matches.length !== 1) return null;
+    const entry = matches[0];
+    if (entry.ok === true && typeof entry.draftUrl === "string" && Number.isInteger(entry.status)) {
+      return { ok: true, sent: true, status: entry.status, draftUrl: entry.draftUrl, ...(entry.bytesVerified === true ? { bytesVerified: true } : {}) };
+    }
+    if (entry.ok === false && typeof entry.error === "string" && /^moodle_[a-z0-9_]+$/.test(entry.error)) {
+      return { ok: false, sent: entry.sent === true, ...(entry.outcomeUnknown === true ? { outcomeUnknown: true } : {}), ...(Number.isInteger(entry.status) ? { status: entry.status } : {}), error: entry.error };
+    }
+    return null;
+  };
+  const requestExtensionDraftUpload = (channel, ticket) => new Promise((resolve) => {
+    const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const timer = setTimeout(() => {
+      document.removeEventListener("morrow-draft-upload-result", onResult);
+      resolve(null);
+    }, Math.max(1, Math.min(30_000, (Number.isFinite(input?.expiresAt) ? input.expiresAt : Date.now() + 30_000) - Date.now())));
+    const onResult = (event) => {
+      const detail = event?.detail;
+      if (!detail || detail.channel !== channel || detail.id !== requestId) return;
+      clearTimeout(timer);
+      document.removeEventListener("morrow-draft-upload-result", onResult);
+      resolve(detail.result || null);
+    };
+    document.addEventListener("morrow-draft-upload-result", onResult);
+    document.dispatchEvent(new CustomEvent("morrow-draft-upload", { detail: { channel, id: requestId, ticket } }));
+  });
+  // The file bytes and sesskey stay in the extension listener. This function only
+  // names the draft fields Moodle's form already showed.
+  const uploadResourceDraft = async (context, manager, manifest, module = "resource", savepath = "/") => {
+    const ready = matchedExtensionDraft(manager.itemId, manifest, savepath);
+    if (ready) return ready;
     if (executionExpired()) return error("moodle_execution_expired");
-    let response;
-    try { response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" }, body, signal: requestSignal(input?.expiresAt) }); } catch { return { ok: false, sent: true, outcomeUnknown: true, error: `moodle_${module}_draft_upload_unknown` }; }
-    let text;
-    try { text = await readText(response); } catch { return { ok: false, sent: true, outcomeUnknown: true, status: response.status, error: `moodle_${module}_draft_upload_unknown` }; }
-    let result;
-    try { result = JSON.parse(text); } catch { return { ok: false, sent: true, status: response.status, error: `moodle_${module}_draft_upload_refused` }; }
-    if (!response.ok || !isObject(result) || result.error || result.fileexists || id(result.id) !== manager.itemId || result.file !== manifest.filename || typeof result.url !== "string") return { ok: false, sent: true, status: response.status, error: `moodle_${module}_draft_upload_refused` };
-    const draftUrl = nativeDraftUrl(context, result.url, manager.itemId, manifest.filename, savepath);
-    return draftUrl ? { ok: true, sent: true, status: response.status, draftUrl } : { ok: false, sent: true, status: response.status, error: `moodle_${module}_draft_upload_refused` };
+    const ticket = {
+      schema: "morrow.moodle-draft-upload.v1",
+      origin: context.profile.origin,
+      basePath: context.basePath,
+      itemId: manager.itemId,
+      repoId: manager.repoId,
+      contextId: manager.contextId,
+      filename: manifest.filename,
+      savepath,
+      sha256: manifest.sha256,
+      size_bytes: manifest.size_bytes,
+      acceptedTypes: Array.isArray(manager.acceptedTypes) ? manager.acceptedTypes.slice(0, 8) : [],
+      author: manager.author,
+      module,
+      archive: module === "imscp" || module === "scorm" ? "imsmanifest" : "none",
+      manifestError: module === "imscp" || module === "scorm" ? `moodle_${module}_package_manifest_invalid` : "",
+      unknownError: `moodle_${module}_draft_upload_unknown`,
+      refusedError: `moodle_${module}_draft_upload_refused`,
+    };
+    if (typeof input.draftUploadChannel !== "string" || !input.draftUploadChannel) {
+      return { ok: false, sent: false, error: "moodle_extension_upload_required", needsExtensionUpload: ticket };
+    }
+    const result = await requestExtensionDraftUpload(input.draftUploadChannel, ticket);
+    if (result?.record?.ok === true && typeof result.record.draftUrl === "string" && Number.isInteger(result.record.status)) {
+      return { ok: true, sent: true, status: result.record.status, draftUrl: result.record.draftUrl, ...(result.record.bytesVerified === true ? { bytesVerified: true } : {}) };
+    }
+    if (result && result.ok === false && typeof result.error === "string") {
+      return { ok: false, sent: result.sent === true, ...(result.outcomeUnknown === true ? { outcomeUnknown: true } : {}), ...(Number.isInteger(result.status) ? { status: result.status } : {}), error: result.error };
+    }
+    return { ok: false, sent: false, error: "moodle_extension_upload_failed" };
   };
   // The staged draft copy is read back from Moodle before any save, so a save is never sent for
   // bytes Morrow has not seen in the draft area itself.
   const draftBytesMatch = async (context, draftUrl, manifest) => {
+    if (extensionDraftUploads().some((entry) => isObject(entry) && entry.bytesVerified === true && entry.draftUrl === draftUrl && entry.sha256 === manifest.sha256)) return true;
     let response;
     try { response = await fetch(draftUrl, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestSignal(input?.expiresAt) }); } catch { return false; }
     if (!response.ok || response.url !== draftUrl) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return false; }
@@ -2254,7 +2301,7 @@ export async function executeMoodleInPage(input) {
     if (prepared.snapshot_digest !== args.expected_digest) return error("moodle_expected_digest_mismatch");
     const local = await exactPrivateResourceFile(inputValue, args);
     if (!local) return error("moodle_file_attachment_invalid");
-    if ((module === "imscp" || module === "scorm") && !zipArchiveHasSingleRootManifest(local.bytes)) return error(`moodle_${module}_package_manifest_invalid`);
+    if ((module === "imscp" || module === "scorm") && local.bytes && !zipArchiveHasSingleRootManifest(local.bytes)) return error(`moodle_${module}_package_manifest_invalid`);
     if ([prepared.manager.maxBytes, prepared.manager.areaMaxBytes].some((limit) => limit > 0 && local.manifest.size_bytes > limit)) return error("moodle_file_exceeds_native_limit");
     const before = await state(context, args.course_id);
     if (!before.ok) return before;
@@ -2266,11 +2313,11 @@ export async function executeMoodleInPage(input) {
     if (prepared.action !== preflight.action || prepared.nativeSesskey !== preflight.nativeSesskey
       || prepared.snapshot_digest !== preflight.snapshot_digest || stable(prepared.manager.semantic) !== stable(preflight.manager.semantic)
       || sectionNumber(prepared.section.number) !== sectionNumber(preflight.section.number)) return error(`moodle_${module}_creation_form_changed`);
-    const uploaded = await uploadResourceDraft(current, prepared.manager, local.manifest, local.bytes, module);
+    const uploaded = await uploadResourceDraft(current, prepared.manager, local.manifest, module);
     if (!uploaded.ok) return { ...uploaded, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: uploaded.error } };
     const listing = await readDraftListing(current, prepared.manager.itemId);
     if (!resourceDraftListingMatches(listing, local.manifest)) return { ok: false, sent: true, status: uploaded.status, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: `moodle_${module}_upload_succeeded_save_not_sent` }, error: `moodle_${module}_upload_succeeded_save_not_sent` };
-    if (!await draftBytesMatch(current, uploaded.draftUrl, local.manifest)) return { ok: false, sent: true, status: uploaded.status, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: `moodle_${module}_upload_succeeded_save_not_sent` }, error: `moodle_${module}_upload_succeeded_save_not_sent` };
+    if (uploaded.bytesVerified !== true && !await draftBytesMatch(current, uploaded.draftUrl, local.manifest)) return { ok: false, sent: true, status: uploaded.status, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: `moodle_${module}_upload_succeeded_save_not_sent` }, error: `moodle_${module}_upload_succeeded_save_not_sent` };
     const saveContext = currentContext();
     if (!sameContext(current, saveContext) || validateBinding(saveContext, inputValue.binding)) return error("moodle_binding_mismatch");
     const selected = await selectedSection(saveContext, args.course_id, args.section_id);
@@ -2339,13 +2386,13 @@ export async function executeMoodleInPage(input) {
   const stageDraftFiles = async (context, manager, entries, module) => {
     let status;
     for (const entry of entries) {
-      const uploaded = await uploadResourceDraft(context, manager, entry.manifest, entry.bytes, module, entry.filepath);
+      const uploaded = await uploadResourceDraft(context, manager, entry.manifest, module, entry.filepath);
       status = uploaded.status ?? status;
       if (!uploaded.ok) return { ...uploaded, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: uploaded.error } };
       const listed = draftFileEntries(await readDraftListing(context, manager.itemId, entry.filepath), entry.filepath)
         .filter((file) => file.filename === entry.manifest.filename);
       const staged = listed.length === 1 && listed[0].size === entry.manifest.size_bytes
-        && await draftBytesMatch(context, uploaded.draftUrl, entry.manifest);
+        && (uploaded.bytesVerified === true || await draftBytesMatch(context, uploaded.draftUrl, entry.manifest));
       if (!staged) return unconfirmedStage(status, `moodle_${module}_upload_succeeded_save_not_sent`);
     }
     return { ok: true, sent: true, status };
@@ -2406,6 +2453,16 @@ export async function executeMoodleInPage(input) {
   };
   const exactPrivateFolderFiles = async (inputValue, args) => {
     const attachments = inputValue?.privateAttachments;
+    if (inputValue?.privateAttachment === undefined && attachments === undefined) {
+      if (!Array.isArray(args?.files) || args.files.length < 1 || args.files.length > MAX_STAGED_FILES) return null;
+      const resolved = [];
+      for (const file of args.files) {
+        const manifest = resourceFileManifest(file);
+        if (!manifest) return null;
+        resolved.push({ manifest, bytes: null, filepath: args.folder_path });
+      }
+      return resolved;
+    }
     if (inputValue?.privateAttachment !== undefined || !Array.isArray(attachments) || attachments.length !== args.files.length) return null;
     const resolved = [];
     for (let index = 0; index < attachments.length; index += 1) {
@@ -5032,4 +5089,239 @@ export async function executeMoodleInPage(input) {
   } catch {
     return error("moodle_execution_failed");
   }
+}
+
+/**
+ * Reads the Moodle session key without calling fetch. The page's fetch cannot
+ * see this return value. The upload itself runs in the isolated world.
+ */
+export function executeMoodleDraftSessionInPage() {
+  const cfg = globalThis.M?.cfg;
+  if (!cfg || typeof cfg.wwwroot !== "string" || typeof cfg.sesskey !== "string"
+    || cfg.sesskey.length < 1 || cfg.sesskey.length > 1024 || cfg.sesskey.includes("\u0000")) return null;
+  let site;
+  try { site = new URL(cfg.wwwroot); } catch { return null; }
+  if (site.protocol !== "https:" || site.username || site.password || site.search || site.hash) return null;
+  const origin = String(globalThis.location?.origin || "");
+  const path = String(globalThis.location?.pathname || "");
+  const basePath = site.pathname.replace(/\/$/, "");
+  if (site.origin !== origin || !(path === basePath || path.startsWith(`${basePath}/`))) return null;
+  return { origin: site.origin, siteUrl: site.href, basePath, sesskey: cfg.sesskey };
+}
+
+/**
+ * Uploads one reviewed Moodle draft from the extension isolated world.
+ * The page function never receives the bytes or the session key for this request.
+ */
+export async function executeMoodleDraftUploadInPage(rawInput) {
+  let input = rawInput;
+  if (typeof rawInput === "string") {
+    try { input = JSON.parse(rawInput); } catch { return { ok: false, sent: false, error: "moodle_file_attachment_invalid" }; }
+  }
+  if (input?.mode === "listen") {
+    const channel = typeof input.channel === "string" ? input.channel : "";
+    const files = Array.isArray(input.files) ? input.files : [];
+    const deadline = Number.isSafeInteger(input.expiresAt) ? input.expiresAt : Date.now() + 30_000;
+    document.documentElement?.setAttribute("data-morrow-draft-listener", channel);
+    return await new Promise((resolve) => {
+      const timer = setTimeout(() => finish({ ok: true, idle: true }), Math.max(1, Math.min(2_147_483_647, deadline - Date.now())));
+      const finish = (value) => {
+        clearTimeout(timer);
+        document.removeEventListener("morrow-draft-upload", onUpload);
+        document.removeEventListener("morrow-draft-upload-close", onClose);
+        resolve(value);
+      };
+      const onClose = (event) => {
+        if (event?.detail?.channel !== channel) return;
+        finish({ ok: true, closed: true });
+      };
+      const onUpload = (event) => {
+        const detail = event?.detail;
+        if (!detail || detail.channel !== channel || typeof detail.id !== "string") return;
+        const ticket = detail.ticket;
+        const file = files.find((entry) => entry?.manifest?.sha256 === ticket?.sha256
+          && entry?.manifest?.filename === ticket?.filename && entry?.manifest?.size_bytes === ticket?.size_bytes);
+        const upload = file
+          ? executeMoodleDraftUploadInPage({ ticket, sesskey: input.sesskey, bytes_base64: file.bytes_base64, expiresAt: deadline })
+          : Promise.resolve({ ok: false, sent: false, error: "moodle_file_attachment_invalid" });
+        Promise.resolve(upload).then((result) => {
+          document.dispatchEvent(new CustomEvent("morrow-draft-upload-result", { detail: { channel, id: detail.id, result } }));
+        }, () => {
+          document.dispatchEvent(new CustomEvent("morrow-draft-upload-result", { detail: { channel, id: detail.id, result: { ok: false, sent: false, error: "moodle_extension_upload_failed" } } }));
+        });
+      };
+      document.addEventListener("morrow-draft-upload", onUpload);
+      document.addEventListener("morrow-draft-upload-close", onClose);
+    });
+  }
+  const code = (value, fallback) => typeof value === "string" && /^moodle_[a-z0-9_]+$/.test(value) ? value : fallback;
+  const moodleDraftUrl = (origin, basePath, value, itemId, filename, savepath) => {
+    let url;
+    try { url = new URL(value); } catch { return ""; }
+    if (url.origin !== origin || url.username || url.password || url.hash || url.protocol !== "https:") return "";
+    const path = `${basePath}/draftfile.php`;
+    const expected = `${savepath}${filename}`;
+    if (url.pathname === path) {
+      if ([...url.searchParams.keys()].length !== 1 || url.searchParams.getAll("file").length !== 1) return "";
+      const parts = String(url.searchParams.get("file") || "").split("/").filter(Boolean);
+      return parts.length >= 5 && /^[1-9][0-9]*$/.test(parts[0]) && parts[1] === "user" && parts[2] === "draft" && parts[3] === itemId
+        && `/${parts.slice(4).join("/")}` === expected ? url.toString() : "";
+    }
+    const prefix = `${path}/`;
+    const parts = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length).split("/") : [];
+    let tail;
+    try { tail = parts.slice(4).map((part) => decodeURIComponent(part)); } catch { return ""; }
+    return !url.search && parts.length >= 5 && /^[1-9][0-9]*$/.test(parts[0]) && parts[1] === "user" && parts[2] === "draft"
+      && parts[3] === itemId && `/${tail.join("/")}` === expected ? url.toString() : "";
+  };
+  const zipHasNamedRoot = (bytes, rootName) => {
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength < 22) return false;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let eocd = -1;
+    for (let index = bytes.byteLength - 22, minimum = Math.max(0, bytes.byteLength - 65_557); index >= minimum; index -= 1) {
+      if (view.getUint32(index, true) === 0x06054b50) { eocd = index; break; }
+    }
+    if (eocd < 0 || eocd + 22 + view.getUint16(eocd + 20, true) !== bytes.byteLength
+      || view.getUint16(eocd + 4, true) !== 0 || view.getUint16(eocd + 6, true) !== 0) return false;
+    const entries = view.getUint16(eocd + 10, true);
+    const centralSize = view.getUint32(eocd + 12, true);
+    const centralOffset = view.getUint32(eocd + 16, true);
+    if (view.getUint16(eocd + 8, true) !== entries || entries < 1 || entries > 10_000
+      || centralOffset + centralSize !== eocd) return false;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let found = 0;
+    let offset = centralOffset;
+    const centralEnd = centralOffset + centralSize;
+    for (let index = 0; index < entries; index += 1) {
+      if (offset + 46 > centralEnd || view.getUint32(offset, true) !== 0x02014b50) return false;
+      const method = view.getUint16(offset + 10, true);
+      const nameLength = view.getUint16(offset + 28, true);
+      const extraLength = view.getUint16(offset + 30, true);
+      const commentLength = view.getUint16(offset + 32, true);
+      const next = offset + 46 + nameLength + extraLength + commentLength;
+      if ((method !== 0 && method !== 8) || next > centralEnd) return false;
+      let name;
+      try { name = decoder.decode(bytes.slice(offset + 46, offset + 46 + nameLength)); } catch { return false; }
+      if (!name || name.includes("..") || name.startsWith("/") || name.includes("\\")) return false;
+      if (!name.endsWith("/") && name === rootName) found += 1;
+      offset = next;
+    }
+    return offset === centralEnd && found === 1;
+  };
+  const fail = (error, sent = false, status) => ({
+    ok: false, sent, ...(sent ? { outcomeUnknown: true } : {}), ...(Number.isInteger(status) ? { status } : {}), error,
+  });
+  const ticket = input?.ticket;
+  const object = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const id = (value) => /^[1-9][0-9]{0,18}$/.test(String(value || "")) ? String(value) : "";
+  if (!object(ticket) || ticket.schema !== "morrow.moodle-draft-upload.v1") return fail("moodle_file_attachment_invalid");
+  const refused = code(ticket.refusedError, "moodle_file_upload_refused");
+  const unknown = code(ticket.unknownError, "moodle_file_upload_refused");
+  const manifestError = code(ticket.manifestError, refused);
+  let origin;
+  try { origin = new URL(ticket.origin); } catch { return fail(refused); }
+  if (origin.protocol !== "https:" || origin.username || origin.password || origin.hash || origin.search
+    || origin.href !== `${origin.origin}/` || origin.origin !== ticket.origin) return fail(refused);
+  const basePath = ticket.basePath;
+  if (typeof basePath !== "string" || basePath.length > 512 || (basePath !== "" && !/^\/[A-Za-z0-9._~/-]+$/.test(basePath))
+    || basePath.includes("..") || basePath.includes("//")) return fail(refused);
+  const filename = ticket.filename;
+  const savepath = ticket.savepath;
+  const itemId = id(ticket.itemId);
+  const repoId = id(ticket.repoId);
+  const contextId = id(ticket.contextId);
+  const sha = typeof ticket.sha256 === "string" && /^[a-f0-9]{64}$/.test(ticket.sha256) ? ticket.sha256 : "";
+  const size = ticket.size_bytes;
+  if (!itemId || !repoId || !contextId || !sha || !Number.isSafeInteger(size) || size < 1 || size > 1024 * 1024) return fail("moodle_file_attachment_invalid");
+  if (typeof filename !== "string" || filename.length < 1 || filename.length > 255 || filename !== filename.trim()
+    || filename === "." || filename === ".." || /[\\/\u0000-\u001f]/.test(filename)) return fail("moodle_file_attachment_invalid");
+  if (typeof savepath !== "string" || !savepath.startsWith("/") || !savepath.endsWith("/") || savepath.length > 4096
+    || savepath.includes("\u0000") || savepath.split("/").filter(Boolean).some((part) => !part || part === "." || part === "..")) return fail(refused);
+  const accepted = Array.isArray(ticket.acceptedTypes) ? ticket.acceptedTypes : [];
+  if (accepted.length > 8 || accepted.some((entry) => typeof entry !== "string" || entry.length < 1 || entry.length > 64 || /[\u0000\r\n]/.test(entry))) return fail(refused);
+  const author = ticket.author === null || ticket.author === undefined ? null
+    : typeof ticket.author === "string" && ticket.author.length <= 255 && !ticket.author.includes("\u0000") ? ticket.author : false;
+  if (author === false) return fail(refused);
+  const bytesText = input?.bytes_base64;
+  if (typeof bytesText !== "string" || bytesText.length < 4 || bytesText.length > 1_398_104) return fail("moodle_file_attachment_invalid");
+  let bytes;
+  try { bytes = Uint8Array.from(atob(bytesText), (character) => character.charCodeAt(0)); } catch { return fail("moodle_file_attachment_invalid"); }
+  if (bytes.byteLength !== size) return fail("moodle_file_attachment_invalid");
+  const digest = async (value) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", value)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  let actual;
+  try { actual = await digest(bytes); } catch { return fail("moodle_file_attachment_invalid"); }
+  if (actual !== sha) return fail("moodle_file_attachment_invalid");
+  const rootName = ticket.archive === "imsmanifest" ? "imsmanifest.xml" : ticket.archive === "h5p" ? "h5p.json" : "";
+  if (ticket.archive !== "none" && ticket.archive !== "imsmanifest" && ticket.archive !== "h5p") return fail(refused);
+  if (rootName && !zipHasNamedRoot(bytes, rootName)) return fail(manifestError);
+  const sesskey = input?.sesskey;
+  if (typeof sesskey !== "string" || sesskey.length < 1 || sesskey.length > 1024 || sesskey.includes("\u0000")) return fail("moodle_form_session_mismatch");
+  const endpoint = new URL(`${basePath}/repository/repository_ajax.php`, origin.origin);
+  endpoint.searchParams.set("action", "upload");
+  endpoint.hash = "";
+  if (endpoint.origin !== origin.origin || endpoint.username || endpoint.password) return fail(refused);
+  let file;
+  try { file = new File([bytes], filename, { type: "application/octet-stream" }); } catch { return fail("moodle_file_attachment_invalid"); }
+  const body = new FormData();
+  body.append("repo_upload_file", file, filename);
+  body.append("sesskey", sesskey);
+  body.append("repo_id", repoId);
+  body.append("itemid", itemId);
+  body.append("savepath", savepath);
+  body.append("title", filename);
+  body.append("ctx_id", contextId);
+  for (const acceptedType of accepted) body.append("accepted_types[]", acceptedType);
+  if (author !== null) body.append("author", author);
+  const remaining = Number.isSafeInteger(input?.expiresAt) ? input.expiresAt - Date.now() : 0;
+  if (remaining <= 0) return fail("moodle_execution_expired");
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST", credentials: "include", cache: "no-store", redirect: "error",
+      headers: { Accept: "application/json" }, body, signal: AbortSignal.timeout(Math.min(2_147_483_647, remaining)),
+    });
+  } catch {
+    return fail(unknown, true);
+  }
+  let finalUrl;
+  try { finalUrl = new URL(response.url); } catch { return fail(unknown, true, response.status); }
+  if (response.redirected || finalUrl.origin !== origin.origin || finalUrl.username || finalUrl.password || finalUrl.hash
+    || finalUrl.pathname !== endpoint.pathname) return fail(refused, true, response.status);
+  let text;
+  try { text = await response.text(); } catch { return fail(unknown, true, response.status); }
+  if (text.length > 2 * 1024 * 1024) return fail(unknown, true, response.status);
+  let result;
+  try { result = JSON.parse(text); } catch { return fail(refused, true, response.status); }
+  if (!response.ok || !object(result) || result.error || result.fileexists || id(result.id) !== itemId
+    || result.file !== filename || typeof result.url !== "string") return fail(refused, true, response.status);
+  const draftUrl = moodleDraftUrl(origin.origin, basePath, result.url, itemId, filename, savepath);
+  if (!draftUrl) return fail(refused, true, response.status);
+  const unverified = {
+    ok: true,
+    record: { ok: true, itemId, filename, savepath, sha256: sha, status: response.status, draftUrl, bytesVerified: false },
+  };
+  let saved;
+  try {
+    saved = await fetch(draftUrl, {
+      method: "GET", credentials: "include", cache: "no-store", redirect: "error",
+      signal: AbortSignal.timeout(Math.min(2_147_483_647, Math.max(1, input.expiresAt - Date.now()))),
+    });
+  } catch {
+    return unverified;
+  }
+  let savedUrl;
+  try { savedUrl = new URL(saved.url); } catch { return unverified; }
+  if (!saved.ok || saved.redirected || savedUrl.href !== draftUrl || savedUrl.origin !== origin.origin) return unverified;
+  let savedBytes;
+  try { savedBytes = new Uint8Array(await saved.arrayBuffer()); } catch { return unverified; }
+  if (savedBytes.byteLength !== size) return unverified;
+  let savedDigest;
+  try { savedDigest = await digest(savedBytes); } catch { return unverified; }
+  if (savedDigest !== sha) return unverified;
+  return {
+    ok: true,
+    record: {
+      ok: true, itemId, filename, savepath, sha256: sha, status: response.status, draftUrl, bytesVerified: true,
+    },
+  };
 }
