@@ -24,8 +24,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/client": "2.2.0",
-    "@modelcontextprotocol/server": "2.2.0",
+    "@modelcontextprotocol/client": "2.3.0",
+    "@modelcontextprotocol/server": "2.3.0",
     "@morrow/batch-engine": "workspace:*",
     "@morrow/blackboard-learn-api": "workspace:*",
     "@morrow/bridge-loopback": "workspace:*",
@@ -35,12 +35,12 @@
     "@morrow/operation-journal": "workspace:*",
     "@morrow/upstream-mcp": "workspace:*",
     "htmlparser2": "12.0.0",
-    "sanitize-html": "2.17.7",
+    "sanitize-html": "2.18.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@morrow/bridge-protocol": "workspace:*",
-    "@types/sanitize-html": "2.16.1",
+    "@types/sanitize-html": "2.16.2",
     "@types/ws": "^8.18.1",
     "ws": "^8.18.3"
   }

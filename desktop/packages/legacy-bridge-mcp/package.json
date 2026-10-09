@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.2.0",
+    "@modelcontextprotocol/server": "2.3.0",
     "@morrow/bridge-loopback": "workspace:*",
     "@morrow/bridge-protocol": "workspace:*",
     "@morrow/contracts": "workspace:*",
