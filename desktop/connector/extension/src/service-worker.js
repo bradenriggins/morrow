@@ -9,7 +9,7 @@ import { itemBankMediaFindings } from "./item-bank-guard.js";
 import { canClaimCourseConnectionIntent, canCompleteCourseConnectionIntent, normalizeCourseConnectionUrl, validCourseConnectionIntent } from "./course-connection-intent.js";
 import { MAX_FILE_TEXT_BYTES, canvasCourseFileDownloadUrl, canvasFileTextContentTypeSupported, executeCanvasCourseFileTextInPage } from "./canvas-file-content.js";
 import { CANVAS_FILE_SIGNALS_OPERATION_KEY, CANVAS_FILE_SIGNALS_SCHEMA, CANVAS_FILE_SIGNALS_TOOL_NAME, canvasCourseFileSignals, canvasFileSignalsContentTypeSupported } from "./canvas-file-signals.js";
-import { canvasPrivateUploadUrl, canvasUploadFolderId, executeCanvasCourseFileTransferInPage } from "./canvas-file-transfer.js";
+import { canvasPrivateUploadUrl, canvasUploadFolderId, canvasUploadUrlShape, executeCanvasCourseFileTransferInPage, executeCanvasUploadInitIsolated } from "./canvas-file-transfer.js";
 import { canvasNewQuizHotSpotVerification, executeCanvasNewQuizHotSpotInPage, unsignedHotSpotImageUrl } from "./canvas-new-quiz-hot-spot.js";
 import { CANVAS_CONVERSATION_PRIVATE_SCHEMA, PRIVATE_CANVAS_CONVERSATION_OPERATION, PRIVATE_CANVAS_CONVERSATION_TOOL, canvasConversationOperationMatches, executeCanvasConversationInPage, normalizeCanvasConversationPrivatePayload } from "./canvas-conversations.js";
 import { problemCopy, problemText } from "./bridge-problem-copy.js";
@@ -4804,13 +4804,13 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
     : await executeCanvas(binding, operation, args, expiresAt);
 }
 
-function privateCanvasUploadPlan(value, canvasOrigin) {
+function privateCanvasUploadPlan(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some((key) => !["course_id", "folder_id", "upload_path", "upload_url", "upload_params"].includes(key))
-    || !decimalId(value.course_id) || typeof value.upload_path !== "string" || (value.folder_id !== undefined && !decimalId(value.folder_id))
+    || Object.keys(value).some((key) => !["ok", "upload_url", "upload_params"].includes(key))
+    || value.ok !== true
     || typeof value.upload_url !== "string" || value.upload_url.length < 1 || value.upload_url.length > 8192
     || !value.upload_params || typeof value.upload_params !== "object" || Array.isArray(value.upload_params)) return null;
-  const uploadUrl = canvasPrivateUploadUrl(value.upload_url, canvasOrigin);
+  const uploadUrl = canvasUploadUrlShape(value.upload_url);
   if (!uploadUrl) return null;
   const entries = Object.entries(value.upload_params);
   if (!entries.length || entries.length > 64 || entries.some(([key, entry]) => (
@@ -4899,8 +4899,10 @@ function privateCanvasSignedUploadUrl(value, canvasOrigin) {
 
 function canvasUploadRedirectKept(response, uploadUrl, canvasOrigin) {
   if (!response || response.redirected !== true) return true;
-  const stayed = canvasPrivateUploadUrl(response.url, canvasOrigin);
-  return Boolean(stayed) && stayed.origin === uploadUrl.origin;
+  let finalUrl;
+  try { finalUrl = new URL(response.url); } catch { return false; }
+  if (finalUrl.protocol !== "https:" || finalUrl.username || finalUrl.password || finalUrl.hash) return false;
+  return finalUrl.origin === uploadUrl.origin || finalUrl.origin === canvasOrigin;
 }
 
 function canvasUploadLocationKept(response, uploadUrl, canvasOrigin) {
@@ -5170,19 +5172,38 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       const imported = await execute({ ...transferInput, mode: "rubric" });
       return imported || { ok: false, sent: true, outcomeUnknown: true, error: "canvas_rubric_import_result_missing" };
     }
-    const prepared = await execute({ ...transferInput, mode: "initialize" });
-    const plan = prepared?.ok === true && prepared?.sent === false && privateCanvasUploadPlan(prepared.data, binding.origin);
-    if (!plan || String(prepared.data.course_id) !== binding.courseId || prepared.data.upload_path !== target.uploadPath) {
-      const refused = prepared?.ok === true && prepared?.sent === false && typeof prepared?.data?.upload_url === "string"
-        && !canvasPrivateUploadUrl(prepared.data.upload_url, binding.origin);
-      return { ok: false, sent: false, error: refused ? "canvas_file_upload_url_refused" : (prepared?.error || "canvas_file_upload_init_invalid") };
+    const prepared = await execute({ ...transferInput, mode: "preflight" });
+    if (prepared?.ok !== true || prepared?.sent !== false || String(prepared.data?.course_id) !== binding.courseId
+      || prepared.data?.upload_path !== target.uploadPath) {
+      return { ok: false, sent: false, error: prepared?.error || "canvas_file_upload_init_invalid" };
+    }
+    // The page's fetch is not asked for the upload URL. A replaced window.fetch
+    // cannot name the host that receives the file.
+    const [initialized] = await chrome.scripting.executeScript({
+      target: { tabId: binding.tabId, frameIds: [0] }, world: "ISOLATED", func: executeCanvasUploadInitIsolated,
+      args: [JSON.stringify({
+        origin: binding.origin,
+        uploadPath: target.uploadPath,
+        filename: privateAttachment.manifest.filename,
+        size: privateAttachment.manifest.size_bytes,
+        contentType: privateAttachment.content_type,
+        expiresAt: deadline,
+      })],
+    });
+    const plan = privateCanvasUploadPlan(initialized?.result);
+    if (!plan) {
+      const supplied = initialized?.result?.upload_url;
+      return {
+        ok: false, sent: false,
+        error: typeof supplied === "string" && !canvasUploadUrlShape(supplied) ? "canvas_file_upload_url_refused" : (initialized?.result?.error || "canvas_file_upload_init_invalid"),
+      };
     }
     const form = new FormData();
     for (const [key, value] of plan.entries) form.append(key, value);
     form.append("file", new Blob([Uint8Array.from(atob(privateAttachment.bytes_base64), (character) => character.charCodeAt(0))], {
       type: privateAttachment.content_type,
     }), privateAttachment.manifest.filename);
-    if (!canvasPrivateUploadUrl(plan.uploadUrl.href, binding.origin)) {
+    if (plan.uploadUrl.href !== canvasUploadUrlShape(initialized.result.upload_url)?.href) {
       return { ok: false, sent: false, error: "canvas_file_upload_url_refused" };
     }
     uploadObserver = observeCanvasUploadConfirmation(plan.uploadUrl, binding.origin, controller.signal);

@@ -1112,9 +1112,11 @@ canvas.setExternalFileDownloadUrl(`https://localhost:${externalFileAddress.port}
 for (const document of SIGNAL_DOCUMENTS) {
   canvas.addDocumentFile({ ...document, downloadUrl: `https://localhost:${externalFileAddress.port}${document.path}?signature=opaque` });
 }
-// Canvas issues a signed upload URL that carries its signature in the query
-// string, so the fixture URL carries one too: the upload observer registers this
-// exact URL as its Chrome match pattern.
+// Canvas's own upload-init response names this store. The worker sends the file
+// only to the host that response returns, so this localhost store is allowed
+// because the synthetic Canvas init names it. The page cannot substitute another host.
+// The URL carries its signature in the query string, and the upload observer
+// registers this exact URL as its Chrome match pattern.
 const externalFileUploadUrl = `https://localhost:${externalFileAddress.port}/upload/signed?signature=opaque`;
 canvas.setExternalFileUploadUrl(externalFileUploadUrl);
 externalFileStore.setUploadConfirmationUrl(`https://127.0.0.1:${address.port}/api/v1/files/502/create_success?uuid=synthetic-42`);

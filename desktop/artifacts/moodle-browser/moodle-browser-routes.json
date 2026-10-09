@@ -42,7 +42,7 @@
     "moodle-site-inventory-read.js": "3852c0ebcd2fe62f69b3be3b22e1ee1708bb7b8e208105b70d70948de28785de",
     "moodle-subsection-executor.js": "0bcd1b72fab1904e9603b82cb220c438f55cdf35560d59c929675e46ed45f7dc",
     "moodle-workshop-executor.js": "7eab3a80247564234f124d4c694c28d020a36e66e007e5f30421a877ac384f14",
-    "service-worker.js": "8d1d68d62b29428647db42c7176b7457f735c253f8a5530bc7336fed1de6b7d3"
+    "service-worker.js": "02f9a99d087ebeedbdce63428124c62f38f9dd3a324f02d3275adaa3a09c3ca0"
   },
   "operations": {
     "moodle.ajax.core_backup.async_progress.backup.read.v1": {

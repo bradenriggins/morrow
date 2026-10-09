@@ -3,9 +3,21 @@ export const MAX_CANVAS_FILE_TRANSFER_BYTES = 1024 * 1024;
 export const CANVAS_UPLOAD_PATH = /^\/api\/v1(?:\/[a-z_]+(?:\/(?:[1-9][0-9]*|self))?)+$/;
 
 /**
- * A private Canvas upload may leave only for the Canvas page origin, or for a
+ * Shape of an upload URL before any byte is sent. The host is trusted only when
+ * the service worker read it from Canvas's own upload-init response. Userinfo,
+ * fragments, and non-https URLs are refused here.
+ */
+export function canvasUploadUrlShape(value) {
+  if (typeof value !== "string" || value.length < 1 || value.length > 8192) return null;
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== "https:" || url.username || url.password || url.hash || !url.hostname) return null;
+  return url;
+}
+
+/**
+ * A Hot Spot image URL may leave only for the Canvas page origin, or for a
  * New Quiz host this code already treats as Canvas-owned for that same tenant.
- * Any other https host is refused, including userinfo and fragment tricks.
  */
 export function canvasPrivateUploadUrl(value, canvasOrigin) {
   if (typeof value !== "string" || value.length < 1 || value.length > 8192) return null;
@@ -26,6 +38,81 @@ export function canvasPrivateUploadUrl(value, canvasOrigin) {
   const host = url.hostname.toLowerCase();
   if (!tenant || !/^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i.test(host) || host.split(".")[0] !== tenant) return null;
   return url;
+}
+
+/**
+ * Asks the bound Canvas origin for one upload URL. Chrome runs this in the
+ * isolated world, so a page script that replaced window.fetch cannot choose
+ * the host. The returned URL is whatever Canvas answered with, including an
+ * S3 or inst-fs host.
+ */
+export async function executeCanvasUploadInitIsolated(rawInput) {
+  let input = rawInput;
+  if (typeof rawInput === "string") {
+    try { input = JSON.parse(rawInput); } catch { return { ok: false, error: "canvas_file_upload_init_invalid" }; }
+  }
+  const fail = (error) => ({ ok: false, error });
+  const originText = typeof input?.origin === "string" ? input.origin : "";
+  const uploadPath = typeof input?.uploadPath === "string" ? input.uploadPath : "";
+  const filename = typeof input?.filename === "string" ? input.filename : "";
+  const contentType = typeof input?.contentType === "string" ? input.contentType : "";
+  const size = input?.size;
+  if (!/^\/api\/v1(?:\/[a-z_]+(?:\/(?:[1-9][0-9]*|self))?)+$/.test(uploadPath) || !/\/files$/.test(uploadPath)) {
+    return fail("canvas_file_upload_target_invalid");
+  }
+  let canvas;
+  try { canvas = new URL(originText); } catch { return fail("canvas_file_binding_invalid"); }
+  if (canvas.protocol !== "https:" || canvas.username || canvas.password || canvas.hash
+    || canvas.origin !== originText || canvas.href !== `${canvas.origin}/`
+    || String(location.origin || "") !== canvas.origin) return fail("canvas_file_binding_invalid");
+  if (filename.length < 1 || filename.length > 255 || !Number.isSafeInteger(size) || size < 1 || size > 1024 * 1024
+    || !/^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/.test(contentType)) {
+    return fail("canvas_file_attachment_invalid");
+  }
+  const cookie = String(document.cookie || "").split(";").map((entry) => entry.trim()).find((entry) => entry.startsWith("_csrf_token="));
+  const csrf = cookie ? decodeURIComponent(cookie.slice("_csrf_token=".length)) : "";
+  if (!csrf) return fail("canvas_csrf_context_missing");
+  const remaining = Number.isSafeInteger(input?.expiresAt) ? input.expiresAt - Date.now() : 0;
+  if (remaining <= 0) return fail("canvas_file_transfer_timeout");
+  const endpoint = new URL(uploadPath, canvas.origin);
+  if (endpoint.origin !== canvas.origin) return fail("canvas_file_upload_target_invalid");
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      redirect: "error",
+      referrerPolicy: "no-referrer",
+      headers: {
+        Accept: "application/json+canvas-string-ids",
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "X-CSRF-Token": csrf,
+      },
+      body: new URLSearchParams({
+        name: filename,
+        size: String(size),
+        content_type: contentType,
+        on_duplicate: "rename",
+      }),
+      signal: AbortSignal.timeout(Math.min(2_147_483_647, remaining)),
+    });
+  } catch {
+    return fail("canvas_file_upload_init_invalid");
+  }
+  let finalUrl;
+  try { finalUrl = new URL(response.url); } catch { return fail("canvas_file_upload_init_invalid"); }
+  if (!response.ok || response.redirected || finalUrl.origin !== canvas.origin || finalUrl.username || finalUrl.password || finalUrl.hash) {
+    return fail("canvas_file_upload_init_invalid");
+  }
+  let body;
+  try { body = await response.json(); } catch { return fail("canvas_file_upload_init_invalid"); }
+  const uploadUrl = typeof body?.upload_url === "string" ? body.upload_url : "";
+  const uploadParams = body?.upload_params;
+  if (!uploadUrl || !uploadParams || typeof uploadParams !== "object" || Array.isArray(uploadParams)) {
+    return fail("canvas_file_upload_init_invalid");
+  }
+  return { ok: true, upload_url: uploadUrl, upload_params: uploadParams };
 }
 
 /** The Canvas folder a folder upload names, or "" for an upload to any other target. */
@@ -286,7 +373,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       && (kind === "file" ? /\/files$/.test(target.uploadPath) : /\/rubrics\/upload$/.test(target.uploadPath))
       ? target.uploadPath : "";
     if (!plainObject(input) || !plainObject(input.binding) || !uploadPath
-      || !(kind === "file" ? ["direct", "initialize", "complete", "resolve"] : ["rubric"]).includes(transferMode)) throw new Error("canvas_file_binding_invalid");
+      || !(kind === "file" ? ["direct", "initialize", "preflight", "complete", "resolve"] : ["rubric"]).includes(transferMode)) throw new Error("canvas_file_binding_invalid");
     const courseId = decimalId(input.binding.courseId);
     const principalId = decimalId(input.binding.principalId);
     const folderId = /^\/api\/v1\/folders\/([1-9][0-9]*)\/files$/.exec(uploadPath)?.[1] || "";
@@ -426,6 +513,9 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       return result({ ok: true, sent: false, outcomeUnknown: false, data: { ...targetFields } });
     }
     if (transferMode !== "complete" && transferMode !== "resolve" && folderId) await filenameAvailable();
+    if (transferMode === "preflight") {
+      return result({ ok: true, sent: false, outcomeUnknown: false, data: { ...targetFields } });
+    }
     if (transferMode === "initialize") {
       const started = await beginUpload();
       return {
